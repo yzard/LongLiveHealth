@@ -10,7 +10,7 @@ fi
 case "$UMASK" in [0-7][0-7][0-7]|[0-7][0-7][0-7][0-7]) ;; *) echo 'Invalid UMASK' >&2; exit 1;; esac
 umask "$UMASK"
 if [ "$(id -u)" -eq 0 ]; then
-    if [ "$1" = "/app/helpyourself" ]; then
+    if [ "$1" = "/app/longlivehealth" ]; then
         mkdir -p /data
         chown -R "$PUID:$PGID" /data
     fi

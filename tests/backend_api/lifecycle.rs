@@ -9,7 +9,7 @@ async fn iphone_contract_review_trend_export_and_account_isolation() {
     add_user(&state, "bob").await;
     let alice = token(&state, "alice").await;
     let bob = token(&state, "bob").await;
-    let app = helpyourself::app::create_application(state.clone());
+    let app = longlivehealth::app::create_application(state.clone());
     let (_, uploaded) = upload(&app, &alice, &uuid::Uuid::new_v4().to_string(), &png()).await;
     let report = uploaded["file"]["file_id"].as_str().unwrap();
     let review = json!({"report_id":report,"expected_revision":1,"context":{"fasting":true},"observations":[{"observation_id":null,"expected_revision":null,"status":"confirmed","payload":crate::observation_payload()}]});
@@ -62,7 +62,7 @@ async fn iphone_contract_review_trend_export_and_account_isolation() {
             .0,
         StatusCode::NOT_FOUND
     );
-    helpyourself::maintenance::export_next(&state)
+    longlivehealth::maintenance::export_next(&state)
         .await
         .unwrap();
     assert_eq!(

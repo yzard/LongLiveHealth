@@ -1,6 +1,6 @@
 services:
   backend_api:
-    image: helpyourself-backend-api:local
+    image: longlivehealth-backend-api:local
     build:
       context: ..
       dockerfile: docker/backend_api.Dockerfile
@@ -8,15 +8,16 @@ services:
     environment:
       PUID: "${PUID:-1000}"
       PGID: "${PGID:-1000}"
+      RESET_ADMIN_PASSWORD: "${RESET_ADMIN_PASSWORD:-false}"
       UMASK: "077"
       TZ: "${TZ:-UTC}"
     volumes:
-      - ${HELPYOURSELF_API_DATA_DIR:-../playground/backend_api}:/data
+      - ${LONGLIVEHEALTH_API_DATA_DIR:-../playground/backend_api}:/data
     expose: ["8080"]
     networks: [ingress, inference]
     stop_grace_period: 30s
   backend_ocr:
-    image: helpyourself-backend-ocr:local
+    image: longlivehealth-backend-ocr:local
     build:
       context: ..
       dockerfile: docker/backend_ocr.Dockerfile
@@ -27,13 +28,13 @@ services:
       UMASK: "077"
       TZ: "${TZ:-UTC}"
     volumes:
-      - ${HELPYOURSELF_OCR_DATA_DIR:-../playground/backend_ocr}:/data:ro
+      - ${LONGLIVEHEALTH_OCR_DATA_DIR:-../playground/backend_ocr}:/data:ro
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["${HELPYOURSELF_GPU_DEVICE:-0}"]
+              device_ids: ["${LONGLIVEHEALTH_GPU_DEVICE:-0}"]
               capabilities: [gpu]
     expose: ["8000"]
     networks: [inference]
@@ -42,10 +43,10 @@ services:
     image: caddy:2
     restart: unless-stopped
     environment:
-      HELPYOURSELF_DOMAIN: "${HELPYOURSELF_DOMAIN:-localhost}"
+      LONGLIVEHEALTH_DOMAIN: "${LONGLIVEHEALTH_DOMAIN:-localhost}"
     ports:
-      - "${HELPYOURSELF_BIND_ADDRESS:-0.0.0.0}:${HELPYOURSELF_HTTP_PORT:-80}:80"
-      - "${HELPYOURSELF_BIND_ADDRESS:-0.0.0.0}:${HELPYOURSELF_HTTPS_PORT:-443}:443"
+      - "${LONGLIVEHEALTH_BIND_ADDRESS:-0.0.0.0}:${LONGLIVEHEALTH_HTTP_PORT:-80}:80"
+      - "${LONGLIVEHEALTH_BIND_ADDRESS:-0.0.0.0}:${LONGLIVEHEALTH_HTTPS_PORT:-443}:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

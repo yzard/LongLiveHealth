@@ -1,15 +1,21 @@
 # API v1 实现契约
 
-前缀 `/api/v1/`；除下载 GET 外均 POST。JSON 为 snake_case。仅 `server/status` 和 `session/login` 无需会话，其余需 `Authorization: Bearer <token>`。未列出的字段不接受，不能传 user_id。ISO 日期支持 `YYYY-MM-DD` 或带时区 RFC3339，健康明细时间为 Unix 整数秒；iPhone payload 同时保存原始小数秒。
+前缀 `/api/v1/`；除下载 GET 外均 POST。JSON 为 snake_case。`server/status`、`session/login` 无需会话；`session/refresh`、`session/revoke` 验证请求体中的续期凭据，其余需 `Authorization: Bearer <token>`。未列出的字段不接受，不能传 user_id。ISO 日期支持 `YYYY-MM-DD` 或带时区 RFC3339，健康明细时间为 Unix 整数秒；iPhone payload 同时保存原始小数秒。
 
 API 同时通过 `GET /` 和固定 `/assets/{app.css,app.mjs,client.mjs,presentation.mjs}` 提供嵌入式 Web GUI；这些页面资源公开，数据读取继续使用上述认证。未知路由仍返回 JSON 404，不用网页覆盖 API 错误。[网页范围](runbooks/webgui.md)限定为浏览与现有血脂 AI 预设，导入和健康平台读写由移动端承担。
 
 | 组件/操作 | 请求 | 返回 |
 | --- | --- | --- |
 | server/status | {} | status、api_version、capabilities |
-| session/login | username、password | token、expires_at、user |
+| session/login | username、password | token、expires_at、refresh_token、refresh_expires_at、refresh_after、user |
+| session/refresh | refresh_token、next_refresh_token | 同 login；轮换访问和续期凭据 |
+| session/revoke | refresh_token | revoked；即使访问 Token 过期也可撤销 |
 | session/logout | {} | revoked |
-| user/get | {} | user_id、username |
+| user/get | {} | user_id、username、is_admin、must_change_password |
+| user/password/change | current_password、new_password | changed、sessions_revoked；成功后重新登录 |
+| users/list | limit 1–100、after_id 可空 | users；仅 admin |
+| users/create | username、password | 新用户；仅 admin，密码 12–1024 字节 |
+| users/delete | user_id、confirmation（目标用户名） | user_id、cleanup_queued、sessions_revoked；仅 admin，不能删除 admin |
 | user/delete | confirmation：当前用户名 | cleanup_queued、sessions_revoked |
 | files/upload | multipart file，HEIC/HEIF 可另附 original；X-Upload-Id UUID | file、job、replayed |
 | files/list / reports/list / jobs/list | limit 1–100、after_id 可空 | files / reports / jobs |
@@ -22,12 +28,12 @@ API 同时通过 `GET /` 和固定 `/assets/{app.css,app.mjs,client.mjs,presenta
 | reports/review | 见下方 | 新报告快照；可能附 analysis_trigger |
 | reports/relate | report_id、expected_revision、preferred_report_id 可空、kind | updated |
 | reports/delete | report_id、expected_revision | cleanup_queued |
-| observations/history | observation_id | history 修订数组 |
+| observations/history | observation_id | history 数组，仅含当前结果（已安装客户端兼容入口） |
 | metrics/list | {} | metrics：metric_id/name/standard_unit |
 | trends/get | metric_ids 1–20、start_at/end_at 可空 | points、incomparable_count、算法/转换版本 |
 | health/connect | platform、installation_id UUID | connection_id、platform、installation_id |
-| health/sync | 见下方 | batch_id、replayed |
-| health/coverage | {} | coverage、read_permission=unknown |
+| health/sync | 见下方 | batch_id、replayed、total_records |
+| health/coverage | {} | coverage、read_permission=unknown、total_records |
 | health/list | limit 1–500、offset 非负 | records，平台和完整 envelope |
 | health/raw/list | limit 1–100、after_id 可空 | files：raw_id、platform、source_id、record_id、relative_path、received_at |
 | health/raw/{raw_id}/download | GET | 该修订的完整原始 JSON |
@@ -85,13 +91,13 @@ trends/get 返回标准 value/unit、original、标准化 reference、excluded�
 }
 ```
 
-platform 为 apple_health/health_connect；第二项只提供服务器协议，尚无 Android 客户端。批次最大 500 条、40 MiB；单条 payload 最大 32 MiB，不接受截断数据。Health 同步在读取正文前取得最多两个共享准入槽，health/list、health/aggregate 共用这两个槽；满时返回 429，客户端保留原批次重试。JSON 类型支持 application/json 及 application/*+json；非法 JSON 为 400、超限为 413。批次解析、校验、摘要和原始 envelope 编码在有界 CPU 执行域准备，事务内不重复编码。health/list 累积 envelope 超过 40 MiB 时明确失败，请减少 limit。查询原件索引不返回大载荷，单个原件下载为流式响应。
+platform 为 apple_health/health_connect；第二项只提供服务器协议，尚无 Android 客户端。批次最大 1000 条、40 MiB；单条 payload 最大 32 MiB，不接受截断数据。Health 同步在读取正文前取得最多两个共享准入槽，health/list、health/aggregate 共用这两个槽；满时返回 429，客户端保留原批次重试。JSON 类型支持 application/json 及 application/*+json；非法 JSON 为 400、超限为 413。批次解析、校验、摘要和原始 envelope 编码在有界 CPU 执行域准备，事务内不重复编码。health/list 累积 envelope 超过 40 MiB 时明确失败，请减少 limit。查询原件索引不返回大载荷，单个原件下载为流式响应。
 
 同批次不同内容冲突；同记录同版本不同内容冲突；旧版本忽略；删除标记不能被更高版本旧上传覆盖。Apple 删除事件不知道 source 时用 `*`，仅删除事件可用。删除清除内容、历史和对应原件，只留抑制标记。
 
-有效修订的完整 envelope 同时保存 SQLite 和 raw/apple_health 或 raw/google_health。iOS payload.raw_archive 是 HealthKit 可读样本的 secure archive/base64，FHIR 与专门查询的序列另保留。服务端允许其他原始字段，不要求每种类型都能聚合。
+完整 envelope 保存到 raw/<user>/apple_health 或 raw/<user>/google_health；SQLite 只保留查询投影和原件索引。iOS payload.raw_archive 是 HealthKit 可读样本的 secure archive/base64，FHIR 与专门查询的序列另保留。服务端允许其他原始字段，不要求每种类型都能聚合。
 
-coverage_status：observed/no_visible_samples/error/unsupported；它描述该批查询，不代表 Apple 已授予读取权限或整个历史完整。服务器保存最近批次状态、首次/最近成功时间；visible_start_at/visible_end_at 是当前平台/类型的归档范围，不证明中间完整。iOS 每次锚点查询上限 10 个对象，按字节及记录数拆请求；先持久化全部批次及候选锚点，全部得到回执才推进。断线或响应丢失重放相同批次；特征/活动环/CDA/药物快照独立检查点，不从隐藏或空结果推断删除。
+coverage_status：observed/no_visible_samples/error/unsupported；它描述该批查询，不代表 Apple 已授予读取权限或整个历史完整。服务器保存最近批次状态、首次/最近成功时间；visible_start_at/visible_end_at 是当前平台/类型的归档范围，不证明中间完整。iOS 每次锚点查询上限 1000 个对象，按字节及记录数拆请求；先持久化全部批次及候选锚点，全部得到回执才推进。断线或响应丢失重放相同批次；特征/活动环/CDA/药物快照独立检查点，不从隐藏或空结果推断删除。
 
 日聚合版本 health-daily-v2，分析快照引用同一版本。支持 heart_rate/resting_heart_rate/hrv_sdnn/steps/sleep/workout。数量类型严格检查单位；前 3 项为样本均值，步数按区间重叠比例分配，睡眠/运动为同来源区间并集。每个来源分别输出；没有数据时无条目或 value=null，不能当作零。每个 day/source 的 sample_count 是实际参与计算的记录数；source_record_count 是该日来源候选数，excluded_sample_count 是未参与数。value_status 为 available/missing/numeric_overflow；后两种 value=null。非数值、错误单位、不适用睡眠类别及无重叠区间不进入计算，原始载荷仍完整归档。最多 367 天、50,000 条候选明细，超限明确失败而非截断。
 
@@ -99,11 +105,11 @@ coverage_status：observed/no_visible_samples/error/unsupported；它描述该�
 
 上传每个 part 默认最大 20 MiB、100 页、4000 万像素，最多两次并发上传。通常仅 file，PDF/PNG/JPEG 按内容解析。HEIC/HEIF 使用 file=JPEG 识别副本、original=原文件（该顺序）；后端校验 original 的 MIME/ftyp 容器头，尚不解码整个 HEIC。其他附加字段拒绝。两份字节分别有摘要；相同上传 ID 携带不同原件、处理摘要或文件名返回 409。
 
-file.relative_path 指向 raw/photos 或 raw/documents 原件；原件名称、content_type、sha256、byte_count 均描述原件。HEIC 的 processing_path/processing_sha256 描述 derived 下 JPEG；其他文件这两个字段为空。download 始终返回原件。相机扫描每页 PNG 独立上传，当前每页对应一份报告。
+file.relative_path 指向 raw/<user>/<source>/<file>.<extension> 原件；原件名称、content_type、sha256、byte_count 均描述原件。HEIC 的 processing_path/processing_sha256 描述 derived 下 JPEG；其他文件这两个字段为空。download 始终返回原件。相机扫描每页 PNG 独立上传，当前每页对应一份报告。
 
 extraction_outputs 保存每个阶段最终接收的 UTF-8 HTTP 回复（上限 8 MiB），成功或解析失败均可取回；不包括网络失败时不存在的正文、超限正文和中间自动重试回复。已解析 content 与完整 response_body 分开保存。报告元数据列表不加载完整回复正文；读取单个回复及导出均检查用户归属。
 
-导出 manifest.version=1：表 JSONL（含完整健康历史、OCR 回复及人工修订）、辅助 CSV（含标准化结果/参考区间/状态/规则版本），extraction_inputs.jsonl 收录每页证据，以及按数据库 relative_path/raw_path 收录的有效原件；ZIP 使用 raw/apple_health、raw/photos、raw/google_health、raw/documents、raw/manual、raw/file_import 路径。删除后的内容不再导出。
+导出 manifest.version=1：表 JSONL（当前记录、原件索引、OCR 回复及当前人工复核结果）、辅助 CSV（含标准化结果/参考区间/状态/规则版本），extraction_inputs.jsonl 收录每页证据，以及按数据库 relative_path/raw_path 收录的有效原件；ZIP 使用 raw/<user>/<source>/<file> 路径。删除后的内容不再导出。
 
 列表按 ID 游标，不保证多请求期间新增数据的快照；趋势最多读取 10,000 条已确认结果，超限明确报错。iPhone 可比较两项指标，图表使用各自尺度；API 保持独立 metric_id/unit。
 
@@ -117,7 +123,7 @@ extraction_outputs 保存每个阶段最终接收的 UTF-8 HTTP 回复（上限 
 
 ## Wellness and open file import
 
-All routes below require the current user's Bearer session. Source data remains in the health archive, with revision history and export coverage.
+All routes below require the current user's Bearer session. Source data remains in the health archive, with original-file and export coverage.
 
 `POST /api/v1/wellness/day` accepts `date` (`YYYY-MM-DD`), `timezone` (IANA name), and `source_priority` (metric names mapped to ordered source IDs). The response includes six metrics, their source alternatives, history, coverage, and archive revision. A source ID combines its platform and producer. Multiple available sources require a choice. Missing data remains null. Personal comparisons require 28 earlier valid days from the same source within 42 days. These comparisons describe data. They do not estimate disease risk.
 
@@ -131,7 +137,7 @@ All routes below require the current user's Bearer session. Source data remains 
 
 `POST /api/v1/wellness/import/gpx` accepts `filename` and `xml`. The parser accepts UTF-8 GPX 1.1 with its standard namespace, timed track points, and increasing timestamps. The file cannot exceed 4 MiB or 50,000 points. The HTTP JSON body cannot exceed 5 MiB. DTDs are rejected. The archive retains the XML text and SHA-256 digest. Distance uses consecutive points within each segment. Elapsed duration includes pauses and gaps. It is not active exercise duration. FIT is not supported yet. TCX has a separate endpoint below.
 
-Manual entries use `manual:helpyourself`. GPX records use `file_import:gpx-1.1`. TCX records use `file_import:tcx-2`. Their raw envelopes use `raw/manual` and `raw/file_import`. Public Health sync endpoints cannot write these reserved connections. The initial schema supports these platforms. All database and export schemas use version 1. No historical migration or compatibility path exists.
+Manual entries use `manual:helpyourself`. GPX records use `file_import:gpx-1.1`. TCX records use `file_import:tcx-2`. Their raw envelopes use `raw/<user>/helpyourself`, `raw/<user>/gpx`, and `raw/<user>/tcx`. Public Health sync endpoints cannot write these reserved connections. The initial schema supports these platforms. The database schema uses version 7; the export format uses version 1. No historical migration or compatibility path exists.
 
 `POST /api/v1/wellness/import/list` accepts nullable `after_id` and returns up to 100 imports with `next_after_id`. The list omits XML bodies. `POST /api/v1/wellness/import/delete` accepts `record_id`, `source_id`, and `expected_version`. Deletion invalidates affected analysis and exports, removes archived revisions, and schedules original-file cleanup. Reimporting the same deleted content fails. Uploading identical content under another filename retains the first original.
 
@@ -215,3 +221,116 @@ Coach 输出只允许引用输入提供的证据 ID。可审阅草稿限制为�
 `health/aggregate` 按七个日历日分块读取。每块最多 50000 条记录，最终最多 10000 个来源日。返回结果前核对账户修订。该方式保留跨块睡眠和步数区间的日内截断语义。一个块超限仍返回明确限制错误。每日基线和长期报告复用此路径。
 
 `cycle.context` 支持 cycle、pregnancy、postpartum、perimenopause 和 unknown。独立 `cycle_prediction` 条目保存 `start_date`、`end_date`、`generated_at`、`source`、`uncertainty`、`note`。日期使用 YYYY-MM-DD，区间最多 366 天。来源与不确定性说明必须填写，未知准确性也须明确写出。预测不转换为实际经期或排卵记录。
+
+
+账号初始化与权限：API 首次启动创建 admin/admin；RESET_ADMIN_PASSWORD=true 在启动时重置 admin，撤销旧会话。登录和 user/get 的 user 信息包含 is_admin 与 must_change_password。必须改密码时，只能调用 user/get、user/password/change、session/logout；其余认证接口为 403/password_change_required。普通账号管理他人为 403/forbidden。改密码验证当前密码并以凭据版本和有效会话做原子更新。
+
+wellness/entries/save 和 wellness/entries/delete 返回 record_id、sync 和 record。record 是操作后当前已存储记录（与 list 的行格式相同），已删除为 null；即使重放旧批次也返回当前状态，客户端按 record_id 局部更新，不靠关闭编辑器重新加载列表。
+
+`health/sync`（包括重放）和 `health/coverage` 的 `total_records` 是当前用户所有连接中仍有效的 Apple Health / Health Connect 唯一记录总数，不是本次同步计数。重复批次、跨连接重传和同一记录修订不会增加总数；删除会减少总数。手工录入和文件导入不计入此数字。
+
+### Unified metric history and report institutions
+
+`POST /api/v1/metrics/history/get` accepts `{"metric_id":"ldl_cholesterol"}` for a metric from `metrics/list`. It returns `metric`, chronologically ordered `points`, `excluded`, `excluded_count`, and calculation/conversion versions. Each point has a stable `point_id`, `source_id`, `source_name`, `sampled_at`, `timestamp`, canonical `value`/`unit`, and original evidence. Report points also include `report_id`, `observation_id`, revision and filename; their source page remains in `original.source`. Apple Health points retain their record/provider identity and original clinical observation. Values from different sources are not summed or averaged.
+
+Report review context accepts optional `source_name`: the clinic/laboratory/institution entered at import, such as Function Health. Nonempty names must be at most 160 UTF-8 bytes, without control characters; Apple Health is reserved for device archives. Existing reports without a name use their filename until the user edits collection context. Existing persisted upload drafts may lack the field. New iOS imports require it, and retry the same upload ID until both the file and the source name have been acknowledged. There is no database schema migration.
+
+Report history includes only confirmed observations and preserves existing duplicate/superseded-report exclusions and analyte-specific conversions. Apple Health includes active blood glucose quantity records and finalized/amended/corrected clinical FHIR Observations with recognized LOINC codes. Clinical components use their own codes/quantities and the parent collection date. Imported/issued timestamps do not replace missing collection dates. Unrecognized codes, unsupported clinical resources, non-final results, bounds and incompatible units remain archived and are reported as exclusions when relevant; they are not guessed from display labels. The initial closed mapping covers the 17 laboratory metrics in the catalog (LOINC reference: https://loinc.org/). It does not yet map every clinical code or FHIR resource format.
+
+The read is user-scoped and applies current deletion state. A single history request is bounded by the existing 10,000-confirmed-observation limit plus 10,000 applicable Health records / 32 MiB of projected clinical data. Exceeding a bound returns 413, never a silently truncated chart. Raw HealthKit binary archives are excluded from this query projection. Large archives that exceed these bounds require a subsequent paginated history implementation.
+
+
+### Persistent mobile sessions
+
+The mobile client renews at `refresh_after` (30 minutes under the default configuration).
+The original login access TTL retains the configured value for existing web clients;
+renewed access tokens last at most one hour. Refresh credentials expire after 90 days without
+successful renewal. Password changes, resets, account removal/deactivation and logout revoke
+both credentials. Schema 4 migrates existing sessions without extending or reviving them.
+
+Before renewal, the client generates a 32-byte CSPRNG successor and atomically persists it
+with the current refresh secret in Keychain. The server stores SHA-256 digests only. The access
+secret is SHA-256 of the domain-separated string `helpyourself-access-v1:<successor>`; its digest
+is stored for authentication. A transaction swaps both secrets and keeps the previous access
+credential valid for at most five minutes for in-flight requests. An identical predecessor /
+successor pair is retryable after a lost response, including after the access expiry. A consumed
+refresh credential presented with a different successor revokes that login. Older unknown
+credentials receive 401. Refresh credentials are never accepted as API Bearer tokens.
+
+`session/revoke` accepts the current or immediately preceding refresh credential so an offline
+logout can revoke either side of a pending rotation when delivery succeeds. iOS local logout
+is immediate; network revocation is best effort if the server is unreachable. No credential
+is placed in a URL, log, UserDefaults, exported archive, or client diagnostic.
+
+
+Apple Health same-version raw-archive variants: when the only difference is
+`payload.raw_archive.data` in an `nskeyedarchiver-secure-v1` / `base64` envelope,
+the API retains a raw revision under the same logical record identity. Every
+other field must match, including times, source metadata, decoded values, series
+and archive format. Unique record totals do not increase. Exact retries remain
+idempotent; different structured content without a source version still returns
+409. Health Connect and manual-entry version rules are unchanged.
+
+Metric history v2 scopes `excluded` / `excluded_count` to observations identified as
+the requested metric. Unmapped, unreadable and unsupported clinical resources are
+reported separately in `unassigned_clinical_records` / `unassigned_clinical_count`;
+they are not evidence of missing points for any particular metric. Raw archives
+remain unchanged. Lab conversion v4 recognizes `K/uL`, `x10(3)/uL`, `10*3/uL`
+and `10*9/L` as count-unit aliases of `10^9/L`. UCUM count notation reference:
+https://hl7.org/fhir/us/core/STU9/Observation-cbc-leukocytes.html .
+
+`POST /api/v1/metrics/browse` returns the authenticated user's available laboratory
+items, discovered from imported clinical Observations/components and confirmed
+report metrics. `metrics/list` remains the curated catalog for report review.
+Clinical identity uses LOINC (across providers), otherwise provider-scoped coding;
+uncoded records retain individual identity rather than merging guessed labels.
+Dynamic `clinical:<digest>` IDs are accepted by `metrics/history/get` only when
+present in this user's archive. Clinical histories include `records` with original
+values, dates, status and hospital source, including text/bounded/preliminary
+results. Dynamic numeric `points` require a final result, collection date, exact
+finite value and explicit unit; unconverted units must be charted separately.
+Raw archives and existing report conversions are not changed.
+
+Clinical metric history normalizes closed unit aliases (including NG/mL, ng/mL,
+count-per-volume spellings and mIU/L versus µIU/mL). It does not lowercase SI
+prefixes or guess unknown conversions from similar values. Clinical `records`
+and chart `points` share normalized values; each displayed clinical record has
+`original_records` containing its retained observation payloads and IDs.
+Exact numeric results coalesce only within a metric, source, collection time,
+status, measurement codes, method and specimen when normalized values and units agree. Text,
+bounds, missing dates and preliminary results remain separate. Raw archive
+records are unchanged. `raw_record_count` and `record_count` distinguish raw
+versus displayed records in the clinical browse catalog. Chart clinical points
+carry `channel: Apple Health` and `original.clinical_observation`, so clients must
+not append them again to the clinical historical list. Unit derivation version:
+`lab-units-v5`.
+
+
+Storage schema 7 keeps complete Health JSON in `raw/<user>/apple_health/<raw_id>.json`.
+`health_records` contains one current query projection and a pointer to its original.
+`health_originals` is a file catalog (identity, path, received time); it contains no JSON
+payload or historical values. It supports raw listing, export, deletion and orphan cleanup.
+Detailed Apple sampling series, device metadata and opaque archives remain in originals;
+specialty and HRV detail reads load the current original with existing response bounds.
+A canonical semantic digest detects same-version structured conflicts, including changes
+to omitted series. Opaque Apple archive encoding variants do not create duplicate files.
+Report observations store only their current review; revision counters remain for concurrent
+edit detection. The old history endpoint returns the current row for installed clients.
+
+Reports are grouped by clinic/laboratory name, e.g. `raw/<user>/function_health/<file>.pdf`.
+PDFs and images from the same source share that folder. Unnamed uploads use `raw/<user>/unassigned/`
+until a source is saved. Directory names are sanitized independently from display names.
+No source directories are pre-created. Only the current schema and user-first layout are supported.
+Complete raw originals remain retained; legacy directory converters and online schema upgrades are removed.
+
+
+Source aliases are stored in `wellness/preferences/get` and `wellness/preferences/save`
+as `preferences.source_aliases`, a user-owned map of stable source keys to labels.
+Health keys use `<platform>:<source_id>`. Named reports use
+`report-source:<trimmed lowercase clinic name>`; unnamed reports use `report:<report_id>`.
+`wellness/sources` returns a deduplicated `catalog` with `source_key` and original `name`.
+Metric-history points and clinical historical rows expose `source_key` for the same lookup.
+Aliases are 1–100 characters without controls; remove a map entry to restore the original
+label. Save uses the existing preference version and batch ID, retains other preferences,
+and rejects concurrent edits. Existing saved preferences have an empty alias map.
+Aliases do not change source identities, raw paths, chart grouping, or deduplication.

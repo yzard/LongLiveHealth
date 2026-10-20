@@ -284,7 +284,7 @@ async fn extract(state: &AppState, job: &ClaimedJob) -> Result<(), AppError> {
                 .bind(key)
                 .execute(&mut *transaction)
                 .await?;
-            sqlx::query(queries::INSERT_OBSERVATION_REVISION)
+            sqlx::query(queries::SAVE_OBSERVATION)
                 .bind(&job.user_id)
                 .bind(id)
                 .bind(1)

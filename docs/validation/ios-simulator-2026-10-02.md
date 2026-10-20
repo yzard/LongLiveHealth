@@ -1,6 +1,6 @@
 # 2026-10-02 iOS 构建与模拟器验收
 
-环境：Xcode 27.0（27A266a）、Swift 6.4、iOS 26.4、独立 iPhone 17 Pro 模拟器 `helpyourself-tests`（CE049AFA-1D5B-45B6-BB01-6BBE37C42CAA）。网络测试使用 `tests/ios/simulator_fixture.py` 的 loopback 合成 API；没有连接生产账户、OCR GPU 服务或分析模型。
+环境：Xcode 27.0（27A266a）、Swift 6.4、iOS 26.4、独立 iPhone 17 Pro 模拟器 `longlivehealth-tests`（CE049AFA-1D5B-45B6-BB01-6BBE37C42CAA）。网络测试使用 `tests/ios/simulator_fixture.py` 的 loopback 合成 API；没有连接生产账户、OCR GPU 服务或分析模型。
 
 ## 已确认的问题与修复
 
@@ -35,7 +35,7 @@
 
 脚本启动 loopback 合成 API，并在退出时清理该进程。需要 Python 3、Xcode 与 XcodeGen，端口 18765 不应被其他进程占用。直接从 Xcode 运行 native tests 时，须先单独启动 `python3 tests/ios/simulator_fixture.py`。
 
-最终完整日志保存在 `build/ios/validation/final-build-and-tests.log`；Xcode 的 `.xcresult` 保存在 `build/ios/DerivedData/Logs/Test/`。iPhone Release 产物为 `dist/ios/Helpyourself.app`（版本 0.1.0，arm64）。构建目录与 dist 不提交。
+最终完整日志保存在 `build/ios/validation/final-build-and-tests.log`；Xcode 的 `.xcresult` 保存在 `build/ios/DerivedData/Logs/Test/`。iPhone Release 产物为 `dist/ios/LongLiveHealth.app`（版本 0.1.0，arm64）。构建目录与 dist 不提交。
 
 ## 验证边界
 

@@ -14,7 +14,7 @@ struct DailyLogsView: View {
             }
             Section("Last 30 days") {
                 if entries.isEmpty { Text("No entries in this range.").foregroundStyle(.secondary) }
-                ForEach(Array(entries.enumerated()), id: \.offset) { _, item in
+                ForEach(entries, id: \.identifier) { item in
                     VStack(alignment: .leading, spacing: 8) {
                         Text(item["entry"]["kind"].stringValue.replacingOccurrences(of: "_", with: " ").capitalized).font(.headline)
                         Text(Date(timeIntervalSince1970: item["at"].numberValue ?? 0).formatted()).font(.caption)
@@ -25,7 +25,7 @@ struct DailyLogsView: View {
                             }
                         }
                         if item["entry"]["kind"] == .string("nutrition") {
-                            NavigationLink("Record this meal again") { LogEditor(model: model, existing: nil, initialKind: "nutrition", initialValues: EntryDraft.decode(item["entry"]), initialDate: Date()) }
+                            EditorLink("Record this meal again") { LogEditor(model: model, existing: nil, initialKind: "nutrition", initialValues: EntryDraft.decode(item["entry"]), initialDate: Date()) }
                         }
                         HStack {
                             if item["entry"]["kind"] == .string("sleep_correction") {
@@ -38,8 +38,9 @@ struct DailyLogsView: View {
                 }
             }
         }.navigationTitle("Daily logs")
-            .task { await reload() }.refreshable { await reload() }
-            .sheet(item: $editing, onDismiss: { Task { await reload() } }) { selection in
+            .initialTask { await reload() }.refreshable { await reload() }
+            .onChange(of: model.entryMutation) { _, change in if let change { entries = change.applying(to: entries) { ($0["at"].numberValue ?? 0) >= Date().timeIntervalSince1970 - 30 * 86400 && ($0["at"].numberValue ?? 0) <= Date().timeIntervalSince1970 } } }
+            .sheet(item: $editing) { selection in
                 NavigationStack { LogEditor(model: model, existing: selection.entry, initialKind: "journal", initialValues: [:], initialDate: Date()) }
             }
             .confirmationDialog("Delete this log and its revision history? Separate exports and backups remain unchanged.", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
@@ -61,7 +62,6 @@ struct DailyLogsView: View {
             _ = try await model.request("wellness/entries/delete", body: .object(["record_id": entry["record_id"], "version": .number((entry["version"].numberValue ?? 0) + 1), "batch_id": .string(UUID().uuidString), "kind": entry["entry"]["kind"]]))
         }
         deleting = nil
-        await reload()
     }
 }
 
@@ -78,6 +78,7 @@ struct LogEditor: View {
     @State private var recordID = UUID().uuidString
     @State private var failure: String?
     @State private var saving = false
+    @State private var initialized = false
     var body: some View {
         Form {
             Picker("Log type", selection: $kind) { ForEach(EntryDraft.kinds, id: \.self) { Text($0.replacingOccurrences(of: "_", with: " ").capitalized).tag($0) } }.disabled(existing != nil)
@@ -110,7 +111,9 @@ struct LogEditor: View {
             Button("Save log") { Task { await save() } }.disabled(saving)
         }.disabled(saving).navigationTitle(existing == nil ? "New observation" : "Edit observation")
             .toolbar { Button("Cancel") { dismiss() }.disabled(saving) }
+            .interactiveDismissDisabled()
             .onAppear {
+                guard !initialized else { return }; initialized = true
                 kind = initialKind; values = initialValues; date = initialDate
                 if let existing {
                     kind = existing["entry"]["kind"].stringValue

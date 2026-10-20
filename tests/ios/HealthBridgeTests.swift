@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import HealthKit
-@testable import Helpyourself
+@testable import LongLiveHealth
 
 @MainActor @Test func healthDefinitionsUseUniqueTypesAndExplicitCoverage() {
     let bridge = HealthBridge()
@@ -76,8 +76,12 @@ import HealthKit
     try archive.save(true, name: "health-enabled.json")
     let bridge = HealthBridge()
     let client = APIClient(server: URL(string: "http://localhost:18765")!, token: "synthetic-token")
-    try await bridge.synchronize(client: client, archive: archive, requestAccess: false)
+    try await bridge.synchronize(client: client, archive: archive, requestAccess: false, requestSelectedAccess: false)
     #expect(!bridge.isSyncing)
+    #expect(bridge.totalRecords == 29330)
+    let resumed = HealthBridge()
+    try await resumed.synchronize(client: client, archive: archive, requestAccess: false, requestSelectedAccess: false)
+    #expect(resumed.totalRecords == 29330)
     #expect(!bridge.status.contains("paused"))
     #expect(try archive.load(UUID.self, name: "installation.json") != nil)
     // A denied/empty query is still a completed checkpoint; never infer read authorization.
@@ -94,16 +98,29 @@ import HealthKit
     let bridge = HealthBridge()
     let kind = try #require(bridge.definitions.first?.kind)
     let anchor = try NSKeyedArchiver.archivedData(withRootObject: HKQueryAnchor(fromValue: 0), requiringSecureCoding: true)
-    let requests = try HealthSyncBatch.requests(connectionID: "synthetic-connection", recordType: kind, coverageStatus: "no_visible_samples", records: [], maximumRecords: 500, maximumBytes: 40 * 1024 * 1024)
+    let requests = try HealthSyncBatch.requests(connectionID: "synthetic-connection", recordType: kind, coverageStatus: "no_visible_samples", records: [], maximumRecords: HealthSyncBatch.maximumRecords, maximumBytes: 40 * 1024 * 1024)
     try archive.save(SyncCheckpoint(requests: requests, nextAnchor: anchor), name: "pending-\(kind).json")
     let rejected = APIClient(server: URL(string: "http://127.0.0.1:18765")!, token: "reject-sync")
-    do { try await bridge.synchronize(client: rejected, archive: archive, requestAccess: false); Issue.record("Rejected batch was accepted") }
+    do { try await bridge.synchronize(client: rejected, archive: archive, requestAccess: false, requestSelectedAccess: false); Issue.record("Rejected batch was accepted") }
     catch { #expect(bridge.status.contains("paused")) }
     #expect(!bridge.isSyncing)
     #expect(try archive.load(SyncCheckpoint.self, name: "pending-\(kind).json")?.requests == requests)
     #expect(try archive.load(Data.self, name: "anchor-\(kind).json") == nil)
     let accepted = APIClient(server: URL(string: "http://127.0.0.1:18765")!, token: "synthetic-token")
-    try await bridge.synchronize(client: accepted, archive: archive, requestAccess: false)
+    try await bridge.synchronize(client: accepted, archive: archive, requestAccess: false, requestSelectedAccess: false)
     #expect(try archive.load(SyncCheckpoint.self, name: "pending-\(kind).json") == nil)
     #expect(try archive.load(Data.self, name: "anchor-\(kind).json") != nil)
+}
+
+@Test func lockedHealthDatabaseIsRecognizedWithoutTreatingNetworkErrorsAsLocking() {
+    #expect(HealthBridge.isProtectedDataError(NSError(domain: HKErrorDomain, code: HKError.Code.errorDatabaseInaccessible.rawValue)))
+    #expect(!HealthBridge.isProtectedDataError(URLError(.timedOut)))
+}
+
+@MainActor @Test func backgroundDeliveryAcknowledgesOnlyOnce() {
+    var count = 0
+    let completion = HealthDeliveryCompletion { count += 1 }
+    completion.finish()
+    completion.finish()
+    #expect(count == 1)
 }

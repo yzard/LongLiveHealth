@@ -2,7 +2,7 @@
 
 研究与范围更新日期：2026-10-06。代码基线：`46463f2`。状态：H01–H07、H10、H12、H13 部分实施；完整工作包尚未验收。Bevel 为用户确认的竞品名称。
 
-helpyourself 是开源、可自托管的 health data center（健康数据中心）。它从不同设备和健康平台读取用户可获得的数据，整合、保存和导出，并在此基础上提供辅助分析。项目完全没有硬件产品。
+Long Live Health 是开源、可自托管的 health data center（健康数据中心）。它从不同设备和健康平台读取用户可获得的数据，整合、保存和导出，并在此基础上提供辅助分析。项目完全没有硬件产品。
 
 实施顺序是接入、整合、导出、辅助分析。数据管理能力独立于 AI 工作，关闭模型服务后仍能查看、管理和导出档案。
 
@@ -79,7 +79,7 @@ WHOOP 与 Bevel 的功能并集用于发现软件和分析能力。所有候选�
 | 健康数据同步 | [HealthBridge.swift](../src/ios/HealthBridge.swift)、[HealthCatalog.swift](../src/ios/HealthCatalog.swift)、[health.rs](../src/backend_api/health.rs) | 有类型目录、原始载荷、来源、同步覆盖与删除。大部分类型只有归档能力 |
 | 健康日汇总 | [health.rs](../src/backend_api/health.rs) 的 `aggregate_health` 与 `aggregate_records` | 仅支持心率、静息心率、HRV SDNN、步数、睡眠和运动。睡眠与运动计算区间并集时长，来源分别展示 |
 | AI 分析 | [analysis.rs](../src/backend_api/analysis.rs) | 默认关闭的 `lipid-review-v1` 血脂分析，有输入快照和引用约束。不是通用对话教练 |
-| 手机与网页 | [HelpyourselfApp.swift](../src/ios/HelpyourselfApp.swift)、[HealthView.swift](../src/ios/HealthView.swift)、[app.mjs](../src/frontend/app.mjs) | 档案、趋势、明细、分析入口已实现。没有每日健康主页、食物日志或训练执行界面 |
+| 手机与网页 | [LongLiveHealthApp.swift](../src/ios/LongLiveHealthApp.swift)、[HealthView.swift](../src/ios/HealthView.swift)、[app.mjs](../src/frontend/app.mjs) | 档案、趋势、明细、分析入口已实现。没有每日健康主页、食物日志或训练执行界面 |
 | 数据生命周期 | [schema.sql](../src/backend_api/database/schema.sql)、[maintenance.rs](../src/backend_api/maintenance.rs) | 有用户隔离、任务、导出与删除基础。新增实体必须接入同一生命周期 |
 | 客户端平台 | [project.yml](../src/ios/project.yml) 与 `src/` 目录 | 有 iOS 应用，无 watchOS 或 Android 应用。Health Connect 服务器载荷不等于 Android 接入 |
 
@@ -93,7 +93,7 @@ HRV 是心跳间隔变化。SDNN 与 RMSSD 是不同计算方法，不能混用�
 
 下表保留 34 项竞品研究。数据接入与分析属于目标；设备操作、训练执行和社交属于可选软件扩展；硬件与医疗服务明确排除。排除项不计入交付缺口。每行列出官方来源。
 
-| 编号 | 功能 | WHOOP | Bevel | helpyourself 差距 | 工作包 |
+| 编号 | 功能 | WHOOP | Bevel | Long Live Health 差距 | 工作包 |
 | --- | --- | --- | --- | --- | --- |
 | U01 | 每日总览与历史时间线 | My Day、日历 [W1] | 日事件时间线 [B1] | 已有明细，缺跨领域时间线和每日结论 | H01、H02 |
 | U02 | 睡眠分析 | 睡眠表现、规划 [W2] | 评分、连续性、入睡时间 [B2] | 已有睡眠时长汇总，缺睡眠会话、分期视图和评分 | H02 |
@@ -291,7 +291,7 @@ AI 只调用受约束的数据与操作接口。先生成可审阅的计划，�
 
 按开放程度、用户已有设备和数据价值选择连接器，优先补充 Apple Health 以外的可读来源与文件导入。WHOOP v2、Garmin、Oura、Strava、Withings 和 Google Health 仅作为可行性候选，不承诺接入全部品牌。分别记录授权方式、字段、限流、历史范围、回调和删除能力。Android 实现 Health Connect 同步与核心界面，不能把 Google Health 云连接与 Health Connect 当成同一接口。
 
-WHOOP 普通用户 API 提供周期、睡眠、恢复、运动及身体测量等数据。检验合作方接口使用单独权限，不能假设普通账户可访问。[W16] 接入保留 WHOOP 原评分与 helpyourself 自有计算的不同来源，不把导入评分当成自有算法完成。
+WHOOP 普通用户 API 提供周期、睡眠、恢复、运动及身体测量等数据。检验合作方接口使用单独权限，不能假设普通账户可访问。[W16] 接入保留 WHOOP 原评分与 Long Live Health 自有计算的不同来源，不把导入评分当成自有算法完成。
 
 验收：授权撤销、令牌刷新、历史分页、乱序通知和重复转写均有案例。私有服务器不可被外网回调时有明确的轮询方案。没有公开接口、系统平台转出或文件导出通道的封闭设备标为不支持，不投入破解或合作等待。部分开放来源只验收已声明的可读字段。
 

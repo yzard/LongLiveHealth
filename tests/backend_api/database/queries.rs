@@ -1,5 +1,5 @@
 use crate::{add_user, fixture, token};
-use helpyourself::{authentication::digest, models::ArchivedFile};
+use longlivehealth::{authentication::digest, models::ArchivedFile};
 use sqlx::{Connection, SqliteConnection, sqlite::SqliteConnectOptions};
 
 #[tokio::test]
@@ -14,7 +14,7 @@ async fn database_enforces_resource_owner_and_only_persists_session_digest() {
         original_name: "synthetic.pdf".into(),
         processing_path: None,
         processing_sha256: None,
-        relative_path: format!("raw/documents/{}/fixture", alice.user_id),
+        relative_path: format!("raw/{}/function_health/fixture", alice.user_id),
         content_type: "application/pdf".into(),
         sha256: digest(b"synthetic"),
         byte_count: 9,
@@ -55,7 +55,7 @@ async fn database_enforces_resource_owner_and_only_persists_session_digest() {
 #[tokio::test]
 async fn unknown_newer_schema_is_not_silently_accepted() {
     let directory = tempfile::tempdir().unwrap();
-    let database = helpyourself::database::Database::open(directory.path())
+    let database = longlivehealth::database::Database::open(directory.path())
         .await
         .unwrap();
     database.close().await;
@@ -70,7 +70,7 @@ async fn unknown_newer_schema_is_not_silently_accepted() {
         .unwrap();
     connection.close().await.unwrap();
     assert!(
-        helpyourself::database::Database::open(directory.path())
+        longlivehealth::database::Database::open(directory.path())
             .await
             .is_err()
     );

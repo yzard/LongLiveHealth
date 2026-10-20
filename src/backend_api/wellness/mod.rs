@@ -132,8 +132,9 @@ impl Database {
             "record_type":r.get::<String,_>("record_type"),"record_count":r.get::<i64,_>("record_count"),
             "first_at":r.get::<i64,_>("first_at"),"last_at":r.get::<i64,_>("last_at")
         })).collect();
+        let catalog = crate::sources::catalog(self, user, &sources).await?;
         Ok(
-            json!({"sources":sources,"supported_daily_types":KINDS,"coverage_scope":"visible_records_not_read_permission"}),
+            json!({"sources":sources,"catalog":catalog,"supported_daily_types":KINDS,"coverage_scope":"visible_records_not_read_permission"}),
         )
     }
 }

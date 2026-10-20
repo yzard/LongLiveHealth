@@ -12,7 +12,7 @@ async fn export_contains_raw_and_revisions_without_credentials_and_delete_cleans
         .database
         .behavior_associations(
             &user.user_id,
-            helpyourself::wellness::associations::Request {
+            longlivehealth::wellness::associations::Request {
                 end_date: "2026-01-01".into(),
                 timezone: "UTC".into(),
                 outcome: "sleep".into(),
@@ -26,7 +26,7 @@ async fn export_contains_raw_and_revisions_without_credentials_and_delete_cleans
         .unwrap();
     let export = state.database.request_export(&user.user_id).await.unwrap();
     assert!(
-        helpyourself::maintenance::export_next(&state)
+        longlivehealth::maintenance::export_next(&state)
             .await
             .unwrap()
     );
@@ -43,13 +43,16 @@ async fn export_contains_raw_and_revisions_without_credentials_and_delete_cleans
         .join(format!("{export}.zip"));
     let mut zip = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
     let mut bytes = Vec::new();
-    zip.by_name(&format!("raw/photos/{}/{report}", user.user_id))
+    zip.by_name(&format!("raw/{}/unassigned/{report}.png", user.user_id))
         .unwrap()
         .read_to_end(&mut bytes)
         .unwrap();
     assert_eq!(bytes, crate::png());
-    assert!(zip.by_name("observation_revisions.jsonl").is_ok());
+    assert!(zip.by_name("observations.jsonl").is_ok());
     assert!(zip.by_name("sessions.jsonl").is_err());
+    let manifest: serde_json::Value =
+        serde_json::from_reader(zip.by_name("manifest.json").unwrap()).unwrap();
+    assert_eq!(manifest["database_schema_version"], 7);
     drop(zip);
     let checker = std::process::Command::new("python3")
         .arg(concat!(
@@ -89,7 +92,7 @@ async fn export_contains_raw_and_revisions_without_credentials_and_delete_cleans
         "{}",
         String::from_utf8_lossy(&restored.stderr)
     );
-    let restored_db = helpyourself::database::Database::open(&restored_path)
+    let restored_db = longlivehealth::database::Database::open(&restored_path)
         .await
         .unwrap();
     assert_eq!(
@@ -106,7 +109,7 @@ async fn export_contains_raw_and_revisions_without_credentials_and_delete_cleans
     restored_db
         .enable_user(
             "restored",
-            &helpyourself::authentication::hash_password("restored-password".into())
+            &longlivehealth::authentication::hash_password("restored-password".into())
                 .await
                 .unwrap(),
         )
@@ -114,7 +117,8 @@ async fn export_contains_raw_and_revisions_without_credentials_and_delete_cleans
         .unwrap();
     assert!(restored_db.credentials("restored").await.unwrap().is_some());
     assert_eq!(
-        std::fs::read(restored_path.join(format!("raw/photos/{}/{report}", user.user_id))).unwrap(),
+        std::fs::read(restored_path.join(format!("raw/{}/unassigned/{report}.png", user.user_id)))
+            .unwrap(),
         crate::png()
     );
     assert_eq!(
@@ -137,15 +141,16 @@ async fn export_contains_raw_and_revisions_without_credentials_and_delete_cleans
             .await
             .is_err()
     );
-    helpyourself::maintenance::cleanup(&state).await.unwrap();
+    longlivehealth::maintenance::cleanup(&state).await.unwrap();
     assert!(!path.exists());
     assert!(
         !state
             .config
             .data_dir
-            .join("raw/photos")
+            .join("raw")
             .join(&user.user_id)
-            .join(&report)
+            .join("unassigned")
+            .join(format!("{report}.png"))
             .exists()
     );
     assert!(state.database.report(&user.user_id, &report).await.is_err());
@@ -164,8 +169,8 @@ async fn account_deletion_revokes_sessions_and_cancels_queued_work() {
         state
             .database
             .session_user(
-                &helpyourself::authentication::digest(token.as_bytes()),
-                helpyourself::authentication::now().unwrap()
+                &longlivehealth::authentication::digest(token.as_bytes()),
+                longlivehealth::authentication::now().unwrap()
             )
             .await
             .is_err()
@@ -178,36 +183,34 @@ async fn account_deletion_revokes_sessions_and_cancels_queued_work() {
             .is_err()
     );
     assert!(
-        !helpyourself::maintenance::export_next(&state)
+        !longlivehealth::maintenance::export_next(&state)
             .await
             .unwrap()
     );
-    helpyourself::maintenance::cleanup(&state).await.unwrap();
-    for source in helpyourself::raw::SOURCES {
-        assert!(
-            !state
-                .config
-                .data_dir
-                .join("raw")
-                .join(source)
-                .join(&user.user_id)
-                .exists()
-        );
-    }
+    longlivehealth::maintenance::cleanup(&state).await.unwrap();
+    assert!(
+        !state
+            .config
+            .data_dir
+            .join("raw")
+            .join(&user.user_id)
+            .exists()
+    );
 
     assert!(
         !state
             .config
             .data_dir
-            .join("raw/photos")
+            .join("raw")
             .join(&user.user_id)
+            .join("unassigned")
             .exists()
     );
 }
 
 #[test]
 fn csv_formula_cells_are_inert() {
-    assert_eq!(helpyourself::maintenance::csv_cell("=1+1"), "\"'=1+1\"");
+    assert_eq!(longlivehealth::maintenance::csv_cell("=1+1"), "\"'=1+1\"");
 }
 
 #[tokio::test]
@@ -221,10 +224,10 @@ async fn delayed_report_cleanup_does_not_remove_a_new_export() {
         .await
         .unwrap();
     let export = state.database.request_export(&user.user_id).await.unwrap();
-    helpyourself::maintenance::export_next(&state)
+    longlivehealth::maintenance::export_next(&state)
         .await
         .unwrap();
-    helpyourself::maintenance::cleanup(&state).await.unwrap();
+    longlivehealth::maintenance::cleanup(&state).await.unwrap();
     state
         .database
         .export_ready(&user.user_id, &export)
@@ -246,7 +249,7 @@ async fn deleted_upload_cannot_be_revived_by_a_lost_response_retry() {
     let (_directory, state) = fixture().await;
     let user = add_user(&state, "alice").await;
     let token = crate::token(&state, "alice").await;
-    let app = helpyourself::app::create_application(state.clone());
+    let app = longlivehealth::app::create_application(state.clone());
     let upload_id = uuid::Uuid::new_v4().to_string();
     let (_, response) = crate::upload(&app, &token, &upload_id, &crate::png()).await;
     let report = response["file"]["file_id"].as_str().unwrap();
@@ -262,7 +265,7 @@ async fn deleted_upload_cannot_be_revived_by_a_lost_response_retry() {
             .database
             .reports(
                 &user.user_id,
-                &helpyourself::models::ListRequest {
+                &longlivehealth::models::ListRequest {
                     limit: 10,
                     after_id: None
                 }
@@ -273,19 +276,19 @@ async fn deleted_upload_cannot_be_revived_by_a_lost_response_retry() {
     );
 }
 
-async fn additional_sources(state: &helpyourself::app::AppState, user: &str) {
+async fn additional_sources(state: &longlivehealth::app::AppState, user: &str) {
     state.database.save_wellness_entry(user, serde_json::from_value(serde_json::json!({
         "record_id":uuid::Uuid::new_v4(),"version":1,"batch_id":uuid::Uuid::new_v4(),"at":100,"timezone":"UTC",
         "entry":{"kind":"body","content":{"weight_kg":70,"body_fat_percent":null,"waist_cm":null,"note":"synthetic"}}
     })).unwrap()).await.unwrap();
-    state.database.import_gpx(user, helpyourself::wellness::import::XmlImportRequest {
+    state.database.import_gpx(user, longlivehealth::wellness::import::XmlImportRequest {
         filename:"synthetic.gpx".into(), xml:r#"<gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg><trkpt lat="0" lon="0"><time>2026-01-01T00:00:00Z</time></trkpt><trkpt lat="0" lon="0.001"><time>2026-01-01T00:01:00Z</time></trkpt></trkseg></trk></gpx>"#.into()
     }).await.unwrap();
     state
         .database
         .import_tcx(
             user,
-            helpyourself::wellness::import::XmlImportRequest {
+            longlivehealth::wellness::import::XmlImportRequest {
                 filename: "indoor.tcx".into(),
                 xml: super::wellness::tcx_fixture(),
             },

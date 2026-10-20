@@ -17,6 +17,13 @@ use serde_json::json;
 
 pub fn router(upload_limit: usize) -> Router<AppState> {
     Router::new()
+        .route(
+            "/api/v1/user/password/change",
+            post(crate::accounts::change_password),
+        )
+        .route("/api/v1/users/list", post(crate::accounts::list))
+        .route("/api/v1/users/create", post(crate::accounts::create))
+        .route("/api/v1/users/delete", post(crate::accounts::delete))
         .route("/api/v1/reports/delete", post(delete_report))
         .route("/api/v1/user/delete", post(delete_account))
         .route("/api/v1/exports/create", post(create_export))
@@ -42,7 +49,9 @@ pub fn router(upload_limit: usize) -> Router<AppState> {
         .route("/api/v1/reports/relate", post(relate_reports))
         .route("/api/v1/observations/history", post(observation_history))
         .route("/api/v1/metrics/list", post(list_metrics))
+        .route("/api/v1/metrics/browse", post(browse_metrics))
         .route("/api/v1/trends/get", post(get_trends))
+        .route("/api/v1/metrics/history/get", post(get_metric_history))
         .route("/api/v1/health/connect", post(connect_health))
         .route(
             "/api/v1/health/sync",
@@ -120,6 +129,8 @@ pub fn router(upload_limit: usize) -> Router<AppState> {
         .route("/api/v1/server/status", post(status))
         .route("/api/v1/session/login", post(login))
         .route("/api/v1/session/logout", post(logout))
+        .route("/api/v1/session/refresh", post(refresh_session))
+        .route("/api/v1/session/revoke", post(revoke_refresh_session))
         .route("/api/v1/user/get", post(current_user))
         .route(
             "/api/v1/files/upload",
@@ -205,10 +216,13 @@ async fn review_report(
         .observations
         .iter()
         .any(|item| item.status == "confirmed");
-    let mut response = state
-        .database
-        .review(&current.user.user_id, request)
-        .await?;
+    let mut response = {
+        let _guard = state.file_mutation.lock().await;
+        state
+            .database
+            .review(&current.user.user_id, request)
+            .await?
+    };
     if confirmed && state.config.providers.analysis.enabled {
         let end = chrono::Utc::now().date_naive();
         let scope = crate::analysis::AnalysisRequest {
@@ -341,7 +355,7 @@ async fn download_export(
             (header::CONTENT_TYPE, "application/zip"),
             (
                 header::CONTENT_DISPOSITION,
-                "attachment; filename=helpyourself-export.zip",
+                "attachment; filename=longlivehealth-export.zip",
             ),
         ],
         Body::from_stream(tokio_util::io::ReaderStream::new(file)),
@@ -431,6 +445,27 @@ async fn observation_history(
 async fn list_metrics(_current: CurrentUser) -> Json<serde_json::Value> {
     Json(json!({"metrics":crate::laboratory::metrics()}))
 }
+async fn browse_metrics(
+    State(state): State<AppState>,
+    current: CurrentUser,
+) -> Result<Response, AppError> {
+    crate::transport::json_response(
+        &state,
+        crate::metric_history::browse(&state.database, &current.user.user_id).await?,
+    )
+    .await
+}
+async fn get_metric_history(
+    State(state): State<AppState>,
+    current: CurrentUser,
+    Json(request): Json<crate::metric_history::HistoryRequest>,
+) -> Result<Response, AppError> {
+    crate::transport::json_response(
+        &state,
+        crate::metric_history::history(&state.database, &current.user.user_id, request).await?,
+    )
+    .await
+}
 async fn get_trends(
     State(state): State<AppState>,
     current: CurrentUser,
@@ -464,7 +499,9 @@ async fn sync_health(
     current: CurrentUser,
     body: crate::transport::HealthSyncBody,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let _guard = state.file_mutation.lock().await;
+    // Health publishes unique immutable paths. SQLite rechecks ownership and
+    // tombstones atomically; leased staging files survive cleanup. Do not hold
+    // the report/export file mutex while staging an entire Health batch.
     state
         .database
         .require_device_connection(&current.user.user_id, &body.batch.connection_id)
@@ -511,6 +548,9 @@ async fn download_raw_health(
 async fn health_coverage(
     State(state): State<AppState>,
     current: CurrentUser,
+    // Consume even an empty JSON object before responding. Proxies can deliver the
+    // body separately from headers; dropping it can reset a large HTTP/1 response.
+    _body: axum::body::Bytes,
 ) -> Result<Json<serde_json::Value>, AppError> {
     Ok(Json(
         state
@@ -1192,4 +1232,25 @@ async fn food_lookup(
         .await
         .map_err(|_| AppError::Internal)?;
     Ok(Json(crate::wellness::food_lookup::lookup(request).await?))
+}
+
+async fn refresh_session(
+    State(state): State<AppState>,
+    Json(request): Json<crate::models::RefreshRequest>,
+) -> Result<Json<crate::models::LoginResponse>, AppError> {
+    Ok(Json(authentication::refresh(&state, request).await?))
+}
+
+async fn revoke_refresh_session(
+    State(state): State<AppState>,
+    Json(request): Json<crate::models::RevokeSessionRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    if request.refresh_token.len() != 64 {
+        return Err(AppError::Unauthorized);
+    }
+    state
+        .database
+        .revoke_refresh_session(&authentication::digest(request.refresh_token.as_bytes()))
+        .await?;
+    Ok(Json(json!({"revoked":true})))
 }

@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import HelpYourselfCore
+@testable import LongLiveHealthCore
 
 @Test func checkpointSurvivesRelaunchAndArchiveRejectsTraversal() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

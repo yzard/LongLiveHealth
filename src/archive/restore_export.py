@@ -20,8 +20,7 @@ SCHEMA = Path(__file__).resolve().parents[1] / 'backend_api/database/schema.sql'
 
 def restore(archive_path, destination, username, max_bytes):
     check_export.require(destination.is_absolute(), 'Destination must be absolute')
-    check_export.require(re.fullmatch('[a-z0-9_.@-]{3,64}', username) is not None,
-                         'Invalid restoration username')
+    check_export.require(re.fullmatch('[a-z0-9_.@-]{3,64}', username) is not None, 'Invalid restoration username')
     # Keep the same open file description through audit and restoration.
     with archive_path.open('rb') as source:
         audit = check_export.audit(source, max_bytes)
@@ -30,9 +29,10 @@ def restore(archive_path, destination, username, max_bytes):
             manifest = check_export.read_object(archive, 'manifest.json')
             revision = manifest.get('data_revision')
             created = manifest.get('created_at')
-            check_export.require(type(revision) is int and 0 <= revision < 2**63
-                                 and type(created) is int and 0 <= created < 2**63,
-                                 'Invalid archive metadata')
+            check_export.require(
+                type(revision) is int and 0 <= revision < 2**63 and type(created) is int and 0 <= created < 2**63,
+                'Invalid archive metadata',
+            )
             # mkdir is exclusive. Never reuse or remove an existing destination.
             destination.mkdir(mode=0o700)
             try:
@@ -48,11 +48,14 @@ def restore(archive_path, destination, username, max_bytes):
                     connection.execute(queries.CREATE_OWNER, (manifest['user_id'], username, created, revision))
                     for table in sorted(check_export.TABLES):
                         definitions = queries.columns(connection, table)
-                        expected = [dict(name=name, sqlite_type=kind, not_null=bool(required),
-                                         primary_key_position=key)
-                                    for name, kind, required, key in definitions]
-                        check_export.require(manifest['table_columns'][table] == expected,
-                                             'Archive columns differ from the initial schema')
+                        expected = [
+                            dict(name=name, sqlite_type=kind, not_null=bool(required), primary_key_position=key)
+                            for name, kind, required, key in definitions
+                        ]
+                        check_export.require(
+                            manifest['table_columns'][table] == expected,
+                            'Archive columns differ from the initial schema',
+                        )
                         fields = [definition[0] for definition in definitions]
                         statement = queries.insert(table, fields)
                         for row in check_export.rows(archive, table + '.jsonl'):
@@ -60,10 +63,13 @@ def restore(archive_path, destination, username, max_bytes):
                     interrupted = connection.execute(queries.CANCEL_ANALYSIS).rowcount
                     connection.execute(queries.CLEAR_PROCESSING)
                     connection.execute(queries.REQUEUE_DAILY_VIEWS)
-                    check_export.require(not connection.execute(queries.CHECK_KEYS).fetchall(),
-                                         'Restored foreign keys are invalid')
-                    check_export.require(connection.execute(queries.CHECK_DATABASE).fetchall() == [('ok',)],
-                                         'Restored database is invalid')
+                    check_export.require(
+                        not connection.execute(queries.CHECK_KEYS).fetchall(), 'Restored foreign keys are invalid'
+                    )
+                    check_export.require(
+                        connection.execute(queries.CHECK_DATABASE).fetchall() == [('ok',)],
+                        'Restored database is invalid',
+                    )
                     for member in archive.infolist():
                         if not member.filename.startswith('raw/'):
                             continue
@@ -78,12 +84,19 @@ def restore(archive_path, destination, username, max_bytes):
                     connection.commit()
                 finally:
                     connection.close()
-                result = dict(status='restored', database_schema_version=1,
-                              tables=audit['tables'], original_files=audit['original_files'],
-                              account_status='disabled', interrupted_analyses=interrupted,
-                              notes=['Set a new password and enable the account before use.',
-                                     'Sessions, worker jobs, processing copies, exports and provider secrets are not restored.',
-                                     'Source originals, record revisions and completed analyses retain their contents.'])
+                result = dict(
+                    status='restored',
+                    database_schema_version=7,
+                    tables=audit['tables'],
+                    original_files=audit['original_files'],
+                    account_status='disabled',
+                    interrupted_analyses=interrupted,
+                    notes=[
+                        'Set a new password and enable the account before use.',
+                        'Sessions, worker jobs, processing copies, exports and provider secrets are not restored.',
+                        'Source originals, current records and completed analyses retain their contents.',
+                    ],
+                )
                 receipt = destination / 'restore.json'
                 with receipt.open('x') as stream:
                     os.chmod(stream.fileno(), 0o600)
@@ -104,8 +117,19 @@ def main():
     args = parser.parse_args()
     try:
         result = restore(args.archive, args.destination, args.username, args.max_bytes)
-    except (OSError, ValueError, KeyError, TypeError, EOFError, csv.Error, sqlite3.Error,
-            zipfile.BadZipFile, zlib.error, RuntimeError, NotImplementedError):
+    except (
+        OSError,
+        ValueError,
+        KeyError,
+        TypeError,
+        EOFError,
+        csv.Error,
+        sqlite3.Error,
+        zipfile.BadZipFile,
+        zlib.error,
+        RuntimeError,
+        NotImplementedError,
+    ):
         print(json.dumps(dict(status='failed', error='restore_failed')), file=sys.stderr)
         return 1
     print(json.dumps(result))

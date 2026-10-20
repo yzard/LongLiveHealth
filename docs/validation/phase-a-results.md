@@ -24,7 +24,7 @@
 
 - Rust：46 项测试通过（tests/backend），包括新旧数据库迁移、归属、会话重置、上传和删除重放、报告审核、趋势、健康同步、模型调用、租约与导出。
 - `cargo fmt --all --check`、`cargo clippy --locked --all-targets -- -D warnings` 通过。
-- Swift 6.2 容器编译 HelpYourselfCore；3 项 Swift Testing 测试通过：嵌套数据/身份、持久批次恢复和路径隔离、服务器地址校验。
+- Swift 6.2 容器编译 LongLiveHealthCore；3 项 Swift Testing 测试通过：嵌套数据/身份、持久批次恢复和路径隔离、服务器地址校验。
 - 所有 iPhone Swift 源码由编译器执行语法解析。Linux 不含 SwiftUI/HealthKit SDK，因此这不是完整 iOS build 成功。
 - 最新 Docker release 构建成功。`tests/docker/deployment.py` 使用独立项目和随机端口，以 Caddy 测试 CA 验证 HTTPS，运行登录→上传→原件→复核→趋势→完整导出→重启保留→停服复制恢复→报告/账户删除。只清理自己创建的卷；输出位于 build/deployment-check/result.json。
 - 测试仅使用合成图片、合成 PDF、假模型结果及临时凭据；没有接触真实健康信息或向云模型发送真实报告。

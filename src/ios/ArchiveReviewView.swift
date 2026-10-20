@@ -62,7 +62,7 @@ struct ArchiveReviewView: View {
                     ShareLink("Share review and input references", item: text)
                 }
             }
-        }.navigationTitle("Log review").task { await reload() }.refreshable { await reload() }
+        }.navigationTitle("Log review").initialTask { await reload() }.refreshable { await reload() }
     }
     private func reload() async {
         guard let client = model.client, let token = model.session?.token else { return }
@@ -96,7 +96,7 @@ struct ArchiveTimelineView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(event["record_type"].stringValue.replacingOccurrences(of: "_", with: " ")).font(.headline)
                     if let at = event["at"].numberValue { Text(Date(timeIntervalSince1970: at).formatted()) }
-                    Text("\(event["source"].stringValue) · revision \(Int(event["version"].numberValue ?? 0))").font(.caption)
+                    Text("\(model.sourceLabel(event["source"].stringValue)) · revision \(Int(event["version"].numberValue ?? 0))").font(.caption)
                     if event["source"] == .string("manual:helpyourself") { NavigationLink("Open logs", destination: DailyLogsView(model: model)) }
                     else if event["record_type"] == .string("sleep") { NavigationLink("Open sleep sessions", destination: SleepSessionsView(model: model)) }
                     else if event["record_type"] != .string("report") { NavigationLink("Open source records", destination: HealthView(model: model)) }
@@ -104,7 +104,7 @@ struct ArchiveTimelineView: View {
             }
             if cursor != .null { Button("Load more events") { Task { await load(reset: false) } }.disabled(loading) }
             if loading { ProgressView() }
-        }.navigationTitle("Timeline").task { await load(reset: true) }
+        }.navigationTitle("Timeline").initialTask { await load(reset: true) }
     }
     private func load(reset: Bool) async {
         guard !loading, let client = model.client, let token = model.session?.token else { return }

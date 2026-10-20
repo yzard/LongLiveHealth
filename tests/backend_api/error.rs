@@ -1,6 +1,6 @@
 use axum::response::IntoResponse;
-use helpyourself::error::AppError;
 use http_body_util::BodyExt;
+use longlivehealth::error::AppError;
 
 #[tokio::test]
 async fn internal_errors_do_not_disclose_driver_or_file_details() {

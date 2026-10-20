@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import HelpYourselfCore
+@testable import LongLiveHealthCore
 
 @Test func trainingFilePreservesBomUnicodeAndRejectsRepairedBytes() throws {
     let original = Data([0xef, 0xbb, 0xbf]) + Data("<gpx>cafe\u{301} 健康</gpx>".utf8)

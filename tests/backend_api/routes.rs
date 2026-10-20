@@ -3,8 +3,8 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use helpyourself::app::create_application;
 use http_body_util::BodyExt;
+use longlivehealth::app::create_application;
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -77,7 +77,7 @@ async fn archive_replay_download_and_cross_user_isolation() {
             );
         }
     }
-    helpyourself::maintenance::cleanup(&state).await.unwrap();
+    longlivehealth::maintenance::cleanup(&state).await.unwrap();
     assert!(
         std::fs::read_dir(state.config.data_dir.join("tmp"))
             .unwrap()
@@ -147,7 +147,7 @@ async fn invalid_upload_does_not_create_records_or_leave_temporary_files() {
         upload(&router, &token, "../escape", &png()).await.0,
         StatusCode::BAD_REQUEST
     );
-    helpyourself::maintenance::cleanup(&state).await.unwrap();
+    longlivehealth::maintenance::cleanup(&state).await.unwrap();
     assert!(
         std::fs::read_dir(state.config.data_dir.join("tmp"))
             .unwrap()
@@ -209,7 +209,7 @@ async fn large_valid_upload_has_route_specific_limit_and_excess_is_rejected() {
     let token = token(&state, "alice").await;
     let mut image = image::RgbImage::new(200, 200);
     for (index, pixel) in image.pixels_mut().enumerate() {
-        let hash = helpyourself::authentication::digest(&index.to_le_bytes());
+        let hash = longlivehealth::authentication::digest(&index.to_le_bytes());
         *pixel = image::Rgb([hash.as_bytes()[0], hash.as_bytes()[1], hash.as_bytes()[2]]);
     }
     let mut encoded = std::io::Cursor::new(Vec::new());
@@ -255,8 +255,8 @@ async fn archived_files_and_sessions_survive_server_restart() {
     state.database.close().await;
     drop(router);
     drop(state);
-    let configuration = helpyourself::config::Config::load(directory.path()).unwrap();
-    let reopened = helpyourself::app::AppState::open(configuration)
+    let configuration = longlivehealth::config::Config::load(directory.path()).unwrap();
+    let reopened = longlivehealth::app::AppState::open(configuration)
         .await
         .unwrap();
     let router = create_application(reopened);

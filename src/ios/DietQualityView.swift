@@ -30,8 +30,8 @@ struct DietQualityView: View {
                 }
             }
             Section("Method") { ForEach(result["notes"].arrayValue.map(\.stringValue), id: \.self) { Text($0).font(.caption) } }
-        }.navigationTitle("Diet quality").task(id: date) { await load() }
-            .sheet(isPresented: $editing, onDismiss: { Task { await load() } }) { NavigationStack { LogEditor(model: model, existing: nil, initialKind: "diet_quality", initialValues: [:], initialDate: date) } }
+        }.navigationTitle("Diet quality").initialTask(id: date) { await load() }
+            .sheet(isPresented: $editing) { NavigationStack { LogEditor(model: model, existing: nil, initialKind: "diet_quality", initialValues: [:], initialDate: date) } }
     }
     private func load() async {
         guard let client = model.client, let token = model.session?.token else { return }

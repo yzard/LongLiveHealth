@@ -1,3 +1,4 @@
+mod accounts;
 pub(crate) mod queries;
 
 use crate::{
@@ -27,6 +28,7 @@ pub struct Credentials {
     pub username: String,
     pub password_hash: String,
     pub credential_version: i64,
+    pub must_change_password: bool,
 }
 
 impl Database {
@@ -52,9 +54,9 @@ impl Database {
         let version: i64 = sqlx::query_scalar(queries::SCHEMA_VERSION)
             .fetch_one(&mut *transaction)
             .await?;
-        if version != 0 && version != 1 {
+        if version != 0 && version != 7 {
             return Err(AppError::Conflict(
-                "Unsupported database schema; use a fresh data directory",
+                "Run the offline storage migration before starting this server",
             ));
         }
         if version == 0 {
@@ -66,11 +68,7 @@ impl Database {
             .execute(&mut *transaction)
             .await?;
         transaction.commit().await?;
-        for folder in std::iter::once("tmp".to_owned()).chain(
-            crate::raw::SOURCES
-                .iter()
-                .map(|source| format!("raw/{source}")),
-        ) {
+        for folder in ["tmp", "raw"] {
             tokio::fs::create_dir_all(directory.join(folder)).await?;
         }
         Ok(Self {
@@ -95,6 +93,8 @@ impl Database {
         let user = User {
             user_id: uuid::Uuid::new_v4().to_string(),
             username: username.to_owned(),
+            is_admin: username == "admin",
+            must_change_password: false,
         };
         let inserted = sqlx::query(queries::CREATE_USER)
             .bind(&user.user_id)
@@ -142,6 +142,9 @@ impl Database {
         username: &str,
         password_hash: Option<&str>,
     ) -> Result<(), AppError> {
+        if username == "admin" && password_hash.is_none() {
+            return Err(AppError::Forbidden);
+        }
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let user_id: Option<String> = if let Some(password_hash) = password_hash {
             sqlx::query_scalar(queries::RESET_PASSWORD)
@@ -192,6 +195,7 @@ impl Database {
         &self,
         token_hash: &str,
         expires_at: i64,
+        refresh: Option<(&str, i64)>,
         credentials: &Credentials,
         now: i64,
     ) -> Result<(), AppError> {
@@ -203,6 +207,8 @@ impl Database {
         let created = sqlx::query(queries::CREATE_SESSION)
             .bind(token_hash)
             .bind(expires_at)
+            .bind(refresh.map(|value| value.0))
+            .bind(refresh.map(|value| value.1))
             .bind(&credentials.user_id)
             .bind(credentials.credential_version)
             .execute(&mut *transaction)
@@ -221,6 +227,66 @@ impl Database {
             .fetch_optional(&self.pool)
             .await?
             .ok_or(AppError::Unauthorized)
+    }
+
+    pub async fn rotate_session(
+        &self,
+        previous: &str,
+        next: &str,
+        token: &str,
+        expires: i64,
+        refresh_expires: i64,
+        now: i64,
+    ) -> Result<User, AppError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let (current_token, current_refresh): (String, String) =
+            sqlx::query_as(queries::REFRESH_SESSION)
+                .bind(previous)
+                .bind(now)
+                .fetch_optional(&mut *transaction)
+                .await?
+                .ok_or(AppError::Unauthorized)?;
+        if current_refresh == previous {
+            sqlx::query(queries::ROTATE_SESSION)
+                .bind(now)
+                .bind(token)
+                .bind(expires)
+                .bind(next)
+                .bind(refresh_expires)
+                .bind(&current_token)
+                .execute(&mut *transaction)
+                .await?;
+        } else if current_refresh != next || current_token != token {
+            // A consumed refresh credential with a different successor indicates replay.
+            sqlx::query(queries::REVOKE_SESSION)
+                .bind(&current_token)
+                .execute(&mut *transaction)
+                .await?;
+            transaction.commit().await?;
+            return Err(AppError::Unauthorized);
+        }
+        sqlx::query(queries::RENEW_SESSION_EXPIRY)
+            .bind(expires)
+            .bind(refresh_expires)
+            .bind(token)
+            .execute(&mut *transaction)
+            .await?;
+        let user = sqlx::query_as(queries::SESSION_USER)
+            .bind(token)
+            .bind(now)
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or(AppError::Unauthorized)?;
+        transaction.commit().await?;
+        Ok(user)
+    }
+
+    pub async fn revoke_refresh_session(&self, hash: &str) -> Result<(), AppError> {
+        sqlx::query(queries::REVOKE_REFRESH_SESSION)
+            .bind(hash)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     pub async fn revoke_session(&self, token_hash: &str) -> Result<(), AppError> {

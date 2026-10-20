@@ -1,4 +1,4 @@
-use helpyourself::{database::Database, error::AppError};
+use longlivehealth::{database::Database, error::AppError};
 mod queries;
 mod schema;
 

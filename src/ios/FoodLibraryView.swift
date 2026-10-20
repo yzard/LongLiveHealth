@@ -18,7 +18,7 @@ struct FoodLibraryView: View {
                 Text("Nutrient names include energy_kcal, protein_g, carbohydrate_g, fat_g, fiber_g, water_ml, sodium_mg, calcium_mg, iron_mg and vitamin_d_ug.").font(.caption)
                 if let failure { Text(failure).foregroundStyle(.secondary) }
             }
-            ForEach(Array(entries.filter { query.isEmpty || $0["entry"]["content"].selfDescription.localizedCaseInsensitiveContains(query) }.enumerated()), id: \.offset) { _, item in
+            ForEach(entries.filter { query.isEmpty || $0["entry"]["content"].formattedJSON.localizedCaseInsensitiveContains(query) }, id: \.identifier) { item in
                 Section {
                     Text(item["entry"]["content"]["name"].stringValue.isEmpty ? "Daily targets" : item["entry"]["content"]["name"].stringValue).font(.headline)
                     Text(item["entry"]["content"]["source"].stringValue).font(.caption)
@@ -28,8 +28,9 @@ struct FoodLibraryView: View {
                 }
             }
         }.navigationTitle("Food library").searchable(text: $query, prompt: "Name, brand or barcode")
-            .task(id: kind) { await load() }.refreshable { await load() }
-            .sheet(item: $editor, onDismiss: { Task { await load() } }) { selection in
+            .initialTask(id: kind) { await load() }.refreshable { await load() }
+            .onChange(of: model.entryMutation) { _, change in if let change { entries = change.applying(to: entries) { $0["entry"]["kind"].stringValue == kind } } }
+            .sheet(item: $editor) { selection in
                 NavigationStack { LogEditor(model: model, existing: selection.existing, initialKind: selection.kind, initialValues: selection.kind == "recipe" ? ["ingredients": "[]"] : [:], initialDate: Date()) }
             }
     }
@@ -46,7 +47,6 @@ struct FoodLibraryView: View {
             guard let client = model.client else { return }
             _ = try await model.request("wellness/entries/delete", body: .object(["record_id": item["record_id"], "version": .number((item["version"].numberValue ?? 0) + 1), "batch_id": .string(UUID().uuidString), "kind": item["entry"]["kind"]]))
         }
-        await load()
     }
 }
 
@@ -69,7 +69,7 @@ private struct FoodPortionView: View {
             if result != .null {
                 ForEach(result["nutrients"].objectValue.keys.sorted(), id: \.self) { key in LabeledContent(key, value: result["nutrients"][key].numberValue?.formatted() ?? "Unknown") }
                 Text("Incomplete nutrients: " + result["incomplete_nutrients"].arrayValue.map(\.stringValue).joined(separator: ", ")).font(.caption)
-                NavigationLink("Review and save food log") { LogEditor(model: model, existing: nil, initialKind: "nutrition", initialValues: draft(), initialDate: Date()) }
+                EditorLink("Review and save food log") { LogEditor(model: model, existing: nil, initialKind: "nutrition", initialValues: draft(), initialDate: Date()) }
             }
         }.navigationTitle("Food portion").onChange(of: amount) { _, _ in result = .null }.onChange(of: meal) { _, _ in result = .null }
     }
@@ -119,7 +119,7 @@ struct RecipeIngredientsEditor: View {
                 save(items); grams = ""; failure = nil
             }
             if let failure { Text(failure).font(.caption) }
-        }.task {
+        }.initialTask {
             guard let client = model.client, let token = model.session?.token else { return }
             do { let response = try await model.request("wellness/library", body: .object(["kind": .string("food")]))
                 guard !Task.isCancelled, model.session?.token == token else { return }; foods = response["entries"].arrayValue

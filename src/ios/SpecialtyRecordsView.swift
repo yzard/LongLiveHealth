@@ -19,12 +19,12 @@ struct SpecialtyRecordsView: View {
                     VStack(alignment: .leading) {
                         Text(item["record_type"].stringValue)
                         Text(Date(timeIntervalSince1970: item["at"].numberValue ?? 0).formatted()).font(.caption)
-                        Text(item["platform"].stringValue + ":" + item["source_id"].stringValue).font(.caption)
+                        Text(model.sourceLabel(SourceNames.key(item))).font(.caption)
                     }
                 }
             }
             if cursor != .null { Button("More records") { Task { await load(reset: false) } }.disabled(loading) }
-        }.navigationTitle("Specialty records").task(id: kind) { await load(reset: true) }
+        }.navigationTitle("Specialty records").initialTask(id: kind) { await load(reset: true) }
     }
     private func load(reset: Bool) async {
         guard let client = model.client, let token = model.session?.token else { return }
@@ -47,7 +47,7 @@ private struct SpecialtyRecordView: View {
     var body: some View {
         List {
             Section("Source") {
-                Text(reference["platform"].stringValue + ":" + reference["source_id"].stringValue)
+                Text(model.sourceLabel(SourceNames.key(reference)))
                 Text(reference["record_id"].stringValue).font(.caption)
                 Text("Source classification code: " + (result["source_classification"].numberValue?.formatted() ?? "Not available"))
                 if let failure { Text(failure).foregroundStyle(.secondary) }
@@ -70,9 +70,9 @@ private struct SpecialtyRecordView: View {
                 Section("Clinical resource") {
                     Text(result["fhir"]["resource"]["resourceType"].stringValue).font(.headline)
                     ForEach(result["fhir"]["resource"].objectValue.keys.sorted(), id: \.self) { key in
-                        DisclosureGroup(key) { Text(result["fhir"]["resource"][key].selfDescription).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+                        DisclosureGroup(key) { Text(result["fhir"]["resource"][key].formattedJSON).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
                     }
-                    ShareLink("Share source resource", item: result["fhir"]["resource"].selfDescription)
+                    ShareLink("Share source resource", item: result["fhir"]["resource"].formattedJSON)
                 }
             } else if reference["record_type"] != .string("electrocardiogram") { Text(result["fhir"]["state"].stringValue.replacingOccurrences(of: "_", with: " ")) }
             ForEach(Array(result["related"].arrayValue.enumerated()), id: \.offset) { _, relation in
@@ -84,7 +84,7 @@ private struct SpecialtyRecordView: View {
                 }
             }
             ForEach(result["notes"].arrayValue.map(\.stringValue), id: \.self) { Text($0).font(.caption) }
-        }.navigationTitle("Source record").task(id: offset) { await load() }
+        }.navigationTitle("Source record").initialTask(id: offset) { await load() }
     }
     private func load() async {
         guard let client = model.client, let token = model.session?.token else { return }

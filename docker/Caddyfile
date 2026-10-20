@@ -1,4 +1,4 @@
-{$HELPYOURSELF_DOMAIN:localhost} {
+{$LONGLIVEHEALTH_DOMAIN:localhost} {
     reverse_proxy backend_api:8080
 }
 

@@ -32,7 +32,7 @@ private struct CalendarEventEditor: UIViewControllerRepresentable {
         let event = EKEvent(eventStore: store)
         event.title = title; event.startDate = start
         event.endDate = start.addingTimeInterval(max(1, durationMinutes) * 60)
-        event.notes = "Copy of a Helpyourself plan. Changes to the original plan do not update this calendar event."
+        event.notes = "Copy of a Long Live Health plan. Changes to the original plan do not update this calendar event."
         let controller = EKEventEditViewController()
         controller.eventStore = store; controller.event = event; controller.editViewDelegate = context.coordinator
         return controller

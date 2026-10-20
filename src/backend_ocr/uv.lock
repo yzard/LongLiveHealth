@@ -99,7 +99,7 @@ wheels = [
 ]
 
 [[package]]
-name = "helpyourself-backend-ocr"
+name = "longlivehealth-backend-ocr"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

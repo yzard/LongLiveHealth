@@ -19,7 +19,7 @@ struct RemindersView: View {
                 Text("This device schedules up to 50 upcoming reminders within 31 days. Open this page to refresh after server edits or before the horizon expires.").font(.caption)
                 Text("Quiet hours suppress reminders. A missing daylight-saving time is skipped; a repeated time uses its first occurrence.").font(.caption)
             }
-            ForEach(Array(reminders.enumerated()), id: \.offset) { _, item in
+            ForEach(reminders, id: \.identifier) { item in
                 Section(item["entry"]["content"]["title"].stringValue) {
                     Text(item["entry"]["content"]["local_time"].stringValue + " · " + item["timezone"].stringValue)
                     Text(item["entry"]["content"]["enabled"].boolValue ? "Enabled" : "Disabled")
@@ -30,8 +30,9 @@ struct RemindersView: View {
             Section("Upcoming occurrences") {
                 ForEach(Array(occurrences.prefix(100).enumerated()), id: \.offset) { _, item in Text(item["date"].stringValue + " " + item["local_time"].stringValue + " · " + item["title"].stringValue + " · " + item["state"].stringValue) }
             }
-        }.navigationTitle("Reminders").task { await load() }.refreshable { await load() }
-            .sheet(item: $editor, onDismiss: { Task { await load(); await clearScheduled() } }) { selection in
+        }.navigationTitle("Reminders").initialTask { await load() }.refreshable { await load() }
+            .onChange(of: model.entryMutation) { _, _ in Task { await load(); await clearScheduled() } }
+            .sheet(item: $editor) { selection in
                 NavigationStack { LogEditor(model: model, existing: selection.item, initialKind: "reminder", initialValues: [:], initialDate: Date()) }
             }
     }

@@ -12,7 +12,7 @@ struct TrainingDetailView: View {
         List {
             Section("Source activity") {
                 Text(reference["filename"].stringValue)
-                Text(reference["source_id"].stringValue).font(.caption)
+                Text(model.sourceLabel("file_import:" + reference["source_id"].stringValue)).font(.caption)
                 if let elapsed = result["elapsed_seconds"].numberValue { Text("Elapsed: \((elapsed / 60).formatted()) minutes") }
                 if let timer = result["source_total_time_seconds"].numberValue { Text("Source timer: \((timer / 60).formatted()) minutes") } else { Text("Source timer duration unknown") }
                 Text("Elapsed time can include pauses. Points show source measurements, without filling gaps.").font(.caption)
@@ -49,7 +49,7 @@ struct TrainingDetailView: View {
                     }
                 }
             }
-        }.navigationTitle("Training details").task(id: offset) { await load() }
+        }.navigationTitle("Training details").initialTask(id: offset) { await load() }
     }
     private func load() async {
         guard let client = model.client, let token = model.session?.token else { return }

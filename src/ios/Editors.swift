@@ -50,7 +50,7 @@ struct ObservationEditor: View {
                             dismiss()
                         } catch { self.error = error.localizedDescription }
                     } }.disabled(saving || payload["raw_name"].stringValue.isEmpty || payload["raw_result"].stringValue.isEmpty) }
-                }.interactiveDismissDisabled(saving)
+                }.interactiveDismissDisabled()
         }
     }
     private func text(_ key: String) -> Binding<String> { Binding(get: { payload[key].stringValue }, set: { payload[key] = ["raw_name", "raw_result"].contains(key) ? .string($0) : .optional($0) }) }
@@ -70,6 +70,7 @@ struct ContextEditor: View {
     }
     var body: some View {
         NavigationStack { Form {
+            field("Clinic or laboratory", "source_name")
             Picker("Fasting", selection: $fasting) { Text("Unknown").tag("unknown"); Text("Yes").tag("yes"); Text("No").tag("no") }
             field("Recent exercise", "recent_exercise"); field("Illness", "illness"); field("Medications", "medications"); field("Notes", "notes")
             if let error { Text(error).foregroundStyle(.red) }
@@ -80,7 +81,7 @@ struct ContextEditor: View {
                 context["fasting"] = fasting == "unknown" ? .null : .bool(fasting == "yes")
                 do { try await save(context); dismiss() } catch { self.error = error.localizedDescription }
             } }.disabled(saving) }
-        }.interactiveDismissDisabled(saving) }
+        }.interactiveDismissDisabled() }
     }
     private func field(_ label: String, _ key: String) -> some View { TextField(label, text: Binding(get: { context[key].stringValue }, set: { context[key] = .optional($0) }), axis: .vertical) }
 }

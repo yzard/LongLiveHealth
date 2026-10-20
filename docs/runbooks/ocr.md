@@ -18,7 +18,7 @@ backend_api 接收手机照片/PDF，保存原件并逐页调用 backend_ocr。b
 
 两个服务分别要求 `--data-dir ABSOLUTE_DIRECTORY`，只加载其根内固定的 `config.toml`；TOML 不包含 data_dir。相对模型路径以该根解析。API `[ocr]` 指定 URL、内嵌 api_key 和 660 秒请求超时。OCR `[server]` 指定监听、内嵌同值 api_key、600 秒整体推理截止时间和限额，`[engine]` 指定引擎及模型文件、生成参数。配置变更重启生效。手机用户 token 不传入 OCR。
 
-`./run_playground.sh` 构建两个镜像，以前台运行 API、OCR 和 Caddy。仅在缺失时生成 playground/backend_api 与 playground/backend_ocr 内的 config.toml（0600），OCR 密钥直接写入两份 TOML，已有配置与稳定密钥不覆盖。旧 api_key_file 配置由离线初始化脚本一次性转换；运行时拒绝该旧字段且不读取密钥文件。API 根读写挂载，OCR 根只读挂载，OCR 无法读取 API SQLite 或原件。独立部署用 HELPYOURSELF_API_DATA_DIR 和 HELPYOURSELF_OCR_DATA_DIR 选择两个根目录。
+`./run_playground.sh` 构建两个镜像，以前台运行 API、OCR 和 Caddy。仅在缺失时生成 playground/backend_api 与 playground/backend_ocr 内的 config.toml（0600），OCR 密钥直接写入两份 TOML，已有配置与稳定密钥不覆盖。旧 api_key_file 配置由离线初始化脚本一次性转换；运行时拒绝该旧字段且不读取密钥文件。API 根读写挂载，OCR 根只读挂载，OCR 无法读取 API SQLite 或原件。独立部署用 LONGLIVEHEALTH_API_DATA_DIR 和 LONGLIVEHEALTH_OCR_DATA_DIR 选择两个根目录。
 
 Compose 的 OCR 只加入 internal inference 网络，没有宿主机端口。8000 是服务入口，NInfer 仅监听容器回环 8002；不直接暴露原生 chat 接口。API 通过 Caddy HTTPS 为手机提供服务，OCR 不通过 Caddy。服务使用 PUID/PGID 降权运行，默认为 1000:1000。
 

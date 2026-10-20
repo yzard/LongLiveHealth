@@ -9,7 +9,7 @@ public nonisolated enum APIError: Error, LocalizedError {
     case status(Int, String)
     public var errorDescription: String? {
         switch self {
-        case .invalidServer: "Enter an HTTPS server address without credentials or a query."
+        case .invalidServer: "Enter an HTTP or HTTPS server address without credentials or a query."
         case .invalidResponse: "The server returned an unreadable response."
         case .status(let code, let message): "\(message) (\(code))"
         }
@@ -28,9 +28,14 @@ public nonisolated final class APIClient: Sendable {
     public let server: URL
     public let token: String?
     private let session: URLSession
+    private let authorization: (@Sendable (Bool) async throws -> String)?
 
-    public init(server: URL, token: String?) {
-        self.server = server; self.token = token
+    public convenience init(server: URL, token: String?) {
+        self.init(server: server, token: token, authorization: nil)
+    }
+
+    public init(server: URL, token: String?, authorization: (@Sendable (Bool) async throws -> String)?) {
+        self.server = server; self.token = token; self.authorization = authorization
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 120
         configuration.httpShouldSetCookies = false
@@ -44,21 +49,47 @@ public nonisolated final class APIClient: Sendable {
               let host = components.host, !host.isEmpty,
               components.user == nil, components.password == nil,
               components.query == nil, components.fragment == nil,
-              components.scheme == "https" || (components.scheme == "http" && ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host)),
+              ["http", "https"].contains(components.scheme?.lowercased() ?? ""),
               let url = components.url else { throw APIError.invalidServer }
         return url
     }
 
     public func post(_ path: String, body: JSONValue) async throws -> JSONValue {
-        var request = request(path, method: "POST")
+        do { return try await postOnce(path, body: body, forceRefresh: false) }
+        catch APIError.status(401, _) where authorization != nil {
+            return try await postOnce(path, body: body, forceRefresh: true)
+        }
+    }
+
+    private func postOnce(_ path: String, body: JSONValue, forceRefresh: Bool) async throws -> JSONValue {
+        var request = try await request(path, method: "POST", forceRefresh: forceRefresh)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(body)
-        let (bytes, response) = try await session.data(for: request)
+        let encoded = try JSONEncoder().encode(body)
+        let bytes: Data
+        let response: URLResponse
+        #if os(iOS)
+        if path == "health/sync", !body["records"].arrayValue.isEmpty, !body["batch_id"].stringValue.isEmpty {
+            (bytes, response) = try await BackgroundTransfer.shared.upload(request, body: encoded, operation: body["batch_id"].stringValue)
+        } else {
+            request.httpBody = encoded
+            (bytes, response) = try await session.data(for: request)
+        }
+        #else
+        request.httpBody = encoded
+        (bytes, response) = try await session.data(for: request)
+        #endif
         try check(response, bytes: bytes)
         return try JSONDecoder().decode(JSONValue.self, from: bytes)
     }
 
     public func upload(_ bytes: Data, draft: UploadDraft, originalBytes: Data?) async throws -> JSONValue {
+        do { return try await uploadOnce(bytes, draft: draft, originalBytes: originalBytes, forceRefresh: false) }
+        catch APIError.status(401, _) where authorization != nil {
+            return try await uploadOnce(bytes, draft: draft, originalBytes: originalBytes, forceRefresh: true)
+        }
+    }
+
+    private func uploadOnce(_ bytes: Data, draft: UploadDraft, originalBytes: Data?, forceRefresh: Bool) async throws -> JSONValue {
         guard bytes.count <= 20 * 1024 * 1024 else { throw APIError.status(413, "Choose a file smaller than 20 MiB") }
         let boundary = UUID().uuidString
         let safeName = draft.filename.replacingOccurrences(of: "\"", with: "_").replacingOccurrences(of: "\r", with: "_").replacingOccurrences(of: "\n", with: "_")
@@ -71,16 +102,28 @@ public nonisolated final class APIClient: Sendable {
             body.append(originalBytes)
         } else if draft.originalFilename != nil || draft.originalContentType != nil { throw APIError.invalidResponse }
         body.append(Data("\r\n--\(boundary)--\r\n".utf8))
-        var request = request("files/upload", method: "POST")
+        var request = try await request("files/upload", method: "POST", forceRefresh: forceRefresh)
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.setValue(draft.id.uuidString, forHTTPHeaderField: "X-Upload-Id")
+        #if os(iOS)
+        let (responseBytes, response) = try await BackgroundTransfer.shared.upload(request, body: body, operation: draft.id.uuidString)
+        #else
         let (responseBytes, response) = try await session.upload(for: request, from: body)
+        #endif
         try check(response, bytes: responseBytes)
         return try JSONDecoder().decode(JSONValue.self, from: responseBytes)
     }
 
     public func download(_ path: String, destination: URL) async throws {
-        let (temporary, response) = try await session.download(for: request(path, method: "GET"))
+        do { try await downloadOnce(path, destination: destination, forceRefresh: false) }
+        catch APIError.status(401, _) where authorization != nil {
+            try await downloadOnce(path, destination: destination, forceRefresh: true)
+        }
+    }
+
+    private func downloadOnce(_ path: String, destination: URL, forceRefresh: Bool) async throws {
+        let request = try await request(path, method: "GET", forceRefresh: forceRefresh)
+        let (temporary, response) = try await session.download(for: request)
         try check(response, bytes: Data())
         let manager = FileManager.default
         try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -91,10 +134,11 @@ public nonisolated final class APIClient: Sendable {
         #endif
     }
 
-    private func request(_ path: String, method: String) -> URLRequest {
+    private func request(_ path: String, method: String, forceRefresh: Bool) async throws -> URLRequest {
         var request = URLRequest(url: server.appendingPathComponent("api/v1").appendingPathComponent(path))
         request.httpMethod = method
-        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let credential = try await authorization?(forceRefresh) ?? token
+        if let token = credential { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         return request
     }
 

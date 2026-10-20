@@ -23,7 +23,7 @@ struct HealthReportView: View {
                 Section(metric["record_type"].stringValue.replacingOccurrences(of: "_", with: " ")) {
                     if metric["sources"].arrayValue.isEmpty { Text(metric["state"].stringValue == "query_limit_exceeded" ? "Too many records. Select a shorter period." : "No observations") }
                     ForEach(Array(metric["sources"].arrayValue.enumerated()), id: \.offset) { _, source in
-                        Text(source["source"].stringValue).font(.headline)
+                        Text(model.sourceLabel(source["source"].stringValue)).font(.headline)
                         Text("Daily median: \(source["daily_median"].numberValue?.formatted() ?? "Unknown") \(source["days"].arrayValue.first?["unit"].stringValue ?? "")")
                         Text("\(Int(source["observed_days"].numberValue ?? 0)) observed days · \(Int(source["missing_days"].numberValue ?? 0)) missing days").font(.caption)
                         Chart {
@@ -51,11 +51,11 @@ struct HealthReportView: View {
         }.navigationTitle("Health report")
     }
     private var readableReport: String {
-        var lines = ["Helpyourself health report", "\(result["start_date"].stringValue) to \(result["end_date"].stringValue) (\(result["timezone"].stringValue))", "Archive revision: \(result["data_revision"].numberValue?.formatted() ?? "Unknown")"]
+        var lines = ["Long Live Health health report", "\(result["start_date"].stringValue) to \(result["end_date"].stringValue) (\(result["timezone"].stringValue))", "Archive revision: \(result["data_revision"].numberValue?.formatted() ?? "Unknown")"]
         for metric in result["metrics"].arrayValue {
             lines.append("\n" + metric["record_type"].stringValue)
             for source in metric["sources"].arrayValue {
-                lines.append("Source: " + source["source"].stringValue)
+                lines.append("Source: " + model.sourceLabel(source["source"].stringValue))
                 for day in source["days"].arrayValue { lines.append("\(day["date"].stringValue): \(day["value"].numberValue?.formatted() ?? "Unknown") \(day["unit"].stringValue)") }
             }
         }

@@ -18,5 +18,5 @@ node --test "$PROJECT_ROOT/tests/frontend/"*.mjs
 node --check "$PROJECT_ROOT/src/frontend/app.mjs"
 node --check "$PROJECT_ROOT/src/frontend/presentation.mjs"
 cd "$PROJECT_ROOT/docker"
-docker build --file backend_api.Dockerfile --tag "helpyourself-backend-api:$IMAGE_TAG" ..
-exec docker build --file backend_ocr.Dockerfile --tag "helpyourself-backend-ocr:$IMAGE_TAG" ..
+docker build --file backend_api.Dockerfile --tag "longlivehealth-backend-api:$IMAGE_TAG" ..
+exec docker build --file backend_ocr.Dockerfile --tag "longlivehealth-backend-ocr:$IMAGE_TAG" ..

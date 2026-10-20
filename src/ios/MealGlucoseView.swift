@@ -17,7 +17,7 @@ struct MealGlucoseView: View {
                 if let failure { Text(failure).foregroundStyle(.secondary) }
             }
             ForEach(Array(result["series"]["sources"].arrayValue.enumerated()), id: \.offset) { _, source in
-                Section(source["source"].stringValue) {
+                Section(model.sourceLabel(source["source"].stringValue)) {
                     Chart {
                         ForEach(Array(source["points"].arrayValue.enumerated()), id: \.offset) { _, point in
                             if let at = point["at"].numberValue, let value = point["value"].numberValue {
@@ -46,7 +46,7 @@ struct MealGlucoseView: View {
                 NavigationLink("Correct recorded events", destination: DailyLogsView(model: model))
             }
             Section("Interpretation") { ForEach(result["notes"].arrayValue.map(\.stringValue), id: \.self) { Text($0).font(.caption) } }
-        }.navigationTitle("Meals and glucose").task(id: date) { await load() }
+        }.navigationTitle("Meals and glucose").initialTask(id: date) { await load() }
     }
     private func load() async {
         guard let client = model.client, let token = model.session?.token else { return }

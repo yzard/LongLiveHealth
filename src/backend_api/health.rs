@@ -5,7 +5,7 @@ use crate::{
 };
 use chrono::{NaiveDate, TimeZone, Utc};
 use chrono_tz::Tz;
-use futures_util::TryStreamExt;
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::Row;
@@ -139,8 +139,61 @@ impl Database {
         user_id: &str,
         request: crate::health_batch::PreparedBatch,
     ) -> Result<Value, AppError> {
+        let started = std::time::Instant::now();
         let batch_digest = &request.digest;
+        // Authenticate and reject/replay completed batches without writing temporary files.
+        let _: String = sqlx::query_scalar(queries::CONNECTION)
+            .bind(user_id)
+            .bind(&request.connection_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        let existing: Option<String> = sqlx::query_scalar(queries::SYNC_BATCH)
+            .bind(user_id)
+            .bind(&request.connection_id)
+            .bind(&request.batch_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        if let Some(existing) = existing {
+            if existing != *batch_digest {
+                return Err(AppError::Conflict("Batch ID reused with different content"));
+            }
+            let total: i64 = sqlx::query_scalar(queries::HEALTH_RECORD_TOTAL)
+                .bind(user_id)
+                .fetch_one(&self.pool)
+                .await?;
+            return Ok(json!({"batch_id":request.batch_id,"replayed":true,"total_records":total}));
+        }
+        // Bound concurrent file flushes and drain the stream even on an I/O failure.
+        // No SQLite write transaction is held during this expensive phase.
+        let staged = futures_util::stream::iter(
+            request
+                .records
+                .iter()
+                .map(|record| async move {
+                    if record.deleted {
+                        return Ok(None);
+                    }
+                    crate::raw::stage(
+                        &self.temporary_files,
+                        &self.data_dir,
+                        record.raw_json.as_bytes(),
+                    )
+                    .await
+                    .map(Some)
+                })
+                .collect::<Vec<_>>(),
+        )
+        .buffered(8)
+        .collect::<Vec<Result<_, AppError>>>()
+        .await;
+        let staged = staged.into_iter().collect::<Result<Vec<_>, _>>()?;
+        let staging_ms = started.elapsed().as_millis() as u64;
+        let waiting = std::time::Instant::now();
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let lock_wait_ms = waiting.elapsed().as_millis() as u64;
+        let locked = std::time::Instant::now();
+        let mut published_paths = Vec::new();
         let platform: String = sqlx::query_scalar(queries::CONNECTION)
             .bind(user_id)
             .bind(&request.connection_id)
@@ -157,10 +210,51 @@ impl Database {
             if existing != *batch_digest {
                 return Err(AppError::Conflict("Batch ID reused with different content"));
             }
-            return Ok(json!({"batch_id":request.batch_id,"replayed":true}));
+            let total: i64 = sqlx::query_scalar(queries::HEALTH_RECORD_TOTAL)
+                .bind(user_id)
+                .fetch_one(&mut *transaction)
+                .await?;
+            return Ok(json!({"batch_id":request.batch_id,"replayed":true,"total_records":total}));
         }
+        // Append-only batches use one indexed SQL read instead of two round trips per
+        // record. Mixed deletion batches retain sequential tombstone semantics.
+        let mut current =
+            if platform != "manual" && request.records.iter().all(|record| !record.deleted) {
+                let keys = request
+                    .records
+                    .iter()
+                    .map(|record| {
+                        (
+                            &record.source_id,
+                            &record.record_id,
+                            record.payload_json.len(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let rows = sqlx::query(queries::HEALTH_BATCH_CURRENT)
+                    .bind(user_id)
+                    .bind(&platform)
+                    .bind(serde_json::to_string(&keys).map_err(|_| AppError::Internal)?)
+                    .fetch_all(&mut *transaction)
+                    .await?;
+                Some(
+                    rows.into_iter()
+                        .map(|row| {
+                            (
+                                (
+                                    row.get::<String, _>("input_source"),
+                                    row.get::<String, _>("input_id"),
+                                ),
+                                row,
+                            )
+                        })
+                        .collect::<BTreeMap<_, _>>(),
+                )
+            } else {
+                None
+            };
         let mut changed = false;
-        for record in &request.records {
+        for (record, staged) in request.records.iter().zip(&staged) {
             if platform == "manual" {
                 let previous = sqlx::query(queries::HEALTH_RECORD)
                     .bind(user_id)
@@ -197,14 +291,21 @@ impl Database {
                     _ => {}
                 }
             }
+            let snapshot = current.as_mut().and_then(|rows| {
+                rows.remove(&(record.source_id.clone(), record.record_id.clone()))
+            });
             if !record.deleted {
-                let deleted: i64 = sqlx::query_scalar(queries::HEALTH_TOMBSTONE)
-                    .bind(user_id)
-                    .bind(&platform)
-                    .bind(&record.record_id)
-                    .bind(&record.source_id)
-                    .fetch_one(&mut *transaction)
-                    .await?;
+                let deleted: i64 = if let Some(row) = &snapshot {
+                    row.get("tombstoned")
+                } else {
+                    sqlx::query_scalar(queries::HEALTH_TOMBSTONE)
+                        .bind(user_id)
+                        .bind(&platform)
+                        .bind(&record.record_id)
+                        .bind(&record.source_id)
+                        .fetch_one(&mut *transaction)
+                        .await?
+                };
                 if deleted > 0 {
                     continue;
                 }
@@ -242,13 +343,17 @@ impl Database {
                     .await?;
                 changed = true;
             }
-            let stored = sqlx::query(queries::HEALTH_RECORD)
-                .bind(user_id)
-                .bind(&platform)
-                .bind(&record.source_id)
-                .bind(&record.record_id)
-                .fetch_optional(&mut *transaction)
-                .await?;
+            let stored = if current.is_some() {
+                snapshot.filter(|row| row.get::<Option<i64>, _>("version").is_some())
+            } else {
+                sqlx::query(queries::HEALTH_RECORD)
+                    .bind(user_id)
+                    .bind(&platform)
+                    .bind(&record.source_id)
+                    .bind(&record.record_id)
+                    .fetch_optional(&mut *transaction)
+                    .await?
+            };
             let payload = &record.payload_json;
             if let Some(stored) = stored {
                 if stored.get::<i64, _>("deleted") == 1 {
@@ -259,12 +364,40 @@ impl Database {
                     continue;
                 }
                 if !record.deleted && record.version == version {
-                    if stored.get::<String, _>("payload_json") != *payload {
-                        return Err(AppError::Conflict(
-                            "Health record changed without a new source version",
-                        ));
+                    let mut previous = stored.get::<Option<String>, _>("payload_json");
+                    if previous
+                        .as_deref()
+                        .map(crate::health_batch::project_json)
+                        .transpose()?
+                        .as_deref()
+                        == Some(payload.as_str())
+                    {
+                        continue;
                     }
-                    continue;
+                    // The bulk lookup omits differently-sized payloads. Fetch only this
+                    // exceptional same-version candidate for a strict structured comparison.
+                    if previous.is_none() {
+                        let row = sqlx::query(queries::HEALTH_RECORD)
+                            .bind(user_id)
+                            .bind(&platform)
+                            .bind(&record.source_id)
+                            .bind(&record.record_id)
+                            .fetch_one(&mut *transaction)
+                            .await?;
+                        previous = Some(row.get::<String, _>("payload_json"));
+                    }
+                    if previous
+                        .as_deref()
+                        .map(crate::health_batch::project_json)
+                        .transpose()?
+                        .as_deref()
+                        == Some(payload.as_str())
+                    {
+                        continue;
+                    }
+                    return Err(AppError::Conflict(
+                        "Health record changed without a new source version",
+                    ));
                 }
             }
             sqlx::query(queries::UPSERT_HEALTH)
@@ -281,7 +414,7 @@ impl Database {
                 .execute(&mut *transaction)
                 .await?;
             if record.deleted {
-                sqlx::query(queries::PURGE_HEALTH_REVISIONS)
+                sqlx::query(queries::PURGE_HEALTH_ORIGINALS)
                     .bind(user_id)
                     .bind(&platform)
                     .bind(&record.source_id)
@@ -290,23 +423,31 @@ impl Database {
                     .await?;
             } else {
                 let revision_id = uuid::Uuid::new_v4().to_string();
-                let raw_path = crate::raw::health_path(user_id, &platform, &revision_id)?;
-                crate::raw::archive(
+                let raw_path =
+                    crate::raw::health_path(user_id, &platform, &record.source_id, &revision_id)?;
+                crate::raw::publish(
                     &self.data_dir,
-                    &self.temporary_files,
                     &raw_path,
-                    payload.as_bytes(),
+                    staged.as_ref().ok_or(AppError::Internal)?,
                 )
                 .await?;
-                sqlx::query(queries::INSERT_HEALTH_REVISION)
+                published_paths.push(raw_path.clone());
+                sqlx::query(queries::INSERT_HEALTH_ORIGINAL)
                     .bind(user_id)
                     .bind(&platform)
                     .bind(&record.source_id)
                     .bind(&record.record_id)
-                    .bind(revision_id)
+                    .bind(&revision_id)
                     .bind(raw_path)
-                    .bind(payload)
                     .bind(now()?)
+                    .execute(&mut *transaction)
+                    .await?;
+                sqlx::query(queries::SET_HEALTH_ORIGINAL)
+                    .bind(&revision_id)
+                    .bind(user_id)
+                    .bind(&platform)
+                    .bind(&record.source_id)
+                    .bind(&record.record_id)
                     .execute(&mut *transaction)
                     .await?;
             }
@@ -352,25 +493,69 @@ impl Database {
                 .bind(user_id)
                 .execute(&mut *transaction)
                 .await?;
-            sqlx::query(queries::INVALIDATE_EXPORTS)
-                .bind(user_id)
-                .execute(&mut *transaction)
-                .await?;
         }
+        crate::raw::sync_archive_directories(
+            &self.data_dir,
+            &published_paths
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+        )
+        .await?;
+        let total: i64 = sqlx::query_scalar(queries::HEALTH_RECORD_TOTAL)
+            .bind(user_id)
+            .fetch_one(&mut *transaction)
+            .await?;
         transaction.commit().await?;
-        Ok(json!({"batch_id":request.batch_id,"replayed":false}))
+        tracing::info!(
+            records = request.records.len(),
+            originals = published_paths.len(),
+            staging_ms,
+            lock_wait_ms,
+            write_lock_ms = locked.elapsed().as_millis() as u64,
+            total_ms = started.elapsed().as_millis() as u64,
+            "health sync batch committed"
+        );
+        Ok(json!({"batch_id":request.batch_id,"replayed":false,"total_records":total}))
     }
     pub async fn health_coverage(&self, user_id: &str) -> Result<Value, AppError> {
+        let total: i64 = sqlx::query_scalar(queries::HEALTH_RECORD_TOTAL)
+            .bind(user_id)
+            .fetch_one(&self.pool)
+            .await?;
         let rows = sqlx::query(queries::COVERAGE)
             .bind(user_id)
             .fetch_all(&self.pool)
             .await?;
         Ok(
-            json!({"coverage":rows.into_iter().map(|row|json!({"connection_id":row.get::<String,_>("connection_id"),"platform":row.get::<String,_>("platform"),
+            json!({"total_records":total,"coverage":rows.into_iter().map(|row|json!({"connection_id":row.get::<String,_>("connection_id"),"platform":row.get::<String,_>("platform"),
             "installation_id":row.get::<String,_>("installation_id"),"record_type":row.get::<Option<String>,_>("record_type"),"status":row.get::<Option<String>,_>("status"),
             "last_sync_at":row.get::<Option<i64>,_>("last_sync_at"),"first_success_at":row.get::<Option<i64>,_>("first_success_at"),"last_success_at":row.get::<Option<i64>,_>("last_success_at"),"visible_start_at":row.get::<Option<i64>,_>("visible_start_at"),"visible_end_at":row.get::<Option<i64>,_>("visible_end_at"),"visible_range_scope":"platform_and_type"})).collect::<Vec<_>>(),"read_permission":"unknown"}),
         )
     }
+    pub(crate) async fn hydrate_health_record(
+        &self,
+        user: &str,
+        row: &mut StoredHealthRecord,
+    ) -> Result<(), AppError> {
+        let path: String = sqlx::query_scalar(queries::CURRENT_HEALTH_ORIGINAL)
+            .bind(user)
+            .bind(&row.platform)
+            .bind(&row.source_id)
+            .bind(&row.record_id)
+            .fetch_one(&self.pool)
+            .await?;
+        if !crate::raw::valid_relative_path(&path) {
+            return Err(AppError::Internal);
+        }
+        let path = self.data_dir.join(path);
+        if tokio::fs::metadata(&path).await?.len() > crate::health_batch::MAX_BATCH_BYTES as u64 {
+            return Err(AppError::TooLarge);
+        }
+        row.payload_json = tokio::fs::read_to_string(path).await?;
+        Ok(())
+    }
+
     pub async fn health_records(
         &self,
         user_id: &str,
@@ -380,26 +565,40 @@ impl Database {
         if !(1..=500).contains(&limit) || offset < 0 {
             return Err(AppError::Invalid("Invalid health page"));
         }
-        let mut rows = sqlx::query_as::<_, StoredHealthRecord>(queries::HEALTH_LIST)
+        let rows = sqlx::query(queries::HEALTH_LIST)
             .bind(user_id)
             .bind(limit)
             .bind(offset)
-            .fetch(&self.pool);
+            .fetch_all(&self.pool)
+            .await?;
         let mut records = Vec::new();
         let mut byte_count = 0;
-        while let Some(record) = rows.try_next().await? {
-            byte_count += record.payload_json.len();
+        for row in rows {
+            let path: String = row.try_get("raw_path")?;
+            if !crate::raw::valid_relative_path(&path) {
+                return Err(AppError::Internal);
+            }
+            let file = tokio::fs::File::open(self.data_dir.join(path)).await?;
+            use tokio::io::AsyncReadExt;
+            let remaining = crate::health_batch::MAX_BATCH_BYTES - byte_count;
+            let mut bytes = Vec::new();
+            file.take(remaining as u64 + 1)
+                .read_to_end(&mut bytes)
+                .await?;
+            byte_count += bytes.len();
             if byte_count > crate::health_batch::MAX_BATCH_BYTES {
                 return Err(AppError::TooLarge);
             }
-            records.push(record);
+            records.push((row.get::<String, _>("platform"), bytes));
         }
-        self.cpu.run(move || {
-            let records = records.into_iter().map(|record| {
-                Ok(json!({"platform":record.platform,"record":serde_json::from_str::<Value>(&record.payload_json)?}))
+        self.cpu
+            .run(move || {
+                let records = records.into_iter().map(|(platform, bytes)| {
+                Ok(json!({"platform":platform,"record":serde_json::from_slice::<Value>(&bytes)?}))
             }).collect::<Result<Vec<_>, AppError>>()?;
-            Ok(json!({"records": records}))
-        }).await
+                Ok(json!({"records": records}))
+            })
+            .await
     }
     pub async fn health_raw_files(
         &self,

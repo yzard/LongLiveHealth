@@ -1,8 +1,8 @@
-use helpyourself::{config::Config, files::inspect_document};
+use longlivehealth::{config::Config, files::inspect_document};
 
 #[test]
 fn detects_real_content_and_rejects_bad_or_oversized_images() {
-    let configuration: Config = toml::from_str(helpyourself::config::TEMPLATE).unwrap();
+    let configuration: Config = toml::from_str(longlivehealth::config::TEMPLATE).unwrap();
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("misleading.pdf");
     std::fs::write(&path, crate::png()).unwrap();
@@ -21,7 +21,7 @@ fn detects_real_content_and_rejects_bad_or_oversized_images() {
 
 #[test]
 fn parses_pdf_pages_and_enforces_page_limit() {
-    let configuration: Config = toml::from_str(helpyourself::config::TEMPLATE).unwrap();
+    let configuration: Config = toml::from_str(longlivehealth::config::TEMPLATE).unwrap();
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("report.pdf");
     std::fs::write(&path, synthetic_pdf()).unwrap();
@@ -61,7 +61,7 @@ async fn heic_original_is_preserved_and_jpeg_is_only_a_processing_copy() {
     let (_directory, state) = crate::fixture().await;
     let user = crate::add_user(&state, "alice").await;
     let token = crate::token(&state, "alice").await;
-    let app = helpyourself::app::create_application(state.clone());
+    let app = longlivehealth::app::create_application(state.clone());
     let mut jpeg = std::io::Cursor::new(Vec::new());
     image::DynamicImage::new_rgb8(2, 2)
         .write_to(&mut jpeg, image::ImageFormat::Jpeg)
@@ -121,7 +121,7 @@ async fn heic_original_is_preserved_and_jpeg_is_only_a_processing_copy() {
         .delete_report(&user.user_id, file_id, 1)
         .await
         .unwrap();
-    helpyourself::maintenance::cleanup(&state).await.unwrap();
+    longlivehealth::maintenance::cleanup(&state).await.unwrap();
     assert!(
         !state
             .config

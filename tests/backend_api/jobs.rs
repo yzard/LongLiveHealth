@@ -1,5 +1,5 @@
 use crate::{add_user, fixture, png, token, upload};
-use helpyourself::{app::create_application, error::AppError};
+use longlivehealth::{app::create_application, error::AppError};
 
 #[tokio::test]
 async fn jobs_are_queued_on_upload_and_isolated_without_retrying_queued_work() {

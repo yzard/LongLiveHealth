@@ -4,7 +4,7 @@
 
 历史记录：文档输入与单位差距已按 [补齐计划](../implementation-document-units.md)实施，当前结果及仍未解决的 skills 事项见 [补齐验收](2026-10-01-document-unit-completion.md)；以下保留发现时的证据。
 
-日期：2026-10-01。范围为整个 helpyourself 仓库；当前变更是用户明确指定的 backend_api / backend_ocr 拆分及 Qwen3.8 + NInfer 推理，不审查或修改其他项目。
+日期：2026-10-01。范围为整个 Long Live Health 仓库；当前变更是用户明确指定的 backend_api / backend_ocr 拆分及 Qwen3.8 + NInfer 推理，不审查或修改其他项目。
 
 结论：两个独立服务和真实 GPU 合成数据闭环已实现。主档案、来源 raw 目录和手机 API 契约保留；旧通用视觉 OCR 与 document_parser 调用/config 已移除。全部适用 skills 尚不能宣称完全符合：先前发现的 API 阻塞工作隔离 F01/F02 仍存在，iOS 原生 SDK/设备证据仍缺。
 
@@ -21,7 +21,7 @@
 
 ## 适用 skills
 
-复核了这次变更的调用者、配置、构建入口、文档和测试；未变更的 iOS/健康数据规则沿用 [原始档案审查](2026-10-01-raw-archive-and-skills-audit.md) 的证据及未决发现。同名 skill 的项目专属 Receipt Master 条款不应用于 helpyourself，用户的显式 TOML、当前 schema、不做 migration、Caddy HTTPS 和持久会话契约优先。
+复核了这次变更的调用者、配置、构建入口、文档和测试；未变更的 iOS/健康数据规则沿用 [原始档案审查](2026-10-01-raw-archive-and-skills-audit.md) 的证据及未决发现。同名 skill 的项目专属 Receipt Master 条款不应用于 Long Live Health，用户的显式 TOML、当前 schema、不做 migration、Caddy HTTPS 和持久会话契约优先。
 
 | Skill | 证据与结论 |
 | --- | --- |
@@ -48,7 +48,7 @@
 | Rust API | 50 项测试、fmt 和严格 Clippy 通过，含独立 OCR 请求、完整成功/失败回复归档、跨用户/晚到删除、PDF逐页提取、复核和导出。 |
 | Python OCR | 8 项测试通过：内联图片与模型配置所有权、失败完整回复/截断/猜指标/错页、鉴权/请求限额/脱敏、配置、真实子进程取消/超时/回收、空闲卸载及队列上限。 |
 | 开发脚本 | 8 项网络/配置密钥/前台入口/iOS 构建失败流程检查通过。已有密钥/用户配置不覆盖。 |
-| 双 Docker 镜像 | `helpyourself-backend-api:local` 与 `helpyourself-backend-ocr:local` 构建通过，镜像构建内部执行对应检查。 |
+| 双 Docker 镜像 | `longlivehealth-backend-api:local` 与 `longlivehealth-backend-ocr:local` 构建通过，镜像构建内部执行对应检查。 |
 | RTX 5090 / 真实模型 | 隔离合成 1400×600 PNG 的 LDL 行识别为 120 mg/dL；真实 NInfer finish_reason=stop、完整回复归档、候选 pending、无自动 metric 映射。 |
 | 完整部署 | 可信合成 CA HTTPS、原件逐字节下载/ZIP、人工确认与趋势、API 重启、停服 data 复制恢复、报告/账户删除通过。OCR 启动未加载，测试空闲后卸载，OCR 停止后 API 仍响应。临时容器/卷已清理。 |
 | iOS / 真实报告 | 本轮未改 Swift，也未运行 Xcode/iPhone/Watch 或用户真实报告；模型语义/漏项准确率仍待真实样本验收。 |

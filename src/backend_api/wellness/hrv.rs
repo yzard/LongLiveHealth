@@ -115,6 +115,14 @@ impl Database {
             rows.push(row);
         }
         drop(stream);
+        let mut original_bytes = 0usize;
+        for row in &mut rows {
+            self.hydrate_health_record(user, row).await?;
+            original_bytes = original_bytes.saturating_add(row.payload_json.len());
+            if original_bytes > 16 * 1024 * 1024 {
+                return Err(AppError::TooLarge);
+            }
+        }
         let result = self.cpu.run(move || summarize(rows, zone)).await?;
         if self.data_revision(user).await? != revision {
             return Err(AppError::Conflict("Archive changed; refresh HRV"));

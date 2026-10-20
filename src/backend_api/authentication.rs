@@ -40,18 +40,30 @@ pub fn normalize_username(username: &str) -> Result<String, AppError> {
     Ok(username)
 }
 
-pub async fn hash_password(password: String) -> Result<String, AppError> {
+pub(crate) fn validated_password_hash(password: &str) -> Result<String, AppError> {
     if !(12..=1024).contains(&password.len()) {
         return Err(AppError::Invalid("Password must be 12-1024 bytes"));
     }
-    tokio::task::spawn_blocking(move || {
-        Argon2::default()
-            .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
-            .map(|hashed| hashed.to_string())
-            .map_err(|_| AppError::Internal)
-    })
-    .await
-    .map_err(|_| AppError::Internal)?
+    encode_password(password)
+}
+
+fn encode_password(password: &str) -> Result<String, AppError> {
+    Argon2::default()
+        .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
+        .map(|hashed| hashed.to_string())
+        .map_err(|_| AppError::Internal)
+}
+
+pub async fn hash_password(password: String) -> Result<String, AppError> {
+    tokio::task::spawn_blocking(move || validated_password_hash(&password))
+        .await
+        .map_err(|_| AppError::Internal)?
+}
+
+async fn hash_password_value(password: String) -> Result<String, AppError> {
+    tokio::task::spawn_blocking(move || encode_password(&password))
+        .await
+        .map_err(|_| AppError::Internal)?
 }
 
 pub async fn login(state: &AppState, request: LoginRequest) -> Result<LoginResponse, AppError> {
@@ -96,11 +108,15 @@ pub async fn login(state: &AppState, request: LoginRequest) -> Result<LoginRespo
     OsRng.fill_bytes(&mut random);
     let token = hex::encode(random);
     let expires_at = current_time + state.config.security.session_ttl_seconds;
+    OsRng.fill_bytes(&mut random);
+    let refresh_token = hex::encode(random);
+    let refresh_expires_at = current_time + 90 * 86400;
     state
         .database
         .create_session(
             &digest(token.as_bytes()),
             expires_at,
+            Some((&digest(refresh_token.as_bytes()), refresh_expires_at)),
             &credentials,
             current_time,
         )
@@ -108,8 +124,13 @@ pub async fn login(state: &AppState, request: LoginRequest) -> Result<LoginRespo
     Ok(LoginResponse {
         token,
         expires_at,
+        refresh_token,
+        refresh_expires_at,
+        refresh_after: current_time + (state.config.security.session_ttl_seconds / 2).min(1800),
         user: User {
             user_id: credentials.user_id,
+            is_admin: credentials.username == "admin",
+            must_change_password: credentials.must_change_password,
             username: credentials.username,
         },
     })
@@ -137,10 +158,68 @@ impl FromRequestParts<AppState> for CurrentUser {
         }
         let token_hash = digest(token.as_bytes());
         let user = state.database.session_user(&token_hash, now()?).await?;
+        if user.must_change_password
+            && !matches!(
+                parts.uri.path(),
+                "/api/v1/user/password/change" | "/api/v1/user/get" | "/api/v1/session/logout"
+            )
+        {
+            return Err(AppError::PasswordChangeRequired);
+        }
         Ok(Self { user, token_hash })
     }
 }
 
 pub fn password_semaphore(maximum: usize) -> Arc<Semaphore> {
     Arc::new(Semaphore::new(maximum))
+}
+
+/// Called once at service startup, before accepting connections.
+pub async fn initialize_admin(
+    database: &crate::database::Database,
+    reset: bool,
+) -> Result<(), AppError> {
+    let password_hash = hash_password_value("admin".into()).await?;
+    database
+        .initialize_admin(&password_hash, reset, now()?)
+        .await
+}
+
+/// The successor secret is persisted by the client before sending. A lost response
+/// can be retried with the same pair without losing the session or storing raw tokens.
+pub async fn refresh(
+    state: &AppState,
+    request: crate::models::RefreshRequest,
+) -> Result<LoginResponse, AppError> {
+    for secret in [&request.refresh_token, &request.next_refresh_token] {
+        if secret.len() != 64 || !secret.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(AppError::Unauthorized);
+        }
+    }
+    if request.refresh_token == request.next_refresh_token {
+        return Err(AppError::Unauthorized);
+    }
+    let time = now()?;
+    let token = digest(format!("helpyourself-access-v1:{}", request.next_refresh_token).as_bytes());
+    let expires_at = time + state.config.security.session_ttl_seconds.min(3600);
+    let refresh_expires_at = time + 90 * 86400;
+    let user = state
+        .database
+        .rotate_session(
+            &digest(request.refresh_token.as_bytes()),
+            &digest(request.next_refresh_token.as_bytes()),
+            &digest(token.as_bytes()),
+            expires_at,
+            refresh_expires_at,
+            time,
+        )
+        .await?;
+    Ok(LoginResponse {
+        token,
+        expires_at,
+        refresh_token: request.next_refresh_token,
+        refresh_expires_at,
+        refresh_after: time + (state.config.security.session_ttl_seconds / 2).min(1800),
+        user,
+    })
 }

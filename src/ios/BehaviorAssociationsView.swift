@@ -23,7 +23,7 @@ struct BehaviorAssociationsView: View {
                 Picker("Outcome", selection: $outcome) { ForEach(outcomes, id: \.self) { Text($0.replacingOccurrences(of: "_", with: " ")).tag($0) } }
                 Picker("One source", selection: $source) {
                     Text("Select a source").tag("")
-                    ForEach(choices, id: \.self) { Text($0).tag($0) }
+                    ForEach(choices, id: \.self) { Text(model.sourceLabel($0)).tag($0) }
                 }
                 DatePicker("Last completed date", selection: $endDate, in: ...Date(), displayedComponents: .date)
                 TextField("Behavior names, one per line (up to 8)", text: $behaviors, axis: .vertical).lineLimit(2...8)
@@ -36,7 +36,7 @@ struct BehaviorAssociationsView: View {
             }
             if result != .null {
                 Section("Analysis scope") {
-                    Text(result["parameters"]["source"].stringValue)
+                    Text(model.sourceLabel(result["parameters"]["source"].stringValue))
                     Text("End date: " + result["parameters"]["end_date"].stringValue)
                     Text("90 calendar days. HRV SDNN is not RMSSD. Sleep and workout durations use seconds.").font(.caption)
                 }
@@ -71,7 +71,7 @@ struct BehaviorAssociationsView: View {
                 }
             }
         }.navigationTitle("Behavior associations")
-            .task { await load() }
+            .initialTask { await load() }
             .onChange(of: outcome) { _, _ in source = choices.first ?? ""; acknowledged = false }
             .onChange(of: behaviors) { _, _ in acknowledged = false }
             .onChange(of: covariates) { _, _ in acknowledged = false }

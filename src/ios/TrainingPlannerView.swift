@@ -20,7 +20,7 @@ struct TrainingPlannerView: View {
                 if let failure { Text(failure).foregroundStyle(.secondary) }
             }
             if entries.isEmpty { Text("No entries in this view.").foregroundStyle(.secondary) }
-            ForEach(Array(entries.enumerated()), id: \.offset) { _, item in
+            ForEach(entries, id: \.identifier) { item in
                 Section {
                     let content = item["entry"]["content"]
                     Text(content["name"].stringValue.isEmpty ? (content["title"].stringValue.isEmpty ? content["activity"].stringValue : content["title"].stringValue) : content["name"].stringValue).font(.headline)
@@ -45,9 +45,10 @@ struct TrainingPlannerView: View {
                 }
             }
         }.navigationTitle("Training planner")
-            .task(id: kind + date.formatted(.iso8601)) { await load() }
+            .initialTask(id: kind + date.formatted(.iso8601)) { await load() }
             .refreshable { await load() }
-            .sheet(item: $editor, onDismiss: { Task { await load() } }) { selection in
+            .onChange(of: model.entryMutation) { _, change in if let change { entries = change.applying(to: entries) { kind == "calendar" ? (["planned_workout", "training", "training_day"].contains($0["entry"]["kind"].stringValue) && Calendar.current.isDate(Date(timeIntervalSince1970: $0["at"].numberValue ?? 0), inSameDayAs: date)) : $0["entry"]["kind"].stringValue == kind } } }
+            .sheet(item: $editor) { selection in
                 NavigationStack { LogEditor(model: model, existing: selection.existing, initialKind: selection.kind, initialValues: selection.values, initialDate: date) }
             }
     }
@@ -70,6 +71,5 @@ struct TrainingPlannerView: View {
             guard let client = model.client else { return }
             _ = try await model.request("wellness/entries/delete", body: .object(["record_id": item["record_id"], "version": .number((item["version"].numberValue ?? 0) + 1), "batch_id": .string(UUID().uuidString), "kind": item["entry"]["kind"]]))
         }
-        await load()
     }
 }

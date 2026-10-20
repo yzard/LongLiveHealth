@@ -26,7 +26,7 @@ struct FoodLookupView: View {
                     Toggle("I confirmed these values are per 100 grams", isOn: $massConfirmed)
                     Text("Do not use values per 100 milliliters without a known density conversion.").font(.caption)
                     if massConfirmed {
-                        NavigationLink("Correct fields and save food") { LogEditor(model: model, existing: nil, initialKind: "food", initialValues: values(), initialDate: Date()) }
+                        EditorLink("Correct fields and save food") { LogEditor(model: model, existing: nil, initialKind: "food", initialValues: values(), initialDate: Date()) }
                     }
                     Text(result["attribution"].stringValue).font(.caption)
                     Link("Open Food Facts database license", destination: URL(string: "https://world.openfoodfacts.org/terms-of-use")!)

@@ -6,19 +6,41 @@ import ImageIO
 
 struct ReportsView: View {
     var model: AppModel
+    @State private var sourceName = ""
+    @State private var namingSource = false
+    @State private var importAction: String?
+    @State private var pdfOnly = false
     @State private var importing = false
     @State private var scanning = false
     @State private var choosingPhoto = false
     @State private var photo: PhotosPickerItem?
     var body: some View {
         List {
+            Section {
+                Button {
+                    pdfOnly = true
+                    namingSource = true
+                } label: {
+                    Label("Import PDF", systemImage: "doc.badge.plus")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isBusy)
+                Text("Choose a report from Files, including On My iPhone or iCloud Drive.").font(.caption).foregroundStyle(.secondary)
+                if model.isBusy {
+                    ProgressView("Finishing the current operation…")
+                }
+            }
             if let refresh = model.lastRefresh { Section { Text("Last refreshed \(refresh.formatted())").font(.caption).foregroundStyle(.secondary) } }
             if !model.drafts.isEmpty {
+                Section {
+                    Text("Uploads can continue in the background. After upload, OCR runs on your server even when this app is closed.").font(.footnote).foregroundStyle(.secondary)
+                }
                 Section("Waiting to upload") {
                     ForEach(model.drafts) { draft in Label(draft.filename, systemImage: "icloud.and.arrow.up")
                         .swipeActions { Button("Discard", role: .destructive) { model.discardDraft(draft.id) }.disabled(model.isBusy) }
                     }
-                    Button("Retry uploads") { Task { await model.sendDrafts() } }.disabled(model.isBusy)
+                    Button("Retry uploads") { Task { await model.sendDrafts(automatic: false) } }.disabled(model.isBusy)
                 }
             }
             Section("Your reports") {
@@ -36,22 +58,43 @@ struct ReportsView: View {
                 }
             }
         }
-        .navigationTitle("Reports")
-        .refreshable { await model.refresh() }
+        .navigationTitle("Health Report")
+        .refreshable { await model.refresh(automatic: false) }
         .toolbar { ToolbarItem(placement: .primaryAction) {
-            Menu {
-                Button("Import PDF or image", systemImage: "folder") { importing = true }
-                Button("Choose photo", systemImage: "photo") { choosingPhoto = true }
-                if VNDocumentCameraViewController.isSupported { Button("Scan report", systemImage: "doc.viewfinder") { scanning = true } }
-            } label: { Image(systemName: "plus") }.disabled(model.isBusy)
+            Button("Import", systemImage: "square.and.arrow.down") { pdfOnly = false; namingSource = true }.disabled(model.isBusy)
         } }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.pdf, .image], allowsMultipleSelection: false) { result in
+        .sheet(isPresented: $namingSource, onDismiss: {
+            switch importAction {
+            case "file": importing = true
+            case "photo": choosingPhoto = true
+            case "scan": scanning = true
+            default: break
+            }
+            importAction = nil
+        }) {
+            NavigationStack {
+                Form {
+                    Section("Report source") {
+                        TextField("Clinic or laboratory", text: $sourceName)
+                        Text("For example, Function Health. This name identifies the source in your Overview charts.").font(.caption)
+                    }
+                    Section {
+                        Button(pdfOnly ? "Choose PDF from Files" : "Import PDF or image") { importAction = "file"; namingSource = false }
+                        Button("Choose photo") { importAction = "photo"; namingSource = false }
+                        if VNDocumentCameraViewController.isSupported {
+                            Button("Scan report") { importAction = "scan"; namingSource = false }
+                        }
+                    }.disabled(sourceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }.navigationTitle("Import Health Report").toolbar { Button("Cancel") { namingSource = false } }
+            }
+        }
+        .fileImporter(isPresented: $importing, allowedContentTypes: pdfOnly ? [.pdf] : [.pdf, .image], allowsMultipleSelection: false) { result in
             Task {
                 do {
                     guard let url = try result.get().first else { return }
                     let access = url.startAccessingSecurityScopedResource(); defer { if access { url.stopAccessingSecurityScopedResource() } }
                     let bytes = try Data(contentsOf: url)
-                    if url.pathExtension.lowercased() == "pdf" { await model.addDocument(bytes, filename: url.lastPathComponent, contentType: "application/pdf", originalBytes: nil, originalFilename: nil, originalContentType: nil) }
+                    if url.pathExtension.lowercased() == "pdf" { await model.addDocument(bytes, filename: url.lastPathComponent, contentType: "application/pdf", sourceName: sourceName, originalBytes: nil, originalFilename: nil, originalContentType: nil) }
                     else { await addPhoto(bytes, name: url.deletingPathExtension().lastPathComponent) }
                 } catch { model.errorMessage = error.localizedDescription }
             }
@@ -67,7 +110,7 @@ struct ReportsView: View {
             switch result {
             case .success(let images): Task {
                 for (index, bytes) in images.enumerated() {
-                    await model.addDocument(bytes, filename: "Scanned report page \(index + 1).png", contentType: "image/png", originalBytes: nil, originalFilename: nil, originalContentType: nil)
+                    await model.addDocument(bytes, filename: "Scanned report page \(index + 1).png", contentType: "image/png", sourceName: sourceName, originalBytes: nil, originalFilename: nil, originalContentType: nil)
                 }
             }
             case .failure(let error): model.errorMessage = error.localizedDescription
@@ -79,13 +122,13 @@ struct ReportsView: View {
               let type = UTType(identifier as String), let contentType = type.preferredMIMEType else { model.errorMessage = "Could not decode this image"; return }
         let filename = name + "." + (type.preferredFilenameExtension ?? "image")
         if type == .jpeg || type == .png {
-            await model.addDocument(bytes, filename: filename, contentType: contentType, originalBytes: nil, originalFilename: nil, originalContentType: nil)
+            await model.addDocument(bytes, filename: filename, contentType: contentType, sourceName: sourceName, originalBytes: nil, originalFilename: nil, originalContentType: nil)
             return
         }
         guard ["image/heic", "image/heif"].contains(contentType), let image = UIImage(data: bytes), let jpeg = image.jpegData(compressionQuality: 0.92) else {
             model.errorMessage = "Choose a JPEG, PNG, HEIC or HEIF photo"; return
         }
-        await model.addDocument(jpeg, filename: name + ".jpg", contentType: "image/jpeg", originalBytes: bytes, originalFilename: filename, originalContentType: contentType)
+        await model.addDocument(jpeg, filename: name + ".jpg", contentType: "image/jpeg", sourceName: sourceName, originalBytes: bytes, originalFilename: filename, originalContentType: contentType)
     }
 }
 
@@ -107,11 +150,12 @@ struct ReportView: View {
             Section {
                 Button("View original report", systemImage: "doc.text.magnifyingglass") { showSource(page: 1) }
                 Button("Add result manually", systemImage: "plus") { editor = EditTarget(observation: .null) }
+                if !document["context"]["source_name"].stringValue.isEmpty { Text(model.sourceLabel(SourceNames.reportKey(name: document["context"]["source_name"].stringValue, reportID: document["report_id"].stringValue), name: document["context"]["source_name"].stringValue)).font(.headline) }
                 Button("Collection context", systemImage: "note.text") { contextVisible = true }
                 Button("Duplicate or revised report", systemImage: "doc.on.doc") { relationsVisible = true }
                 if !document["duplicate_candidates"].arrayValue.isEmpty { Text("An identical file already exists. Review the duplicate relationship before confirming results.").font(.caption).foregroundStyle(.orange) }
                 if let job = model.jobs.first(where: { $0["file_id"].stringValue == reportID }), job["status"] == .string("failed") {
-                    Button("Retry failed extraction") { Task { await model.perform { if let client = model.client { _ = try await model.request("jobs/retry", body: .object(["job_id": job["job_id"]])) } }; await model.refresh(); await reload() } }
+                    Button("Retry failed extraction") { Task { await model.perform { if let client = model.client { _ = try await model.request("jobs/retry", body: .object(["job_id": job["job_id"]])) } }; await model.refresh(automatic: false); await reload() } }
                 }
                 if !document["relation"]["preferred_report_id"].stringValue.isEmpty {
                     Text("Excluded from trends: \(document["relation"]["kind"].stringValue). Original data is retained.").font(.caption)
@@ -132,7 +176,7 @@ struct ReportView: View {
                             }
                         }.buttonStyle(.plain)
                         Button("View source · page \(Int(observation["payload"]["source"]["page"].numberValue ?? 1))") { showSource(page: Int(observation["payload"]["source"]["page"].numberValue ?? 1)) }.font(.caption)
-                        NavigationLink("Revision history") { ObservationHistory(model: model, observationID: observation["observation_id"].stringValue) }.font(.caption)
+
                         if observation["status"] == .string("confirmed"), observation["payload"]["metric_id"] == .string("glucose") {
                             Button("Save to Apple Health") { healthWriter = EditTarget(observation: observation) }.font(.caption).disabled(model.isBusy)
                         }
@@ -168,7 +212,7 @@ struct ReportView: View {
         }
         .navigationTitle(document["report"]["original_name"].stringValue.isEmpty ? "Report" : document["report"]["original_name"].stringValue)
         .navigationBarTitleDisplayMode(.inline)
-        .task { await reload() }
+        .initialTask { await reload() }
         .refreshable { await reload() }
         .sheet(item: $preview) { DocumentPreview(location: $0) }
         .sheet(item: $editor) { target in
@@ -176,7 +220,7 @@ struct ReportView: View {
                 try await save(observations: [change], context: .null)
             }
         }
-        .sheet(item: $healthWriter, onDismiss: { Task { await reload() } }) { target in ReviewedGlucoseWriter(model: model, observation: target.observation) }
+        .sheet(item: $healthWriter) { target in ReviewedGlucoseWriter(model: model, observation: target.observation) }
         .sheet(isPresented: $contextVisible) { ContextEditor(context: document["context"]) { context in try await save(observations: [], context: context) } }
         .sheet(isPresented: $relationsVisible) {
             NavigationStack { List(model.reports.filter { $0["report_id"].stringValue != reportID }, id: \.identifier) { report in
@@ -192,8 +236,10 @@ struct ReportView: View {
                 guard let client = model.client else { return }
                 _ = try await model.request("reports/delete", body: .object(["report_id": .string(reportID), "expected_revision": document["report"]["revision"]]))
                 try model.archive?.remove(name: "report-\(reportID).json"); try model.archive?.remove(name: "source-\(reportID)")
+                model.reports.removeAll { $0["report_id"].stringValue == reportID }
+                model.jobs.removeAll { $0["file_id"].stringValue == reportID }
                 dismiss()
-            }; await model.refresh() } }
+            } } }
         } message: { Text("It disappears from your archive immediately. The server then removes stored files. Offline backups you made are separate.") }
     }
     private func reload() async { do { document = try await model.report(reportID) } catch { model.errorMessage = error.localizedDescription } }
@@ -201,7 +247,8 @@ struct ReportView: View {
         guard let client = model.client else { throw APIError.invalidResponse }
         document = try await model.request("reports/review", body: .object(["report_id": .string(reportID), "expected_revision": document["report"]["revision"], "context": context, "observations": .array(observations)]))
         try model.archive?.save(document, name: "report-\(reportID).json")
-        await model.refresh()
+        if let index = model.reports.firstIndex(where: { $0["report_id"].stringValue == reportID }) { model.reports[index] = document["report"] }
+        try model.archive?.save(model.reports, name: "reports.json")
     }
     private func showSource(page: Int) { Task { do { preview = DocumentLocation(url: try await model.source(reportID), page: page) } catch { model.errorMessage = error.localizedDescription } } }
     private func relate(to preferred: String, kind: String) async {
@@ -217,18 +264,6 @@ struct ReportView: View {
     }
 }
 
-private struct ObservationHistory: View {
-    var model: AppModel
-    let observationID: String
-    @State private var history: [JSONValue] = []
-    var body: some View {
-        List(Array(history.enumerated()), id: \.offset) { _, revision in
-            VStack(alignment: .leading) { Text("Revision \(Int(revision["revision"].numberValue ?? 0)) · \(revision["status"].stringValue)").font(.headline)
-                Text("\(revision["payload"]["raw_name"].stringValue): \(revision["payload"]["raw_result"].stringValue) \(revision["payload"]["raw_unit"].stringValue)") }
-        }.navigationTitle("Revision history").task { do { if let client = model.client { history = try await model.request("observations/history", body: .object(["observation_id": .string(observationID)]))["history"].arrayValue } } catch { model.errorMessage = error.localizedDescription } }
-    }
-}
-
 private struct ExtractionOutputView: View {
     var model: AppModel
     let reportID: String
@@ -239,7 +274,7 @@ private struct ExtractionOutputView: View {
             Text(output["model"].stringValue).font(.caption)
             Text(original["content"].stringValue).textSelection(.enabled)
             DisclosureGroup("Complete provider response") { Text(original["response_body"].stringValue).font(.caption.monospaced()).textSelection(.enabled) }
-        }.padding() }.navigationTitle("Original OCR output").task {
+        }.padding() }.navigationTitle("Original OCR output").initialTask {
             do {
                 guard let client = model.client else { return }
                 original = try await model.request("reports/extraction/get", body: .object(["report_id": .string(reportID), "run_id": output["run_id"], "page": output["page"], "stage": output["stage"]]))
@@ -286,7 +321,7 @@ private struct ReviewedGlucoseWriter: View {
                     }
                     catch { self.error = error.localizedDescription }
                 }
-                if saved { dismiss(); await model.synchronizeHealth(requestAccess: false) }
+                if saved { dismiss(); await model.synchronizeHealth(requestAccess: false, requestSelectedAccess: false, automatic: false) }
             } }.disabled(!verifiedTime || model.isBusy)
         }.navigationTitle("Save to Apple Health").toolbar { Button("Cancel") { dismiss() }.disabled(model.isBusy) } }
     }
@@ -309,7 +344,7 @@ private struct DocumentEvidenceView: View {
                 Text(evidence["text_layer"]["text"].stringValue).textSelection(.enabled)
                 Text("Positioned words: \(evidence["text_layer"]["words"].arrayValue.count)").font(.caption)
             }
-        }.navigationTitle("Document evidence").task {
+        }.navigationTitle("Document evidence").initialTask {
             do {
                 guard let client = model.client else { return }
                 evidence = try await model.request("reports/input/get", body: .object(["report_id": .string(reportID), "run_id": input["run_id"], "page": input["page"]]))

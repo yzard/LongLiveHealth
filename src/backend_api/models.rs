@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 pub struct User {
     pub user_id: String,
     pub username: String,
+    pub is_admin: bool,
+    pub must_change_password: bool,
 }
 
 #[derive(Deserialize)]
@@ -17,6 +19,9 @@ pub struct LoginRequest {
 pub struct LoginResponse {
     pub token: String,
     pub expires_at: i64,
+    pub refresh_token: String,
+    pub refresh_expires_at: i64,
+    pub refresh_after: i64,
     pub user: User,
 }
 
@@ -74,4 +79,17 @@ impl ListRequest {
         }
         Ok(())
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RefreshRequest {
+    pub refresh_token: String,
+    pub next_refresh_token: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RevokeSessionRequest {
+    pub refresh_token: String,
 }

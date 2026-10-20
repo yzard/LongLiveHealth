@@ -9,7 +9,7 @@ async fn actual_http_extraction_creates_pending_candidates_with_provenance() {
     config.ocr.url = address.trim_end_matches("/v1").into();
     state.config = std::sync::Arc::new(config);
     let report = archive(&state, "alice").await;
-    assert!(helpyourself::worker::extract_next(&state).await.unwrap());
+    assert!(longlivehealth::worker::extract_next(&state).await.unwrap());
     let rows = state
         .database
         .observations(&user.user_id, &report)
@@ -49,7 +49,7 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
     let mut config = (*state.config).clone();
     config.ocr.url = address.trim_end_matches("/v1").into();
     state.config = std::sync::Arc::new(config);
-    let app = helpyourself::app::create_application(state.clone());
+    let app = longlivehealth::app::create_application(state.clone());
     let token = crate::token(&state, "alice").await;
     let (status, result) = crate::upload(
         &app,
@@ -60,7 +60,7 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
     .await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(result["file"]["content_type"], "application/pdf");
-    helpyourself::worker::extract_next(&state).await.unwrap();
+    longlivehealth::worker::extract_next(&state).await.unwrap();
     let report = result["file"]["file_id"].as_str().unwrap();
     assert_eq!(
         state
@@ -78,7 +78,7 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
 
 #[tokio::test]
 async fn malformed_ocr_is_archived_before_validation_and_obeys_owner_and_deletion() {
-    use helpyourself::reports::ExtractionOutputRequest;
+    use longlivehealth::reports::ExtractionOutputRequest;
     use serde_json::json;
     let (_directory, mut state) = fixture().await;
     let user = add_user(&state, "alice").await;
@@ -99,7 +99,7 @@ async fn malformed_ocr_is_archived_before_validation_and_obeys_owner_and_deletio
     config.ocr.url = format!("http://{address}");
     state.config = std::sync::Arc::new(config);
     let report_id = archive(&state, "alice").await;
-    helpyourself::worker::extract_next(&state).await.unwrap();
+    longlivehealth::worker::extract_next(&state).await.unwrap();
     assert_eq!(
         state
             .database
@@ -182,7 +182,7 @@ async fn deleted_report_rejects_late_ocr_and_clears_temporary_images() {
     let report = archive(&state, "alice").await;
     let worker_state = state.clone();
     let worker =
-        tokio::spawn(async move { helpyourself::worker::extract_next(&worker_state).await });
+        tokio::spawn(async move { longlivehealth::worker::extract_next(&worker_state).await });
     tokio::time::timeout(std::time::Duration::from_secs(10), started.notified())
         .await
         .unwrap();
@@ -193,7 +193,7 @@ async fn deleted_report_rejects_late_ocr_and_clears_temporary_images() {
         .unwrap();
     released.notify_one();
     assert!(worker.await.unwrap().is_err());
-    helpyourself::maintenance::cleanup(&state).await.unwrap();
+    longlivehealth::maintenance::cleanup(&state).await.unwrap();
     assert!(
         state
             .database
@@ -246,7 +246,7 @@ async fn long_extraction_renews_lease_and_releases_renewal_on_completion() {
     let report_id = archive(&state, "alice").await;
     let worker_state = state.clone();
     let worker =
-        tokio::spawn(async move { helpyourself::worker::extract_next(&worker_state).await });
+        tokio::spawn(async move { longlivehealth::worker::extract_next(&worker_state).await });
     tokio::time::timeout(Duration::from_secs(10), started.notified())
         .await
         .unwrap();
@@ -346,7 +346,7 @@ async fn complete_ocr_with_review_warnings_succeeds_without_confirming_or_losing
     config.ocr.url = format!("http://{address}");
     state.config = std::sync::Arc::new(config);
     let report_id = archive(&state, "alice").await;
-    helpyourself::worker::extract_next(&state).await.unwrap();
+    longlivehealth::worker::extract_next(&state).await.unwrap();
     assert_eq!(
         state
             .database
@@ -399,7 +399,7 @@ async fn required_ocr_outage_fails_retryably_without_losing_the_original() {
         .unwrap();
     assert_eq!(job.status, "queued");
     assert!(job.error_code.is_none());
-    assert!(helpyourself::worker::extract_next(&state).await.unwrap());
+    assert!(longlivehealth::worker::extract_next(&state).await.unwrap());
     let failed = state
         .database
         .job(&user.user_id, &job.job_id)
@@ -418,7 +418,7 @@ async fn required_ocr_outage_fails_retryably_without_losing_the_original() {
             .unwrap(),
         crate::png()
     );
-    let app = helpyourself::app::create_application(state.clone());
+    let app = longlivehealth::app::create_application(state.clone());
     let (status, capabilities) =
         crate::request(&app, "/api/v1/server/status", None, serde_json::json!({})).await;
     assert_eq!(status, axum::http::StatusCode::OK);

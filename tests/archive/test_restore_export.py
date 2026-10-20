@@ -18,13 +18,17 @@ USER = '11111111-1111-4111-8111-111111111111'
 def archive_fixture(path, broken=False):
     connection = sqlite3.connect(':memory:')
     connection.executescript(restore_export.SCHEMA.read_text())
-    connection.execute("INSERT INTO users (user_id, username, password_hash, created_at) VALUES (?, 'test', '', 0)", (USER,))
+    connection.execute(
+        "INSERT INTO users (user_id, username, password_hash, created_at) VALUES (?, 'test', '', 0)", (USER,)
+    )
     columns = {}
     members = {}
     counts = {}
     for table in sorted(check_export.TABLES):
-        columns[table] = [dict(name=name, sqlite_type=kind, not_null=bool(required), primary_key_position=key)
-                          for name, kind, required, key in restore_export.queries.columns(connection, table)]
+        columns[table] = [
+            dict(name=name, sqlite_type=kind, not_null=bool(required), primary_key_position=key)
+            for name, kind, required, key in restore_export.queries.columns(connection, table)
+        ]
         rows = []
         if broken and table == 'sync_batches':
             rows = [dict(user_id=USER, connection_id='missing', batch_id='batch', digest='x', received_at=0)]
@@ -32,14 +36,25 @@ def archive_fixture(path, broken=False):
         counts[table] = len(rows)
     connection.close()
     members['observations.csv'] = b'observation_id,revision\n'
-    manifest = dict(format='helpyourself-export', version=1, database_schema_version=1,
-                    user_id=USER, created_at=0, data_revision=42,
-                    tables=[table + '.jsonl' for table in sorted(check_export.TABLES)],
-                    field_dictionary=json.loads((ROOT / "src/archive/field_dictionary.json").read_text()),
-                    table_columns=columns, table_counts=counts, raw_directory='raw/', csv='observations.csv',
-                    integrity=dict(algorithm='sha256', scope='all_members_except_manifest', authenticity='unsigned'),
-                    members={name: dict(sha256=hashlib.sha256(content).hexdigest(), byte_count=len(content))
-                             for name, content in members.items()})
+    manifest = dict(
+        format='helpyourself-export',
+        version=1,
+        database_schema_version=7,
+        user_id=USER,
+        created_at=0,
+        data_revision=42,
+        tables=[table + '.jsonl' for table in sorted(check_export.TABLES)],
+        field_dictionary=json.loads((ROOT / "src/archive/field_dictionary.json").read_text()),
+        table_columns=columns,
+        table_counts=counts,
+        raw_directory='raw/',
+        csv='observations.csv',
+        integrity=dict(algorithm='sha256', scope='all_members_except_manifest', authenticity='unsigned'),
+        members={
+            name: dict(sha256=hashlib.sha256(content).hexdigest(), byte_count=len(content))
+            for name, content in members.items()
+        },
+    )
     members['manifest.json'] = json.dumps(manifest).encode()
     with zipfile.ZipFile(path, 'w') as archive:
         for name, content in members.items():
@@ -54,9 +69,11 @@ class RestoreTests(unittest.TestCase):
             result = restore_export.restore(root / 'export.zip', root / 'restored', 'alice', 1048576)
             self.assertEqual(result['account_status'], 'disabled')
             connection = sqlite3.connect(root / 'restored/database.sqlite')
-            self.assertEqual(connection.execute('PRAGMA user_version').fetchone(), (1,))
-            self.assertEqual(connection.execute('SELECT user_id, is_active, data_revision, password_hash FROM users').fetchone(),
-                             (USER, 0, 42, ''))
+            self.assertEqual(connection.execute('PRAGMA user_version').fetchone(), (7,))
+            self.assertEqual(
+                connection.execute('SELECT user_id, is_active, data_revision, password_hash FROM users').fetchone(),
+                (USER, 0, 42, ''),
+            )
             connection.close()
 
     def test_existing_destination_is_never_changed(self):

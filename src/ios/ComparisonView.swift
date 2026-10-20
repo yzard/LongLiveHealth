@@ -32,7 +32,7 @@ struct ComparisonView: View {
                 }
                 Text("Days without observations stay missing. Missing points do not become zero or connect across gaps.").font(.caption)
             }
-        }.navigationTitle("Compare measurements").task(id: date) { await load() }
+        }.navigationTitle("Compare measurements").initialTask(id: date) { await load() }
     }
     private var dates: [String] {
         let formatter = dateFormatter
@@ -53,7 +53,7 @@ struct ComparisonView: View {
             Picker("Measurement", selection: metric) { ForEach(metrics, id: \.self) { Text($0.replacingOccurrences(of: "_", with: " ").capitalized).tag($0) } }
             Picker("Source", selection: source) {
                 Text("Choose a source").tag("")
-                ForEach(Array(sources(metric.wrappedValue).enumerated()), id: \.offset) { _, item in Text(item["source"].stringValue).tag(item["source"].stringValue) }
+                ForEach(Array(sources(metric.wrappedValue).enumerated()), id: \.offset) { _, item in Text(model.sourceLabel(item["source"].stringValue)).tag(item["source"].stringValue) }
             }
             let record = selected(metric.wrappedValue, source.wrappedValue)
             if record == .null { Text("Choose a source with observed values") }

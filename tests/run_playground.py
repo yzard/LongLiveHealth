@@ -35,7 +35,7 @@ class PlaygroundEntrypointTests(unittest.TestCase):
                     "services": {
                         "caddy": {
                             "ports": [{"target": 443, "published": "24443"}],
-                            "environment": {"HELPYOURSELF_DOMAIN": "localhost"},
+                            "environment": {"LONGLIVEHEALTH_DOMAIN": "localhost"},
                         }
                     }
                 }

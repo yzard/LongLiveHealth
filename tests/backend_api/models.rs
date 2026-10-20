@@ -1,4 +1,4 @@
-use helpyourself::models::{ListRequest, LoginRequest};
+use longlivehealth::models::{ListRequest, LoginRequest};
 
 #[test]
 fn clients_cannot_override_identity_and_list_limits_are_bounded() {

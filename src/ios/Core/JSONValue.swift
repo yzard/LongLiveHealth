@@ -37,6 +37,12 @@ public nonisolated enum JSONValue: Codable, Sendable, Equatable {
     public var objectValue: [String: JSONValue] { if case .object(let fields) = self { return fields }; return [:] }
     public var arrayValue: [JSONValue] { if case .array(let values) = self { return values }; return [] }
     public var stringValue: String { if case .string(let value) = self { return value }; return "" }
+    public var formattedJSON: String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(self) else { return "null" }
+        return String(decoding: data, as: UTF8.self)
+    }
     public var numberValue: Double? {
         if case .number(let value) = self { return value }
         if case .string(let value) = self { return Double(value) }
@@ -45,7 +51,7 @@ public nonisolated enum JSONValue: Codable, Sendable, Equatable {
     public var boolValue: Bool { if case .bool(let value) = self { return value }; return false }
     public static func optional(_ text: String) -> JSONValue { text.isEmpty ? .null : .string(text) }
     public var identifier: String {
-        for key in ["feedback_id", "observation_id", "run_id", "export_id", "job_id", "report_id", "metric_id"] {
+        for key in ["feedback_id", "observation_id", "run_id", "export_id", "job_id", "report_id", "metric_id", "record_id", "user_id"] {
             let candidate = self[key].stringValue
             if !candidate.isEmpty { return candidate }
         }
@@ -57,7 +63,13 @@ public nonisolated struct StoredSession: Codable, Sendable {
     public let server: URL
     public let userID: String
     public let username: String
-    public let token: String
+    public var token: String
+    public var refreshToken: String?
+    public var pendingRefreshToken: String?
+    public var refreshAfter: Double?
+    public var expiresAt: Double?
+    public var biometricUnlock: Bool?
+    public var mustChangePassword: Bool?
     public init(server: URL, userID: String, username: String, token: String) {
         self.server = server; self.userID = userID; self.username = username; self.token = token
     }
@@ -68,10 +80,11 @@ public nonisolated struct UploadDraft: Codable, Identifiable, Sendable {
     public let filename: String
     public let contentType: String
     public let createdAt: Date
+    public let sourceName: String?
     public let originalFilename: String?
     public let originalContentType: String?
-    public init(id: UUID, filename: String, contentType: String, createdAt: Date, originalFilename: String?, originalContentType: String?) {
-        self.id = id; self.filename = filename; self.contentType = contentType; self.createdAt = createdAt; self.originalFilename = originalFilename; self.originalContentType = originalContentType
+    public init(id: UUID, filename: String, contentType: String, createdAt: Date, sourceName: String?, originalFilename: String?, originalContentType: String?) {
+        self.id = id; self.filename = filename; self.contentType = contentType; self.createdAt = createdAt; self.sourceName = sourceName; self.originalFilename = originalFilename; self.originalContentType = originalContentType
     }
 }
 

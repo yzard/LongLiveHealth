@@ -64,7 +64,7 @@ private struct TrendSeries: View {
                     }
                 }
             }
-        }.task(id: metric) { await reload() }
+        }.initialTask(id: metric) { await reload() }
             .onChange(of: selectedTime) { _, time in
                 if let time, let point = result["points"].arrayValue.min(by: { abs(($0["timestamp"].numberValue ?? 0) - time) < abs(($1["timestamp"].numberValue ?? 0) - time) }) { show(point); selectedTime = nil }
             }

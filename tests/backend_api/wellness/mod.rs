@@ -1,4 +1,4 @@
-use helpyourself::wellness::{DayRequest, algorithms::*, select_metric};
+use longlivehealth::wellness::{DayRequest, algorithms::*, select_metric};
 use serde_json::json;
 use std::collections::BTreeMap;
 
@@ -131,7 +131,7 @@ async fn daily_view_validates_dates_priorities_and_user_boundaries() {
 
 #[tokio::test]
 async fn manual_entries_round_trip_revise_isolate_and_delete() {
-    use helpyourself::wellness::entries::{DeleteRequest, ListRequest, SaveRequest};
+    use longlivehealth::wellness::entries::{DeleteRequest, ListRequest, SaveRequest};
     let (_directory, state) = crate::fixture().await;
     let alice = crate::add_user(&state, "manual-alice").await;
     let bob = crate::add_user(&state, "manual-bob").await;
@@ -243,7 +243,7 @@ async fn manual_entries_round_trip_revise_isolate_and_delete() {
 
 #[test]
 fn gpx_preserves_original_and_never_bridges_segments() {
-    use helpyourself::wellness::import::{XmlImportRequest, parse};
+    use longlivehealth::wellness::import::{XmlImportRequest, parse};
     let xml = r#"<?xml version="1.0"?><gpx version="1.1" creator="synthetic" xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg><trkpt lat="0" lon="0"><time>2026-01-01T00:00:00Z</time></trkpt><trkpt lat="0" lon="0.001"><time>2026-01-01T00:01:00Z</time></trkpt></trkseg><trkseg><trkpt lat="1" lon="1"><time>2026-01-01T00:02:00Z</time></trkpt></trkseg></trk></gpx>"#;
     let record = parse(&XmlImportRequest {
         filename: "test.gpx".into(),
@@ -282,7 +282,7 @@ async fn reserved_connections_cannot_bypass_domain_validation() {
     let (_directory, state) = crate::fixture().await;
     let user = crate::add_user(&state, "reserved").await;
     let token = crate::token(&state, "reserved").await;
-    let app = helpyourself::app::create_application(state.clone());
+    let app = longlivehealth::app::create_application(state.clone());
     for endpoint in [
         "wellness/day",
         "wellness/sources",
@@ -318,7 +318,7 @@ async fn reserved_connections_cannot_bypass_domain_validation() {
         .database
         .create_connection(
             &user.user_id,
-            helpyourself::health::ConnectionRequest {
+            longlivehealth::health::ConnectionRequest {
                 platform: "manual".into(),
                 installation_id: uuid::Uuid::new_v4().to_string(),
             },
@@ -330,7 +330,7 @@ async fn reserved_connections_cannot_bypass_domain_validation() {
 
 #[test]
 fn sleep_preserves_gaps_conflicts_and_in_bed_denominator() {
-    use helpyourself::{health::StoredHealthRecord, wellness::sleep::summarize};
+    use longlivehealth::{health::StoredHealthRecord, wellness::sleep::summarize};
     let record = |id: &str, start, end, category| StoredHealthRecord {
         platform: "apple_health".into(),
         source_id: "watch".into(),
@@ -401,7 +401,7 @@ fn clinical_age_matches_independent_probability_space_reference() {
 
 #[tokio::test]
 async fn clinical_model_requires_complete_reviewed_collection_and_explicit_research_use() {
-    use helpyourself::{
+    use longlivehealth::{
         reports::{ReviewItem, ReviewRequest},
         wellness::clinical::ClinicalRequest,
     };
@@ -494,7 +494,7 @@ async fn clinical_model_requires_complete_reviewed_collection_and_explicit_resea
 
 #[tokio::test]
 async fn gpx_deduplicates_renamed_files_isolates_users_and_deletes_originals() {
-    use helpyourself::wellness::import::{
+    use longlivehealth::wellness::import::{
         ImportDeleteRequest, ImportListRequest, XmlImportRequest,
     };
     let (_directory, state) = crate::fixture().await;
@@ -562,7 +562,7 @@ async fn gpx_deduplicates_renamed_files_isolates_users_and_deletes_originals() {
         )
         .await
         .unwrap();
-    helpyourself::maintenance::cleanup(&state).await.unwrap();
+    longlivehealth::maintenance::cleanup(&state).await.unwrap();
     assert!(
         state
             .database
@@ -585,8 +585,9 @@ async fn gpx_deduplicates_renamed_files_isolates_users_and_deletes_originals() {
             state
                 .config
                 .data_dir
-                .join("raw/file_import")
+                .join("raw")
                 .join(&user.user_id)
+                .join("gpx")
         )
         .unwrap()
         .count(),
@@ -607,7 +608,7 @@ async fn preferences_are_versioned_isolated_and_preserve_source_fallbacks() {
             .unwrap()["version"],
         0
     );
-    let input = json!({"expected_version":0,"batch_id":uuid::Uuid::new_v4(),"preferences":{"source_priority":{"sleep":["apple_health:watch","health_connect:ring"]},"favorite_metrics":["sleep"],"sleep_target_minutes":480}});
+    let input = json!({"expected_version":0,"batch_id":uuid::Uuid::new_v4(),"preferences":{"source_aliases":{"apple_health:watch":"My Watch"},"source_priority":{"sleep":["apple_health:watch","health_connect:ring"]},"favorite_metrics":["sleep"],"sleep_target_minutes":480}});
     let result = state
         .database
         .save_wellness_preferences(
@@ -661,7 +662,7 @@ async fn preferences_are_versioned_isolated_and_preserve_source_fallbacks() {
 
 #[tokio::test]
 async fn device_series_keeps_sources_and_uses_actual_healthkit_percentage_units() {
-    use helpyourself::{
+    use longlivehealth::{
         health::{ConnectionRequest, HealthRecordInput, SyncRequest},
         wellness::series::SeriesRequest,
     };
@@ -769,7 +770,7 @@ async fn device_series_keeps_sources_and_uses_actual_healthkit_percentage_units(
 
 #[tokio::test]
 async fn review_keeps_missing_nutrition_unknown_and_observed_strength_separate() {
-    use helpyourself::wellness::review::ReviewRequest;
+    use longlivehealth::wellness::review::ReviewRequest;
     let (_directory, state) = crate::fixture().await;
     let user = crate::add_user(&state, "review").await;
     for mut content in [
@@ -806,7 +807,7 @@ async fn review_keeps_missing_nutrition_unknown_and_observed_strength_separate()
 
 #[tokio::test]
 async fn timeline_pages_equal_timestamps_without_loss_and_rejects_stale_cursor() {
-    use helpyourself::{
+    use longlivehealth::{
         health::{ConnectionRequest, HealthRecordInput, SyncRequest},
         wellness::timeline::{Cursor, TimelineRequest},
     };
@@ -898,7 +899,7 @@ pub(crate) fn tcx_fixture() -> String {
 }
 #[tokio::test]
 async fn tcx_keeps_indoor_points_source_timer_and_original_through_archive_lifecycle() {
-    use helpyourself::wellness::import::{
+    use longlivehealth::wellness::import::{
         ImportDeleteRequest, ImportListRequest, XmlImportRequest, parse_tcx,
     };
     let xml = tcx_fixture();
@@ -976,7 +977,7 @@ async fn tcx_keeps_indoor_points_source_timer_and_original_through_archive_lifec
 
 #[test]
 fn regularity_pipeline_requires_daytime_evidence_and_preserves_source_boundaries() {
-    use helpyourself::{health::StoredHealthRecord, wellness::regularity::summarize_regularity};
+    use longlivehealth::{health::StoredHealthRecord, wellness::regularity::summarize_regularity};
     let row = |id: String, source: &str, start, end, category| StoredHealthRecord {
         platform: "apple_health".into(),
         source_id: source.into(),
@@ -1032,7 +1033,7 @@ fn regularity_pipeline_requires_daytime_evidence_and_preserves_source_boundaries
 
 #[test]
 fn training_windows_preserve_unknowns_and_require_complete_days() {
-    use helpyourself::wellness::training::summarize;
+    use longlivehealth::wellness::training::summarize;
     let end = 28 * 86400;
     let empty = summarize(&[], 0, end, chrono_tz::UTC).unwrap();
     assert!(empty["windows"][0]["total_load_au"].is_null());
@@ -1073,7 +1074,7 @@ fn training_windows_use_local_calendar_days_across_dst() {
         .unwrap()
         .timestamp();
     let entry = json!({"record_id":"rest","version":1,"at":at,"timezone":"America/New_York","entry":{"kind":"training_day","content":{"status":"rest"}}});
-    let result = helpyourself::wellness::training::summarize(&[entry], start, end, zone).unwrap();
+    let result = longlivehealth::wellness::training::summarize(&[entry], start, end, zone).unwrap();
     assert_eq!(result["days"][26]["date"], "2026-03-08");
     assert_eq!(result["days"][26]["state"], "confirmed_rest");
     assert_eq!(result["days"][27]["date"], "2026-03-09");
@@ -1081,7 +1082,7 @@ fn training_windows_use_local_calendar_days_across_dst() {
 
 #[test]
 fn heart_rate_zones_use_elapsed_time_and_fixed_boundary_rules() {
-    use helpyourself::wellness::heart_rate::{DeclaredMaximum, summarize};
+    use longlivehealth::wellness::heart_rate::{DeclaredMaximum, summarize};
     let maximum = DeclaredMaximum {
         bpm: 200.0,
         source: "Synthetic measured maximum".into(),
@@ -1113,7 +1114,7 @@ fn heart_rate_zones_use_elapsed_time_and_fixed_boundary_rules() {
 
 #[test]
 fn sleep_corrections_preserve_observations_and_reject_stale_evidence() {
-    use helpyourself::wellness::sleep::apply_corrections;
+    use longlivehealth::wellness::sleep::apply_corrections;
     let original = json!({"sources":[{"source":"apple_health:watch","sessions":[{"start_at":100,"end_at":1000,"asleep_seconds":600,"efficiency":0.8,"classification":"unclassified_session","timeline":[{"record_id":"sleep-1","version":1}]}]}]});
     let annotation = json!({"record_id":"correction","version":1,"entry":{"kind":"sleep_correction","content":{"source":"apple_health:watch","session_start":100,"session_end":1000,"classification":"nap","corrected_asleep_minutes":8.0,"basis_revisions":{"sleep-1":1},"note":"Synthetic correction"}}});
     let mut result = original.clone();
@@ -1171,7 +1172,7 @@ async fn sleep_correction_and_training_declaration_follow_manual_revision_lifecy
             .database
             .list_wellness_entries(
                 &user.user_id,
-                helpyourself::wellness::entries::ListRequest {
+                longlivehealth::wellness::entries::ListRequest {
                     start_at: 0,
                     end_at: 2000,
                     kind: Some(kind.into()),
@@ -1184,7 +1185,7 @@ async fn sleep_correction_and_training_declaration_follow_manual_revision_lifecy
             .database
             .delete_wellness_entry(
                 &user.user_id,
-                helpyourself::wellness::entries::DeleteRequest {
+                longlivehealth::wellness::entries::DeleteRequest {
                     record_id: id,
                     version: 2,
                     batch_id: uuid::Uuid::new_v4().to_string(),
@@ -1198,7 +1199,7 @@ async fn sleep_correction_and_training_declaration_follow_manual_revision_lifecy
                 .database
                 .list_wellness_entries(
                     &user.user_id,
-                    helpyourself::wellness::entries::ListRequest {
+                    longlivehealth::wellness::entries::ListRequest {
                         start_at: 0,
                         end_at: 2000,
                         kind: Some(kind.into())
@@ -1213,7 +1214,7 @@ async fn sleep_correction_and_training_declaration_follow_manual_revision_lifecy
 
 #[test]
 fn association_statistics_match_independent_reference_with_calendar_gaps() {
-    use helpyourself::wellness::statistics::{Row, benjamini_yekutieli, regress};
+    use longlivehealth::wellness::statistics::{Row, benjamini_yekutieli, regress};
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/statistics.json")).unwrap();
     for case in fixture["cases"].as_array().unwrap() {
@@ -1273,7 +1274,7 @@ fn association_statistics_match_independent_reference_with_calendar_gaps() {
 
 #[test]
 fn association_journal_types_round_trip_and_invalid_values_are_rejected() {
-    use helpyourself::wellness::entries::Entry;
+    use longlivehealth::wellness::entries::Entry;
     let valid = json!({"kind":"journal","content":{"behaviors":{"alcohol":false},"measurements":{"caffeine":{"value":120,"unit":"mg"}},"times":{"bedtime":1420},"mood":5,"perceived_stress":null,"note":"synthetic"}});
     let entry: Entry = serde_json::from_value(valid.clone()).unwrap();
     entry.validate().unwrap();
@@ -1297,7 +1298,7 @@ fn association_journal_types_round_trip_and_invalid_values_are_rejected() {
 
 #[tokio::test]
 async fn associations_preserve_missingness_isolate_owners_and_invalidate_on_source_edit() {
-    use helpyourself::wellness::associations::Request;
+    use longlivehealth::wellness::associations::Request;
     let (_directory, state) = crate::fixture().await;
     let alice = crate::add_user(&state, "association-alice").await;
     let bob = crate::add_user(&state, "association-bob").await;
@@ -1362,7 +1363,7 @@ async fn associations_preserve_missingness_isolate_owners_and_invalidate_on_sour
 #[test]
 fn association_daily_pipeline_handles_types_missing_days_and_clock_boundaries() {
     use chrono::{Days, NaiveDate};
-    use helpyourself::wellness::associations::{Request, analyze};
+    use longlivehealth::wellness::associations::{Request, analyze};
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/statistics.json")).unwrap();
     let start = NaiveDate::from_ymd_opt(2026, 1, 5).unwrap();
@@ -1411,7 +1412,7 @@ fn association_daily_pipeline_handles_types_missing_days_and_clock_boundaries() 
 
 #[tokio::test]
 async fn training_protocol_rejects_inconsistent_times_and_preserves_answer_delay() {
-    use helpyourself::wellness::entries::{Entry, SaveRequest};
+    use longlivehealth::wellness::entries::{Entry, SaveRequest};
     let (_directory, state) = crate::fixture().await;
     let user = crate::add_user(&state, "training-protocol").await;
     let entry = json!({"kind":"training","content":{"activity":"Run","duration_minutes":40,"ended_at":2800,"paused_minutes":5,"duration_basis":"active_excluding_pauses","rpe_answered_at":4600,"rpe_cr10":6,"sets":[],"note":""}});
@@ -1460,7 +1461,7 @@ fn nn_payload() -> serde_json::Value {
 }
 #[test]
 fn hrv_requires_five_continuous_reviewed_minutes_and_separates_protocol_baselines() {
-    use helpyourself::wellness::hrv::{Intervals, calculate, summarize};
+    use longlivehealth::wellness::hrv::{Intervals, calculate, summarize};
     let payload = nn_payload();
     let result = calculate(&serde_json::from_value::<Intervals>(payload.clone()).unwrap()).unwrap();
     assert!((result["rmssd_ms"].as_f64().unwrap() - 20.0).abs() < 1e-10);
@@ -1484,7 +1485,7 @@ fn hrv_requires_five_continuous_reviewed_minutes_and_separates_protocol_baseline
             if day == 29 {
                 p["firmware"] = json!("2");
             }
-            helpyourself::health::StoredHealthRecord {
+            longlivehealth::health::StoredHealthRecord {
                 platform: "manual".into(),
                 source_id: "test-device".into(),
                 record_id: format!("nn-{day}"),
@@ -1518,7 +1519,7 @@ fn hrv_requires_five_continuous_reviewed_minutes_and_separates_protocol_baseline
 
 #[tokio::test]
 async fn exercise_library_is_owned_versioned_and_plans_never_become_completed_load() {
-    use helpyourself::wellness::{
+    use longlivehealth::wellness::{
         entries::{DeleteRequest, Entry, ListRequest, SaveRequest},
         planning::LibraryRequest,
     };
@@ -1583,7 +1584,7 @@ async fn exercise_library_is_owned_versioned_and_plans_never_become_completed_lo
         )
         .await
         .unwrap();
-    let training = helpyourself::wellness::training::summarize(
+    let training = longlivehealth::wellness::training::summarize(
         list["entries"].as_array().unwrap(),
         0,
         86400,
@@ -1637,7 +1638,7 @@ async fn exercise_library_is_owned_versioned_and_plans_never_become_completed_lo
 
 #[tokio::test]
 async fn food_portions_preserve_unknowns_snapshots_versions_and_user_isolation() {
-    use helpyourself::wellness::{
+    use longlivehealth::wellness::{
         entries::SaveRequest,
         food::{PortionBasis, PortionRequest, Recipe, recipe_totals},
     };
@@ -1678,7 +1679,7 @@ async fn food_portions_preserve_unknowns_snapshots_versions_and_user_isolation()
     assert_eq!(
         portion["source_snapshot"],
         serde_json::to_value(
-            serde_json::from_value::<helpyourself::wellness::entries::Entry>(entry).unwrap()
+            serde_json::from_value::<longlivehealth::wellness::entries::Entry>(entry).unwrap()
         )
         .unwrap()
     );
@@ -1710,7 +1711,7 @@ async fn food_portions_preserve_unknowns_snapshots_versions_and_user_isolation()
 
 #[test]
 fn nutrition_targets_preserve_zero_and_missing_values() {
-    use helpyourself::wellness::food::daily_nutrients;
+    use longlivehealth::wellness::food::daily_nutrients;
     let goal = json!({"entry":{"content":{"daily_targets":{"sodium_mg":1000,"protein_g":100}}}});
     let records = vec![
         json!({"entry":{"content":{"protein_g":20,"micronutrients":{"sodium_mg":0}}}}),
@@ -1744,7 +1745,7 @@ fn nutrition_targets_preserve_zero_and_missing_values() {
 
 #[tokio::test]
 async fn hrv_archive_query_is_owned_and_keeps_unknown_apple_quality_explicit() {
-    use helpyourself::{
+    use longlivehealth::{
         health::{ConnectionRequest, HealthRecordInput, SyncRequest},
         wellness::hrv::Request,
     };
@@ -1826,7 +1827,7 @@ async fn hrv_archive_query_is_owned_and_keeps_unknown_apple_quality_explicit() {
 #[tokio::test]
 async fn specialty_views_page_samples_decode_fhir_and_never_resolve_another_source() {
     use base64::{Engine, engine::general_purpose::STANDARD};
-    use helpyourself::{
+    use longlivehealth::{
         health::{ConnectionRequest, HealthRecordInput, SyncRequest},
         wellness::records::{GetRequest, ListRequest},
     };
@@ -1965,7 +1966,7 @@ async fn specialty_views_page_samples_decode_fhir_and_never_resolve_another_sour
 #[test]
 fn reminders_obey_calendar_dst_quiet_hours_and_disable_state() {
     use chrono::TimeZone;
-    use helpyourself::wellness::reminders::{Reminder, occurrences};
+    use longlivehealth::wellness::reminders::{Reminder, occurrences};
     let record = json!({"record_id":"reminder","version":1,"timezone":"America/New_York","entry":{"kind":"reminder","content":{"title":"Follow-up","body":"Review your plan","enabled":true,"recurrence":"daily","start_date":"2026-03-07","end_date":null,"local_time":"02:30","weekdays":[],"quiet_start_minute":null,"quiet_end_minute":null,"note":""}}});
     let from = chrono_tz::America::New_York
         .with_ymd_and_hms(2026, 3, 7, 0, 0, 0)
@@ -2096,7 +2097,7 @@ async fn daily_materialization_invalidates_recomputes_and_bounds_failed_leases()
 
 #[test]
 fn coach_rejects_invented_citations_and_unrequested_or_unsupported_drafts() {
-    use helpyourself::wellness::coach::{Output, validate};
+    use longlivehealth::wellness::coach::{Output, validate};
     let input = json!({"evidence":[{"id":"source-1"}],"allow_drafts":false});
     let valid = json!({"claims":[{"text":"A source measurement exists.","evidence_ids":["source-1"]}],"missing_information":["No verified causal inference."],"questions":[],"drafts":[]});
     assert!(
@@ -2133,7 +2134,7 @@ fn coach_rejects_invented_citations_and_unrequested_or_unsupported_drafts() {
 
 #[tokio::test]
 async fn coach_snapshots_memory_and_deletion_removes_it_from_future_context() {
-    use helpyourself::wellness::{
+    use longlivehealth::wellness::{
         coach::{Request, request},
         entries::{DeleteRequest, SaveRequest},
     };
@@ -2246,7 +2247,7 @@ fn synthetic_fit() -> Vec<u8> {
 #[test]
 fn fit_preserves_originals_and_source_units_and_rejects_corruption() {
     use base64::{Engine, engine::general_purpose::STANDARD};
-    use helpyourself::wellness::fit::{Request, parse, preflight};
+    use longlivehealth::wellness::fit::{Request, parse, preflight};
     let bytes = synthetic_fit();
     let request = |bytes: &[u8]| Request {
         filename: "synthetic.fit".into(),
@@ -2279,7 +2280,7 @@ fn fit_preserves_originals_and_source_units_and_rejects_corruption() {
 #[tokio::test]
 async fn fit_import_deduplicates_and_restricts_deletion_to_owner() {
     use base64::{Engine, engine::general_purpose::STANDARD};
-    use helpyourself::wellness::{
+    use longlivehealth::wellness::{
         fit::Request,
         import::{ImportDeleteRequest, ImportListRequest},
     };
@@ -2317,7 +2318,7 @@ async fn fit_import_deduplicates_and_restricts_deletion_to_owner() {
         .database
         .specialty_record(
             &user.user_id,
-            helpyourself::wellness::records::GetRequest {
+            longlivehealth::wellness::records::GetRequest {
                 platform: "file_import".into(),
                 source_id: "fit".into(),
                 record_id: first["record_id"].as_str().unwrap().into(),
@@ -2360,7 +2361,7 @@ async fn fit_import_deduplicates_and_restricts_deletion_to_owner() {
 
 #[test]
 fn calendar_report_keeps_sources_and_missing_days_separate() {
-    use helpyourself::wellness::report::summarize_days;
+    use longlivehealth::wellness::report::summarize_days;
     let rows = vec![
         json!({"source":"a","date":"2026-01-01","value":10.0}),
         json!({"source":"a","date":"2026-01-02","value":30.0}),
@@ -2375,7 +2376,7 @@ fn calendar_report_keeps_sources_and_missing_days_separate() {
 }
 #[tokio::test]
 async fn calendar_report_validates_bounds_and_preserves_empty_state() {
-    use helpyourself::wellness::report::Request;
+    use longlivehealth::wellness::report::Request;
     let (_directory, state) = crate::fixture().await;
     let user = crate::add_user(&state, "calendar-report").await;
     let request = |end: &str| Request {
@@ -2410,7 +2411,7 @@ fn complete_diet_totals() -> BTreeMap<String, f64> {
 }
 #[test]
 fn hei_official_thresholds_zero_fat_missing_and_density_scaling() {
-    use helpyourself::wellness::diet::score;
+    use longlivehealth::wellness::diet::score;
     let mut totals = complete_diet_totals();
     let first = score(&totals).unwrap();
     assert_eq!(first["total"], 100.0);
@@ -2429,7 +2430,7 @@ fn hei_official_thresholds_zero_fat_missing_and_density_scaling() {
 }
 #[tokio::test]
 async fn diet_windows_require_complete_days_and_reject_duplicate_assessments() {
-    use helpyourself::wellness::{diet::Request, entries::SaveRequest};
+    use longlivehealth::wellness::{diet::Request, entries::SaveRequest};
     let (_directory, state) = crate::fixture().await;
     let user = crate::add_user(&state, "diet-owner").await;
     let request = || Request {
@@ -2467,7 +2468,7 @@ async fn diet_windows_require_complete_days_and_reject_duplicate_assessments() {
 
 #[tokio::test]
 async fn meal_glucose_alignment_preserves_missing_sources_and_owner_boundaries() {
-    use helpyourself::wellness::{entries::SaveRequest, meal_glucose::Request};
+    use longlivehealth::wellness::{entries::SaveRequest, meal_glucose::Request};
     let (_directory, state) = crate::fixture().await;
     let user = crate::add_user(&state, "meal-owner").await;
     let other = crate::add_user(&state, "meal-other").await;
@@ -2516,7 +2517,7 @@ async fn meal_glucose_alignment_preserves_missing_sources_and_owner_boundaries()
 
 #[test]
 fn shopping_uses_recipe_yield_and_preserves_source_distinctions() {
-    use helpyourself::wellness::meals::shopping;
+    use longlivehealth::wellness::meals::shopping;
     let a = json!({"record_id":"a","version":1,"entry":{"content":{"recipe":{"name":"Soup","servings":4,"ingredients":[{"food_name":"Beans","grams":200,"source":"Label A","nutrients_per_100g":{}}],"instructions":"","note":""},"planned_servings":2,"status":"planned"}}});
     let mut b = a.clone();
     b["record_id"] = json!("b");
@@ -2533,7 +2534,7 @@ fn shopping_uses_recipe_yield_and_preserves_source_distinctions() {
 
 #[test]
 fn training_windows_do_not_combine_active_and_elapsed_protocols() {
-    use helpyourself::wellness::training::summarize;
+    use longlivehealth::wellness::training::summarize;
     let mut entries:Vec<_>=(0..28).map(|day|json!({"record_id":format!("day-{day}"),"version":1,"at":day*86400+3600,"timezone":"UTC","entry":{"kind":"training_day","content":{"status":"rest"}}})).collect();
     for (day, basis) in [
         (26, "active_excluding_pauses"),
@@ -2560,7 +2561,7 @@ fn training_windows_do_not_combine_active_and_elapsed_protocols() {
 
 #[test]
 fn hrv_rejects_mismatched_archive_duration() {
-    let row = helpyourself::health::StoredHealthRecord {
+    let row = longlivehealth::health::StoredHealthRecord {
         platform: "health_connect".into(),
         source_id: "reviewed-device".into(),
         record_id: "duration-mismatch".into(),
@@ -2570,14 +2571,14 @@ fn hrv_rejects_mismatched_archive_duration() {
         version: 1,
         payload_json: json!({"payload":nn_payload()}).to_string(),
     };
-    let result = helpyourself::wellness::hrv::summarize(vec![row], chrono_tz::UTC).unwrap();
+    let result = longlivehealth::wellness::hrv::summarize(vec![row], chrono_tz::UTC).unwrap();
     assert_eq!(result[0]["windows"][0]["state"], "ineligible_window");
     assert!(result[0]["days"].as_array().unwrap().is_empty());
 }
 
 #[test]
 fn public_food_lookup_preserves_raw_data_units_and_requires_review() {
-    use helpyourself::wellness::{entries::Entry, food_lookup::project};
+    use longlivehealth::wellness::{entries::Entry, food_lookup::project};
     let source = json!({"status":1,"product":{"code":"12345678","product_name":"Synthetic oats","brands":"Fixture","nutriments":{"energy-kcal_100g":370,"sodium_100g":0.002,"vitamin-d_100g":0.000001,"proteins_100g":"unknown"},"future_field":{"retain":true}}});
     let result = project("12345678", source.clone(), 100).unwrap();
     let mut entry = result["candidate"].clone();
@@ -2604,7 +2605,7 @@ fn public_food_lookup_preserves_raw_data_units_and_requires_review() {
 
 #[tokio::test]
 async fn public_food_lookup_rejects_nonbarcode_paths_before_network_access() {
-    use helpyourself::{
+    use longlivehealth::{
         error::AppError,
         wellness::food_lookup::{Request, lookup},
     };
@@ -2684,7 +2685,7 @@ async fn three_year_minute_history_query_benchmark() {
 
 #[tokio::test]
 async fn weekly_query_chunks_preserve_sleep_across_the_chunk_boundary() {
-    use helpyourself::health::{
+    use longlivehealth::health::{
         AggregateRequest, ConnectionRequest, HealthRecordInput, SyncRequest,
     };
     let (_directory, state) = crate::fixture().await;
@@ -2751,7 +2752,7 @@ async fn weekly_query_chunks_preserve_sleep_across_the_chunk_boundary() {
 
 #[test]
 fn cycle_predictions_preserve_source_uncertainty_and_do_not_become_observations() {
-    use helpyourself::wellness::entries::Entry;
+    use longlivehealth::wellness::entries::Entry;
     let mut value = json!({"kind":"cycle_prediction","content":{"start_date":"2026-10-08","end_date":"2026-10-12","generated_at":1791201600i64,"source":"Synthetic external forecast v1","uncertainty":"Accuracy unknown","note":""}});
     let entry: Entry = serde_json::from_value(value.clone()).unwrap();
     assert!(entry.validate().is_ok());

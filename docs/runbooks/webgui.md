@@ -1,6 +1,6 @@
 # Web GUI
 
-Web GUI 嵌入 `backend_api` 二进制，随 `helpyourself-backend-api` 镜像交付。保持现有 Caddy 配置，打开 `https://你的服务器/` 即可；无需前端容器或网页文件挂载。本地直接运行 API 时，也可打开其 HTTP 监听地址。
+Web GUI 嵌入 `backend_api` 二进制，随 `longlivehealth-backend-api` 镜像交付。保持现有 Caddy 配置，打开 `https://你的服务器/` 即可；无需前端容器或网页文件挂载。本地直接运行 API 时，也可打开其 HTTP 监听地址。
 
 ## 登录和功能
 

@@ -11,6 +11,10 @@ pub enum AppError {
     Invalid(&'static str),
     #[error("Authentication required or credentials invalid")]
     Unauthorized,
+    #[error("Administrator permission required or protected account")]
+    Forbidden,
+    #[error("Change your password before continuing")]
+    PasswordChangeRequired,
     #[error("Resource not found")]
     NotFound,
     #[error("{0}")]
@@ -50,6 +54,8 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, code) = match &self {
             Self::Invalid(_) => (StatusCode::BAD_REQUEST, "invalid_request"),
+            Self::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
+            Self::PasswordChangeRequired => (StatusCode::FORBIDDEN, "password_change_required"),
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             Self::NotFound => (StatusCode::NOT_FOUND, "not_found"),
             Self::Conflict(_) => (StatusCode::CONFLICT, "conflict"),

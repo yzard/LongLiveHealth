@@ -100,11 +100,15 @@ impl Database {
     }
     pub async fn delete_account(&self, user_id: &str) -> Result<(), AppError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        for folder in crate::raw::SOURCES
-            .iter()
-            .map(|source| format!("raw/{source}"))
-            .chain(["derived", "tmp", "exports"].into_iter().map(str::to_owned))
-        {
+        let username: String = sqlx::query_scalar(queries::USERNAME_BY_ID)
+            .bind(user_id)
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        if username == "admin" {
+            return Err(AppError::Forbidden);
+        }
+        for folder in ["raw", "derived", "tmp", "exports"] {
             sqlx::query(queries::INSERT_CLEANUP)
                 .bind(uuid::Uuid::new_v4().to_string())
                 .bind(format!("{folder}/{user_id}"))
@@ -178,7 +182,8 @@ pub async fn cleanup(state: &AppState) -> Result<(), AppError> {
         if components.len() < 2
             || !["raw", "derived", "tmp", "exports"].contains(&components[0])
             || if components[0] == "raw" {
-                !crate::raw::valid_relative_path(&path)
+                !(crate::raw::valid_relative_path(&path)
+                    || (components.len() == 2 && uuid::Uuid::parse_str(components[1]).is_ok()))
             } else {
                 uuid::Uuid::parse_str(components[1]).is_err()
             }
@@ -290,7 +295,7 @@ async fn build_export(state: &AppState, user_id: &str, export_id: &str) -> Resul
     transaction.commit().await?;
     let field_dictionary: Value =
         serde_json::from_str(include_str!("../archive/field_dictionary.json"))?;
-    let manifest = json!({"field_dictionary":field_dictionary,"format":"helpyourself-export","version":1,"database_schema_version":1,"table_counts":table_counts,"table_columns":table_columns,"data_revision":revision,"user_id":user_id,"created_at":now()?,
+    let manifest = json!({"field_dictionary":field_dictionary,"format":"helpyourself-export","version":1,"database_schema_version":7,"table_counts":table_counts,"table_columns":table_columns,"data_revision":revision,"user_id":user_id,"created_at":now()?,
         "conversion_version":crate::laboratory::CONVERSION_VERSION,"metrics":crate::laboratory::metrics(),"tables":queries::EXPORT_TABLES.iter().map(|(name,_)|format!("{name}.jsonl")).collect::<Vec<_>>(),"raw_directory":"raw/","csv":"observations.csv",
         "notes":"JSONL is lossless. CSV formula-leading text is prefixed with an apostrophe. No passwords, sessions or provider secrets are exported."});
     tokio::fs::write(
@@ -365,10 +370,8 @@ fn write_zip(directory: &Path, raw: &Path) -> Result<(), AppError> {
         .map_err(|_| AppError::Internal)?;
     let mut csv_member = DigestMember::new(&mut archive);
     csv_member.write_all(b"observation_id,revision,status,name,result,unit,sampled_at,standardized_result,standard_unit,result_status,original_reference,standardized_reference,reference_status,conversion_version\n")?;
-    for line in std::io::BufReader::new(std::fs::File::open(
-        directory.join("observation_revisions.jsonl"),
-    )?)
-    .lines()
+    for line in
+        std::io::BufReader::new(std::fs::File::open(directory.join("observations.jsonl"))?).lines()
     {
         let row: Value = serde_json::from_str(&line?)?;
         let payload: Value =
@@ -377,7 +380,7 @@ fn write_zip(directory: &Path, raw: &Path) -> Result<(), AppError> {
         let interpreted = crate::laboratory::interpret(&typed);
         let fields = [
             row["observation_id"].as_str().unwrap_or("").to_string(),
-            row["revision"].to_string(),
+            row["current_revision"].to_string(),
             row["status"].as_str().unwrap_or("").to_string(),
             payload["raw_name"].as_str().unwrap_or("").to_string(),
             payload["raw_result"].as_str().unwrap_or("").to_string(),
@@ -409,7 +412,7 @@ fn write_zip(directory: &Path, raw: &Path) -> Result<(), AppError> {
     members.insert("observations.csv".into(), csv_member.finish());
     for (table, path_key) in [
         ("raw_files", "relative_path"),
-        ("health_revisions", "raw_path"),
+        ("health_originals", "raw_path"),
     ] {
         for line in std::io::BufReader::new(std::fs::File::open(
             directory.join(format!("{table}.jsonl")),

@@ -24,7 +24,7 @@ struct TrainingImportsView: View {
                         NavigationLink(item["filename"].stringValue) { TrainingDetailView(model: model, reference: item) }.font(.headline)
                         if let at = item["start_at"].numberValue { Text(Date(timeIntervalSince1970: at).formatted()).font(.caption) }
                         if let distance = item["distance_m"].numberValue { Text("\((distance / 1000).formatted()) km") } else { Text("Distance unknown") }
-                        Text(item["source_id"].stringValue).font(.caption)
+                        Text(model.sourceLabel("file_import:" + item["source_id"].stringValue)).font(.caption)
                         Button("Delete imported activity", role: .destructive) { deleting = item }.disabled(busy)
                     }
                 }
@@ -36,7 +36,7 @@ struct TrainingImportsView: View {
                 Text("GPX distance uses coordinates within segments. TCX distance uses source lap totals. Elapsed duration can include pauses.").font(.caption)
             }
         }.navigationTitle("Training imports")
-            .task { await load(reset: true) }.refreshable { await load(reset: true) }
+            .initialTask { await load(reset: true) }.refreshable { await load(reset: true) }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.data], allowsMultipleSelection: false) { result in
                 switch result {
                 case .success(let urls): if let url = urls.first { Task { await importFile(url) } }

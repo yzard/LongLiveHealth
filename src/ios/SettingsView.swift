@@ -4,6 +4,8 @@ struct SettingsView: View {
     var model: AppModel
     @State private var exports: [JSONValue] = []
     @State private var share: ShareLocation?
+    @State private var changingPassword = false
+    @State private var managingUsers = false
     @State private var deleting = false
     @State private var confirmation = ""
     struct ShareLocation: Identifiable { let id = UUID(); let url: URL }
@@ -12,7 +14,14 @@ struct SettingsView: View {
             Section("Your server") {
                 Text(model.session?.server.absoluteString ?? "").textSelection(.enabled)
                 Text(model.session?.username ?? "")
-                Text("OCR and analysis use the providers chosen in your server's TOML configuration. This app does not route your data through an official helpyourself server.").font(.caption)
+                Text("OCR and analysis use the providers chosen in your server's TOML configuration. This app does not route your data through an official Long Live Health server.").font(.caption)
+            }
+            Section("Account") {
+                Toggle("Face ID / Touch ID unlock", isOn: Binding(get: { model.biometricUnlock }, set: { enabled in Task { await model.setBiometricUnlock(enabled) } }))
+                    .disabled(model.isAuthenticating)
+                Text("Stay signed in securely. Use biometrics or your iPhone passcode to unlock the app; background imports can continue.").font(.caption).foregroundStyle(.secondary)
+                Button("Change password") { changingPassword = true }
+                if model.session?.username == "admin" { Button("Manage users") { managingUsers = true } }
             }
             Section("Full data export") {
                 Text("Includes original files, structured data and revision history. Export files contain sensitive health data.").font(.caption)
@@ -26,11 +35,14 @@ struct SettingsView: View {
                 }
             }
             Section {
-                Button("Sign out and clear this device") { Task { await model.logout() } }.disabled(model.isBusy)
+                Button("Sign out and clear this device") { Task { await model.logout() } }.disabled(model.isBusy || model.isHealthSyncRunning)
+                if model.isHealthSyncRunning { Text("Pause Apple Health sync before signing out or deleting your account.").font(.caption) }
                 Text("This also removes cached reports, pending uploads and local sync checkpoints.").font(.caption)
-                Button("Delete account and all server data", role: .destructive) { deleting = true }.disabled(model.isBusy)
+                if model.session?.username != "admin" { Button("Delete account and all server data", role: .destructive) { deleting = true }.disabled(model.isBusy || model.isHealthSyncRunning) }
             }
-        }.navigationTitle("Settings").task { await reload() }.refreshable { await reload() }
+        }.navigationTitle("Settings").initialTask { await reload() }.refreshable { await reload() }
+            .sheet(isPresented: $changingPassword) { NavigationStack { PasswordChangeView(model: model, required: false) } }
+            .sheet(isPresented: $managingUsers) { NavigationStack { UserManagementView(model: model) } }
             .sheet(item: $share, onDismiss: { clearExportDownloads() }) { item in NavigationStack { VStack(spacing: 20) { Text("Your complete archive is ready"); ShareLink(item: item.url) { Label("Save or share ZIP", systemImage: "square.and.arrow.up") } }.padding().toolbar { Button("Done") { share = nil } } } }
             .alert("Delete your account?", isPresented: $deleting) {
                 TextField("Type your username", text: $confirmation)

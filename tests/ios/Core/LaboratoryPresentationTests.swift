@@ -1,5 +1,5 @@
 import Testing
-@testable import HelpYourselfCore
+@testable import LongLiveHealthCore
 
 @Test func referenceKeepsOriginalAndStandardUnitsSeparate() {
     let payload: JSONValue = .object(["reference_range": .string("<2.586")])

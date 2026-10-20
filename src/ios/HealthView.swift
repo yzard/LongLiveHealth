@@ -3,31 +3,29 @@ import SwiftUI
 struct HealthView: View {
     var model: AppModel
     @State private var coverage: [JSONValue] = []
-    @State private var days: [JSONValue] = []
-    @State private var kind = "resting_heart_rate"
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var isVisible = false
+    private var keepsScreenAwake: Bool { isVisible && scenePhase == .active && model.keepHealthScreenAwake }
     var body: some View {
         List {
             Section {
-                Button("Connect Apple Health") { Task { await model.synchronizeHealth(requestAccess: true); await reload() } }.disabled(model.isBusy)
-                Button("Select prescriptions and medications") { Task { await model.synchronizeHealth(requestAccess: true, requestSelectedAccess: true); await reload() } }.disabled(model.isBusy)
-                Text("Vision prescriptions and medications require individual selection. Use this button each time you want to archive those records.").font(.caption).foregroundStyle(.secondary)
-                Button("Sync now") { Task { await model.synchronizeHealth(requestAccess: false); await reload() } }.disabled(model.isBusy)
-                Text(model.health.status).font(.caption)
-                Text("Only data visible to this iPhone can sync. An empty result does not tell us whether access was denied or data is absent.").font(.caption).foregroundStyle(.secondary)
-            }
-            Section("Last 30 days · \(TimeZone.current.identifier)") {
-                Picker("Metric", selection: $kind) {
-                    Text("Resting heart rate").tag("resting_heart_rate"); Text("Heart rate").tag("heart_rate"); Text("HRV SDNN").tag("hrv_sdnn")
-                    Text("Steps").tag("steps"); Text("Sleep").tag("sleep"); Text("Workout").tag("workout")
-                }
-                Text("Sources remain separate. Missing days are not zero; sample averages are not daily clinical measurements.").font(.caption)
-                ForEach(Array(days.enumerated()), id: \.offset) { _, day in
-                    VStack(alignment: .leading) {
-                        Text(day["date"].stringValue)
-                        Text(day["value"] == .null ? "No visible samples" : "\(day["value"].numberValue?.formatted() ?? "") \(day["unit"].stringValue)")
-                        Text(day["source"].stringValue).font(.caption).foregroundStyle(.secondary)
+                Button {
+                    Task { await model.synchronizeHealth(requestAccess: true, requestSelectedAccess: false, automatic: false); await reload() }
+                } label: {
+                    HStack {
+                        Text("Sync Now")
+                        Spacer()
+                        if model.isHealthSyncRunning { ProgressView().accessibilityHidden(true) }
                     }
-                }
+                }.disabled(model.isHealthSyncRunning).accessibilityValue(model.isHealthSyncRunning ? "Syncing" : "")
+                if model.isHealthSyncRunning { Button("Pause Sync") { model.pauseHealthSync() } }
+                if model.keepHealthScreenAwake { Text("Screen stays awake while syncing on this page.").font(.caption).foregroundStyle(.secondary) }
+                Text(model.health.status).font(.caption).fixedSize(horizontal: false, vertical: true)
+                Button("Select prescriptions and medications") { Task { await model.synchronizeHealth(requestAccess: true, requestSelectedAccess: true, automatic: false); await reload() } }.disabled(model.isHealthSyncRunning)
+                Text("Vision prescriptions and medications require individual selection. Use this button each time you want to archive those records.").font(.caption).foregroundStyle(.secondary)
+                if let note = model.backgroundHealth.registrationError { Text(note).font(.caption).foregroundStyle(.secondary) }
+                Text("Sync resumes when the app opens and when iOS grants background time. Locked Health data waits for unlock. Pause disables automatic sync until you tap Sync Now.").font(.caption).foregroundStyle(.secondary)
+                Text("Only data visible to this iPhone can sync. An empty result does not tell us whether access was denied or data is absent.").font(.caption).foregroundStyle(.secondary)
             }
             Section { Text("The app archives the HealthKit types available on this device, including sample metadata, ECG and other series, routes, clinical FHIR records, characteristics and activity summaries. Clinical records need separate permission and device support. Read coverage is shown below; hidden data cannot be inferred.").font(.caption).foregroundStyle(.secondary) }
             Section("Sync coverage") { ForEach(Array(coverage.enumerated()), id: \.offset) { _, entry in
@@ -35,12 +33,13 @@ struct HealthView: View {
                     if let last = entry["last_success_at"].numberValue { Text("Last successful query: \(Date(timeIntervalSince1970: last).formatted())").font(.caption) }
                     if let first = entry["visible_start_at"].numberValue, let last = entry["visible_end_at"].numberValue { Text("Archived platform range: \(Date(timeIntervalSince1970: first).formatted(date: .abbreviated, time: .omitted)) – \(Date(timeIntervalSince1970: last).formatted(date: .abbreviated, time: .omitted))").font(.caption) } }
             } }
-        }.navigationTitle("Health").task(id: kind) { await reload() }.refreshable { await reload() }
+        }.navigationTitle("Apple Health").initialTask { await reload() }.refreshable { await reload() }
+            .onAppear { isVisible = true }
+            .onChange(of: keepsScreenAwake, initial: true) { _, enabled in UIApplication.shared.isIdleTimerDisabled = enabled }
+            .onDisappear { isVisible = false; UIApplication.shared.isIdleTimerDisabled = false }
     }
-    private func reload() async { do { if let client = model.client {
+    private func reload() async { do { if model.client != nil {
         coverage = try await model.request("health/coverage", body: .object([:]))["coverage"].arrayValue
-        var scope = dateScope(days: 30); scope["record_type"] = .string(kind)
-        days = try await model.request("health/aggregate", body: scope)["days"].arrayValue
     } } catch { model.errorMessage = error.localizedDescription } }
 }
 

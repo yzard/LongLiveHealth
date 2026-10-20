@@ -16,8 +16,8 @@ spec = importlib.util.spec_from_file_location('check_export', SCRIPT)
 checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
 USER = '11111111-1111-4111-8111-111111111111'
-RAW = f'raw/documents/{USER}/file'
-HEALTH = f'raw/apple_health/{USER}/revision.json'
+RAW = f'raw/{USER}/function_health/file'
+HEALTH = f'raw/{USER}/apple_health/revision.json'
 
 
 def fixture():
@@ -26,10 +26,10 @@ def fixture():
                               sha256=hashlib.sha256(b'original').hexdigest(), byte_count=8)]
     data['reports'] = [dict(user_id=USER, report_id='report', file_id='file')]
     data['observations'] = [dict(user_id=USER, report_id='report', observation_id='obs', current_revision=1)]
-    data['observation_revisions'] = [dict(user_id=USER, observation_id='obs', revision=1)]
     health = dict(user_id=USER, platform='apple_health', source_id='watch', record_id='sample')
-    data['health_records'] = [health]
-    data['health_revisions'] = [dict(health, raw_path=HEALTH, payload_json='{"value": 42}')]
+    original = dict(source_id='watch', record_id='sample', payload={'value': 42})
+    data['health_records'] = [dict(health, raw_id='raw', deleted=0, payload_json=json.dumps(checker.health_projection(original)))]
+    data['health_originals'] = [dict(health, raw_id='raw', raw_path=HEALTH)]
     manifest = dict(format='helpyourself-export', version=1, user_id=USER,
                     tables=[name + '.jsonl' for name in sorted(data)],
                     csv='observations.csv', raw_directory='raw/')
@@ -40,10 +40,10 @@ def write_archive(path, data, manifest, replacements):
     members = {name + '.jsonl': ''.join(json.dumps(row) + '\n' for row in rows)
                for name, rows in data.items()}
     members.update({'manifest.json': json.dumps(manifest), RAW: b'original',
-                    HEALTH: '{"value":42}', 'observations.csv': 'observation_id,revision\nobs,1\n'})
+                    HEALTH: json.dumps(dict(source_id='watch', record_id='sample', payload={'value': 42})), 'observations.csv': 'observation_id,revision\nobs,1\n'})
     if manifest.get('version') == 1:
         manifest = copy.deepcopy(manifest)
-        manifest['database_schema_version'] = 1
+        manifest['database_schema_version'] = 7
         manifest['table_counts'] = {name: len(rows) for name, rows in data.items()}
         manifest['table_columns'] = {name: [dict(name=field, sqlite_type='TEXT', not_null=False, primary_key_position=0)
                                           for field in sorted(set().union(*(row.keys() for row in rows)) if rows else {'user_id'})]
@@ -91,7 +91,7 @@ class ExportTests(unittest.TestCase):
         for table, field, value in [('reports', 'user_id', 'another-user'),
                                     ('reports', 'file_id', 'missing'),
                                     ('observations', 'current_revision', 2),
-                                    ('health_revisions', 'record_id', 'missing'),
+                                    ('health_originals', 'record_id', 'missing'),
                                     ('raw_files', 'sha256', None)]:
             with self.subTest(table=table, field=field), tempfile.TemporaryDirectory() as directory:
                 data, manifest = fixture()
@@ -129,7 +129,7 @@ class ExportTests(unittest.TestCase):
             write_archive(path, data, manifest, {})
             result = checker.audit(path, 1024 * 1024)
             self.assertEqual(result['format_version'], 1)
-            self.assertEqual(result['member_sha256_checked'], 21)
+            self.assertEqual(result['member_sha256_checked'], len(checker.TABLES) + 3)
             for replacement in [{'reports.jsonl': json.dumps(data['reports'][0]) + ' \n'},
                                 {HEALTH: '{"value": 42}'}, {'observations.csv': 'observation_id,revision\nobs,1\n\n'}]:
                 write_archive(path, data, manifest, replacement)

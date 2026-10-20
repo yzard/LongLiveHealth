@@ -1,6 +1,6 @@
 # 独立检查导出档案
 
-该工具使用 Python 3 标准库直接读取 helpyourself v1 导出 ZIP，不需要服务、数据库、AI 或第三方依赖。它不解压、不修改档案，不把健康记录输出到终端。
+该工具使用 Python 3 标准库直接读取 Long Live Health v1 导出 ZIP，不需要服务、数据库、AI 或第三方依赖。它不解压、不修改档案，不把健康记录输出到终端。
 
 从仓库根目录运行，显式指定可接受的总解压后字节数。下面示例限制为 1 GiB：
 
@@ -52,9 +52,9 @@ python3 src/archive/restore_export.py /absolute/path/export.zip --destination /a
 使用 API 程序生成配置，填写必需的 OCR 服务配置，再用交互密码提示启用账户。以下命令中的程序路径需要对应实际构建产物。
 
 ```bash
-/path/to/helpyourself --data-dir /absolute/path/new-data init-config
-/path/to/helpyourself --data-dir /absolute/path/new-data enable-user --username alice
-/path/to/helpyourself --data-dir /absolute/path/new-data serve
+/path/to/longlivehealth --data-dir /absolute/path/new-data init-config
+/path/to/longlivehealth --data-dir /absolute/path/new-data enable-user --username alice
+/path/to/longlivehealth --data-dir /absolute/path/new-data serve
 ```
 
 `enable-user` 要求新密码，撤销已有会话。它是显式管理员操作。普通 `reset-password` 不自动启用已禁用账户。恢复不会自动发起 OCR 或模型请求。已恢复分析保留原输出；未完成分析需要用户重新提交。

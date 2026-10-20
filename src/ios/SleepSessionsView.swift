@@ -13,18 +13,18 @@ struct SleepSessionsView: View {
                 Text("Last 30 days. Gaps do not establish wakefulness. Confirm main sleep or naps without replacing source observations.").font(.caption)
             }
             ForEach(Array(result["sources"].arrayValue.enumerated()), id: \.offset) { _, source in
-                Section(source["source"].stringValue) {
+                Section(model.sourceLabel(source["source"].stringValue)) {
                     ForEach(Array(source["sessions"].arrayValue.enumerated()), id: \.offset) { _, session in
                         DisclosureGroup(Date(timeIntervalSince1970: session["end_at"].numberValue ?? 0).formatted()) {
                             if let seconds = session["asleep_seconds"].numberValue {
-                                Text("\((seconds / 3600).formatted()) hours asleep").font(.headline)
+                                Text("\(OverviewSummary.duration(seconds)) asleep").font(.headline)
                             } else { Text(session["state"].stringValue.replacingOccurrences(of: "_", with: " ")) }
                             if let efficiency = session["efficiency"].numberValue {
                                 Text("Observed sleep efficiency: \((efficiency * 100).formatted())%")
                             } else { Text("Efficiency needs complete in-bed evidence.").font(.caption) }
                             Text(session["classification"].stringValue.replacingOccurrences(of: "_", with: " "))
                             Text(session["correction_state"].stringValue.replacingOccurrences(of: "_", with: " ")).font(.caption)
-                            if let seconds = session["user_asleep_seconds"].numberValue { Text("User estimate: \((seconds / 3600).formatted()) hours") }
+                            if let seconds = session["user_asleep_seconds"].numberValue { Text("User estimate: \(OverviewSummary.duration(seconds))") }
                             if session["corrections"].arrayValue.count <= 1 {
                                 Button("Confirm or correct sleep") { correction = SleepCorrectionSelection(source: source["source"].stringValue, session: session) }
                             } else { Text("Delete duplicate corrections in Daily logs before confirming again.").font(.caption) }
@@ -49,7 +49,7 @@ struct SleepSessionsView: View {
                 Text("Every minute needs an explicit sleep or wake state. Missing daytime intervals are unknown.").font(.caption)
                 ForEach(Array(regularity["sources"].arrayValue.enumerated()), id: \.offset) { _, source in
                     VStack(alignment: .leading) {
-                        Text(source["source"].stringValue)
+                        Text(model.sourceLabel(source["source"].stringValue))
                         Text(source["value"].numberValue.map { "\($0.formatted()) SRI" } ?? "Not available").font(.headline)
                         Text("\(Int(source["known_minutes"].numberValue ?? 0))/10080 known minute states").font(.caption)
                         Text(source["state"].stringValue.replacingOccurrences(of: "_", with: " ")).font(.caption)
@@ -61,8 +61,9 @@ struct SleepSessionsView: View {
                 Text("Sessions group intervals separated by at most 90 minutes. This engineering threshold does not classify main sleep or naps.").font(.caption)
                 Text(result["algorithm_version"].stringValue).font(.caption)
             }
-        }.navigationTitle("Sleep").task { await reload() }.refreshable { await reload() }
-            .sheet(item: $correction, onDismiss: { Task { await reload() } }) { selection in
+        }.navigationTitle("Sleep").initialTask { await reload() }.refreshable { await reload() }
+            .onChange(of: model.entryMutation) { _, _ in Task { await reload() } }
+            .sheet(item: $correction) { selection in
                 NavigationStack { SleepCorrectionEditor(model: model, selection: selection) }
             }
     }
@@ -103,6 +104,7 @@ private struct SleepCorrectionEditor: View {
     @State private var recordID = UUID().uuidString
     @State private var failure: String?
     @State private var saving = false
+    @State private var initialized = false
     var body: some View {
         Form {
             Text("Source intervals remain unchanged. Your estimate does not create sleep stages or change SRI.").font(.caption)
@@ -117,7 +119,9 @@ private struct SleepCorrectionEditor: View {
             Button("Save sleep confirmation") { Task { await save() } }.disabled(saving || note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }.navigationTitle("Sleep confirmation")
             .toolbar { Button("Cancel") { dismiss() } }
+            .interactiveDismissDisabled()
             .onAppear {
+                guard !initialized else { return }; initialized = true
                 classification = selection.session["classification"].stringValue
                 if let existing = selection.session["corrections"].arrayValue.first {
                     recordID = existing["record_id"].stringValue

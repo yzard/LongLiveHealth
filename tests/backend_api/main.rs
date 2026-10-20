@@ -1,6 +1,6 @@
 #[test]
 fn executable_requires_explicit_configuration() {
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_helpyourself"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_longlivehealth"))
         .arg("check-config")
         .output()
         .unwrap();
@@ -13,14 +13,14 @@ fn administrator_commands_create_reset_and_disable_without_password_arguments() 
     use std::io::Write;
     use std::process::{Command, Stdio};
     let directory = tempfile::tempdir().unwrap();
-    helpyourself::cli::write_template(directory.path()).unwrap();
+    longlivehealth::cli::write_template(directory.path()).unwrap();
     std::fs::write(
         directory.path().join("config.toml"),
         crate::configured_template(),
     )
     .unwrap();
     for operation in ["create-user", "reset-password"] {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_helpyourself"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_longlivehealth"))
             .arg("--data-dir")
             .arg(directory.path())
             .args([operation, "--username", "alice", "--password-stdin"])
@@ -44,7 +44,7 @@ fn administrator_commands_create_reset_and_disable_without_password_arguments() 
         assert!(!String::from_utf8_lossy(&output.stdout).contains("synthetic-password"));
     }
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_helpyourself"))
+        Command::new(env!("CARGO_BIN_EXE_longlivehealth"))
             .arg("--data-dir")
             .arg(directory.path())
             .args(["disable-user", "--username", "alice"])

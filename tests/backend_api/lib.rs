@@ -1,3 +1,4 @@
+mod accounts;
 mod analysis;
 mod app;
 mod authentication;
@@ -16,18 +17,20 @@ mod jobs;
 mod laboratory;
 mod lifecycle;
 mod maintenance;
+mod metric_history;
 mod middleware;
 mod models;
 mod provider;
 mod raw;
 mod reports;
 mod routes;
+mod sources;
 mod temporary;
 mod transport;
 mod webgui;
 mod worker;
 
-pub fn observation_payload() -> helpyourself::reports::ObservationPayload {
+pub fn observation_payload() -> longlivehealth::reports::ObservationPayload {
     serde_json::from_value(json!({"raw_name":"LDL Cholesterol","raw_result":"120","raw_unit":"mg/dL","reference_range":"<100","report_flag":"H",
         "sampled_at":"2026-08-01","metric_id":"ldl_cholesterol","source":{"page":1,"quote":"LDL Cholesterol 120 mg/dL","bounding_box":null},"notes":null})).unwrap()
 }
@@ -35,7 +38,7 @@ pub fn observation_payload() -> helpyourself::reports::ObservationPayload {
 pub async fn archive(state: &AppState, username: &str) -> String {
     let token = token(state, username).await;
     let (status, response) = upload(
-        &helpyourself::app::create_application(state.clone()),
+        &longlivehealth::app::create_application(state.clone()),
         &token,
         &uuid::Uuid::new_v4().to_string(),
         &png(),
@@ -55,11 +58,11 @@ pub async fn confirm(state: &AppState, user_id: &str, report_id: &str) -> String
         .database
         .review(
             user_id,
-            helpyourself::reports::ReviewRequest {
+            longlivehealth::reports::ReviewRequest {
                 report_id: report_id.into(),
                 expected_revision: report.revision,
                 context: None,
-                observations: vec![helpyourself::reports::ReviewItem {
+                observations: vec![longlivehealth::reports::ReviewItem {
                     observation_id: None,
                     expected_revision: None,
                     status: "confirmed".into(),
@@ -80,12 +83,12 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use helpyourself::{
+use http_body_util::BodyExt;
+use longlivehealth::{
     app::AppState,
     authentication::hash_password,
     config::{Config, TEMPLATE},
 };
-use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tower::ServiceExt;
@@ -107,7 +110,7 @@ pub fn configured_template() -> String {
     )
 }
 
-pub async fn add_user(state: &AppState, username: &str) -> helpyourself::models::User {
+pub async fn add_user(state: &AppState, username: &str) -> longlivehealth::models::User {
     let hash = hash_password("correct-password-123".into()).await.unwrap();
     state
         .database
@@ -144,9 +147,9 @@ pub async fn request(
 }
 
 pub async fn token(state: &AppState, username: &str) -> String {
-    helpyourself::authentication::login(
+    longlivehealth::authentication::login(
         state,
-        helpyourself::models::LoginRequest {
+        longlivehealth::models::LoginRequest {
             username: username.into(),
             password: "correct-password-123".into(),
         },

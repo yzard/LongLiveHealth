@@ -105,8 +105,19 @@ pub async fn run(cli: Cli) -> Result<(), AppError> {
         return Ok(());
     }
     if matches!(cli.command, Command::Serve) {
+        let reset_admin = match std::env::var("RESET_ADMIN_PASSWORD") {
+            Err(std::env::VarError::NotPresent) => false,
+            Ok(value) if value == "true" => true,
+            Ok(value) if value == "false" => false,
+            _ => {
+                return Err(AppError::Invalid(
+                    "RESET_ADMIN_PASSWORD must be true or false",
+                ));
+            }
+        };
         let address = config.server.listen;
         let state = crate::app::AppState::open(config).await?;
+        crate::authentication::initialize_admin(&state.database, reset_admin).await?;
         let listener = tokio::net::TcpListener::bind(address).await?;
         tracing::info!(listen = %listener.local_addr()?, "server ready");
 

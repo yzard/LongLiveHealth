@@ -13,6 +13,8 @@ let notice;
 let closePreview = () => {};
 let selectedDate = dateScope(1, new Date(), timezone).end_date;
 let sourcePriority = {};
+let sourcePreferences = { version: -1, preferences: {} };
+let sourceCatalog = [];
 let importCursor = null;
 const filters = { metric: 'ldl_cholesterol', second: '', kind: 'resting_heart_rate' };
 const client = new Client(window.fetch.bind(window), () => showLogin('Your session has expired. Sign in again.'));
@@ -71,7 +73,45 @@ function actionButton(text, work, className) {
   const node = button(text, () => action(node, work), className);
   return node;
 }
-function post(path, body) { return client.post(path, body, controller.signal); }
+async function post(path, body) {
+  const result = await client.post(path, body, controller.signal);
+  if (path === 'wellness/preferences/get' || path === 'wellness/preferences/save') {
+    if (result.version >= sourcePreferences.version) {
+      sourcePreferences = result;
+      for (const node of root.querySelectorAll('[data-source-key]')) node.textContent = sourceLabel(node.dataset.sourceKey);
+    }
+  }
+  if (path === 'wellness/sources') sourceCatalog = result.catalog ?? [];
+  return result;
+}
+function sourceLabel(key) {
+  return sourcePreferences.preferences.source_aliases?.[key] || (key === 'manual:helpyourself' ? 'Long Live Health' : '') || sourceCatalog.find(item => item.source_key === key)?.name || key;
+}
+function sourceText(key) {
+  const node = el('span', sourceLabel(key)); node.dataset.sourceKey = key; return node;
+}
+async function editSourceAlias(key) {
+  const snapshot = await post('wellness/preferences/get', {});
+  const dialog = el('dialog', null, 'panel');
+  const input = el('input'); input.maxLength = 100; input.value = snapshot.preferences.source_aliases?.[key] ?? '';
+  const original = input.value;
+  const failure = el('p', '', 'notice error'); failure.role = 'alert';
+  const cancel = () => { if (input.value === original || window.confirm('Discard changes?')) dialog.close(); };
+  const save = button('Save', async () => {
+    save.disabled = true;
+    try {
+      const aliases = { ...snapshot.preferences.source_aliases };
+      if (input.value.trim()) aliases[key] = input.value.trim(); else delete aliases[key];
+      await post('wellness/preferences/save', { expected_version: snapshot.version, batch_id: crypto.randomUUID(), preferences: { ...snapshot.preferences, source_aliases: aliases } });
+      dialog.close();
+    } catch (error) { failure.textContent = error.message; }
+    finally { save.disabled = false; }
+  }, 'primary');
+  dialog.append(el('h2', 'Edit source alias'), field('Alias', input), el('p', 'Leave empty to use the original name.', 'muted'), el('p', key, 'footnote'), failure, save, button('Cancel', cancel, 'quiet'));
+  dialog.addEventListener('cancel', event => { event.preventDefault(); cancel(); });
+  dialog.addEventListener('close', () => dialog.remove());
+  root.append(dialog); dialog.showModal(); input.focus();
+}
 
 function scheduleExpiry() {
   if (!client.session) return;
@@ -89,17 +129,18 @@ function showLogin(reason) {
   metrics = [];
   capabilities = {};
   sourcePriority = {};
+  sourcePreferences = { version: -1, preferences: {} }; sourceCatalog = [];
   importCursor = null;
   root.replaceChildren();
   const page = el('main', null, 'login-page');
   page.id = 'content';
   const intro = el('section', null, 'login-intro');
-  intro.append(el('div', 'h+', 'brand-mark'), el('p', 'helpyourself', 'wordmark'),
+  intro.append(el('div', '+', 'brand-mark'), el('p', 'Long Live Health', 'wordmark'),
     el('h1', 'Your health.\nYour history.'),
     el('p', 'A clear view of your reports, your progress, and the questions worth asking.', 'intro-copy'));
   const form = el('form', null, 'login-form panel');
   form.append(el('p', 'YOUR PERSONAL ARCHIVE', 'eyebrow'), el('h2', 'Welcome back'),
-    el('p', 'Sign in to the helpyourself server hosting this page.', 'muted'));
+    el('p', 'Sign in to the Long Live Health server hosting this page.', 'muted'));
   const username = el('input');
   username.name = 'username'; username.autocomplete = 'username'; username.required = true;
   username.maxLength = 128; username.autocapitalize = 'none'; username.spellcheck = false;
@@ -117,12 +158,14 @@ function showLogin(reason) {
       password.value = '';
       if (signal.aborted) return;
       client.session = session;
+      if (session.user.must_change_password) { showPasswordChange(); return; }
       try {
         const [status, catalog] = await Promise.all([
           client.post('server/status', {}, signal), client.post('metrics/list', {}, signal),
         ]);
         if (signal.aborted) return;
         capabilities = status.capabilities;
+        await post("wellness/preferences/get", {});
         metrics = catalog.metrics;
         scheduleExpiry();
         showShell();
@@ -141,7 +184,7 @@ function showShell() {
   const shell = el('div', null, 'shell');
   const sidebar = el('aside', null, 'sidebar');
   const brand = el('a', null, 'brand'); brand.href = '#overview';
-  brand.append(el('span', 'h+', 'brand-mark'), el('span', 'helpyourself', 'wordmark'));
+  brand.append(el('span', '+', 'brand-mark'), el('span', 'Long Live Health', 'wordmark'));
   const nav = el('nav'); nav.setAttribute('aria-label', 'Main navigation');
   const items = [['overview', 'Overview', '01'], ['reports', 'Archive', '02'], ['trends', 'Trends', '03'], ['insights', 'Insights', '04'], ['data', 'Data', '05']];
   for (const [name, title, index] of items) {
@@ -293,12 +336,7 @@ async function reportView(id) {
     if (payload.notes) item.append(el('p', payload.notes));
     item.append(el('blockquote', payload.source.quote),
       actionButton(`Open source · page ${payload.source.page}`, () => preview(id, payload.source.page, data.report.original_name), 'quiet'));
-    const history = actionButton('Show revision history', async () => {
-      const signal = controller.signal;
-      const result = await post('observations/history', { observation_id: observation.observation_id });
-      if (!signal.aborted) { history.replaceWith(detail('Observation revisions', result.history)); }
-    }, 'quiet');
-    item.append(history, detail('Structured result and provenance', observation)); panel.append(item);
+    item.append(detail('Structured result and provenance', observation)); panel.append(item);
   }
   if (data.context) panel.append(detail('Report context', data.context));
   for (const page of data.pages) panel.append(detail(`Recognized text · page ${page.page} · ${page.status}`, page.content));
@@ -374,7 +412,7 @@ async function healthView() {
   daily.append(el('p', 'Sources remain separate. Missing days are not zero; sample averages are not daily clinical measurements.', 'muted'));
   if (!aggregate.days.length) daily.append(empty('No visible samples for this metric. Sync from your mobile device to add data.'));
   else daily.append(table(['Date', 'Value', 'Source', 'Samples', 'Method'], aggregate.days.map(day => [
-    day.date, day.value === null ? 'No visible samples' : `${numeric(day.value)} ${day.unit ?? ''}`, day.source, day.sample_count, day.algorithm,
+    day.date, day.value === null ? 'No visible samples' : `${numeric(day.value)} ${day.unit ?? ''}`, sourceText(day.source), day.sample_count, day.algorithm,
   ])));
   const sync = section('Sync coverage');
   sync.append(el('p', 'Coverage describes data visible to the syncing device. Empty queries do not establish whether permission was denied or data is absent.', 'muted'));
@@ -510,12 +548,12 @@ async function overviewView() {
     const card = section(metricNames[metric.record_type] ?? metric.record_type);
     const selected = metric.current.selected;
     card.append(el('p', selected ? `${numeric(selected.value)} ${selected.unit ?? ''}` : 'Not available', 'metric-value'));
-    card.append(badge(metric.current.state), el('p', selected?.source ?? (metric.current.state === 'source_selection_required' ? 'Choose the source to use for this metric.' : metric.current.state === 'query_limit_exceeded' ? 'This history exceeds the query limit. Open device records for a shorter range.' : 'No usable records for this day.'), 'muted'));
+    card.append(badge(metric.current.state), el('p', (selected ? sourceLabel(selected.source) : null) ?? (metric.current.state === 'source_selection_required' ? 'Choose the source to use for this metric.' : metric.current.state === 'query_limit_exceeded' ? 'This history exceeds the query limit. Open device records for a shorter range.' : 'No usable records for this day.'), 'muted'));
     if (metric.record_type === 'sleep' && selected && saved.preferences.sleep_target_minutes) card.append(el('p', `${numeric(selected.value / 60 - saved.preferences.sleep_target_minutes)} minutes relative to your daily target`, 'footnote'));
     if (metric.record_type === 'sleep') card.append(el('p', 'Calendar-day sleep total, including naps. This is not a nightly recovery score.', 'footnote'));
     const sources = [...new Set(metric.history.flatMap(day => day.alternatives.map(item => item.source)))];
     if (sources.length) {
-      const choice = select([['', 'Use only when one source is available'], ...sources.map(s => [s, s])], sourcePriority[metric.record_type]?.[0] ?? '');
+      const choice = select([['', 'Use only when one source is available'], ...sources.map(s => [s, sourceLabel(s)])], sourcePriority[metric.record_type]?.[0] ?? '');
       choice.addEventListener('change', () => action(choice, async () => {
         const priorities = { ...sourcePriority };
         if (choice.value) priorities[metric.record_type] = [choice.value];
@@ -528,7 +566,7 @@ async function overviewView() {
     card.append(el('p', metric.baseline ? `Previous 28 valid days: median ${numeric(metric.baseline.median)} ${selected?.unit ?? ''}` : `Personal baseline: ${metric.baseline_valid_days}/28 valid days`, 'footnote'));
     const spark = dailySparkline(metric); if (spark) card.append(spark);
     const history = el('details'); history.append(el('summary', 'History and source comparison'));
-    history.append(table(['Date', 'Source', 'Value', 'State'], metric.history.flatMap(day => day.alternatives.map(item => [day.date, item.source, `${numeric(item.value)} ${item.unit ?? ''}`, day.state]))));
+    history.append(table(['Date', 'Source', 'Value', 'State'], metric.history.flatMap(day => day.alternatives.map(item => [day.date, sourceText(item.source), `${numeric(item.value)} ${item.unit ?? ''}`, day.state]))));
     history.append(detail('Calculation evidence', { version: metric.algorithm_version, archive_revision: snapshot.data_revision, source_policy: snapshot.source_policy, baseline: metric.baseline, evidence_status: snapshot.evidence_status }));
     card.append(history); grid.append(card);
   }
@@ -542,9 +580,19 @@ async function overviewView() {
 async function dataView() {
   const wrap = el('div');
   const [sources, coverage, exported, imported] = await Promise.all([post('wellness/sources', {}), post('health/coverage', {}), post('exports/list', {}), post('wellness/import/list', { after_id: importCursor })]);
+  await post('wellness/preferences/get', {});
+  const aliases = section('Source aliases');
+  const keys = [...new Set([...sourceCatalog.map(item => item.source_key), ...Object.keys(sourcePreferences.preferences.source_aliases ?? {})])].sort();
+  for (const key of keys) {
+    const row = el('div', null, 'toolbar');
+    row.append(sourceText(key), actionButton('Edit alias', () => editSourceAlias(key), 'quiet'));
+    aliases.append(row);
+  }
+  if (!keys.length) aliases.append(empty('Import or sync data to add sources.'));
+  wrap.append(aliases);
   const panel = section('Data sources');
   panel.append(el('p', 'Visible records do not prove read permission or full device coverage. Connect and sync Apple Health in the iPhone app.', 'muted'));
-  panel.append(table(['Platform', 'Source', 'Type', 'Records', 'Latest'], sources.sources.map(s => [s.platform, s.source_id, s.record_type, s.record_count, dated(s.last_at)])));
+  panel.append(table(['Platform', 'Source', 'Type', 'Records', 'Latest'], sources.sources.map(s => [s.platform, sourceText(`${s.platform}:${s.source_id}`), s.record_type, s.record_count, dated(s.last_at)])));
   panel.append(detail('Sync coverage', coverage.coverage));
   const file = el('input'); file.type = 'file'; file.accept = '.gpx,.tcx,.fit,application/gpx+xml,application/xml';
   panel.append(field('Import a GPX, TCX, or FIT activity', file), actionButton('Import track', async () => {
@@ -584,7 +632,7 @@ async function dataView() {
       const blob = await client.exportArchive(item.export_id, signal);
       if (signal.aborted) return;
       const url = URL.createObjectURL(blob);
-      const link = el('a'); link.href = url; link.download = `helpyourself-${item.export_id}.zip`;
+      const link = el('a'); link.href = url; link.download = `longlivehealth-${item.export_id}.zip`;
       document.body.append(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     }, 'quiet'));
@@ -744,7 +792,7 @@ async function sleepView() {
   const wrap = el('div');
   wrap.append(el('p', 'Last 30 days. Sessions use observed records; gaps do not establish wakefulness. Confirm main sleep or naps without replacing the source observations.', 'muted'));
   for (const source of data.sources) {
-    const panel = section(source.source);
+    const panel = section(sourceLabel(source.source));
     for (const session of source.sessions) {
       const card = el('article', null, 'observation');
       card.append(el('h3', dated(session.end_at)), badge(session.state));
@@ -781,7 +829,7 @@ async function sleepView() {
   const panel = section('Seven-day sleep regularity');
   panel.append(el('p', 'This requires explicit sleep or wake states for every minute. Missing daytime records remain unknown.', 'footnote'));
   if (!regularity.sources.length) panel.append(empty('No source has sleep/wake intervals in this seven-day window.'));
-  for (const source of regularity.sources) panel.append(el('h3', source.source), el('p', source.value === null ? 'Not available' : `${numeric(source.value)} SRI`, 'metric-value'), badge(source.state), el('p', `${source.known_minutes}/${source.total_minutes} known minute states`, 'footnote'));
+  for (const source of regularity.sources) panel.append(el('h3', sourceLabel(source.source)), el('p', source.value === null ? 'Not available' : `${numeric(source.value)} SRI`, 'metric-value'), badge(source.state), el('p', `${source.known_minutes}/${source.total_minutes} known minute states`, 'footnote'));
   panel.append(detail('Regularity inputs and method', regularity)); wrap.append(panel);
   return wrap;
 }
@@ -859,7 +907,7 @@ async function seriesView() {
   const result = await post('wellness/series', {record_type: selectedSeries, start_at: end - (selectedSeries === 'heart_rate' ? 1 : 30) * 86400, end_at: end, maximum_gap_seconds: selectedSeries === 'heart_rate' ? heartRateParameters.gap : 900, declared_maximum: selectedSeries === 'heart_rate' && heartRateParameters.bpm !== '' ? {bpm: Number(heartRateParameters.bpm), source: heartRateParameters.source} : null});
   if (!result.sources.length) wrap.append(empty('No recorded measurements in this window.'));
   for (const source of result.sources) {
-    const panel = section(source.source); panel.append(badge(source.state));
+    const panel = section(sourceLabel(source.source)); panel.append(badge(source.state));
     const valid = source.points.filter(p => p.value !== null);
     if (valid.length) {
       const latest = valid[valid.length - 1];
@@ -887,7 +935,7 @@ async function seriesView() {
   if (selectedSeries === 'blood_glucose') evidence.append(el('p', 'Glucose summaries hold each sample until the next sample only when the gap is at most 15 minutes. Long gaps remain missing.', 'footnote'));
   evidence.append(button('Download calculation and inputs', () => {
     const url = URL.createObjectURL(new Blob([JSON.stringify(result, null, 2)], {type: 'application/json'}));
-    const link = el('a'); link.href = url; link.download = `helpyourself-${result.record_type}-${end}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const link = el('a'); link.href = url; link.download = `longlivehealth-${result.record_type}-${end}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, 'quiet'));
   wrap.append(evidence); return wrap;
 }
@@ -917,7 +965,7 @@ async function timelineView() {
     if (!data.events.length && cursor === null) panel.append(empty('No archived events in this window.'));
     for (const item of data.events) {
       const row = el('div', null, 'record-row');
-      row.append(el('p', `${dated(item.at)} · ${item.record_type.replaceAll('_', ' ')}`), el('p', `${item.source} · revision ${item.version} · ${item.time_semantics === 'upload' ? 'Uploaded' : 'Record starts'}`, 'footnote'));
+      row.append(el('p', `${dated(item.at)} · ${item.record_type.replaceAll('_', ' ')}`), el('p', `${sourceLabel(item.source)} · revision ${item.version} · ${item.time_semantics === 'upload' ? 'Uploaded' : 'Record starts'}`, 'footnote'));
       row.append(button('Open details', () => item.record_type === 'report' ? route('reports', item.record_id) : route(item.source === 'manual:helpyourself' ? 'entries' : item.record_type === 'sleep' ? 'sleep' : 'health'), 'quiet')); panel.append(row);
     }
     cursor = data.next_cursor;
@@ -961,7 +1009,7 @@ async function reviewView() {
   if (cycles.length) { const panel = section('Cycle observations'); panel.append(table(['Recorded', 'Flow', 'Context', 'Symptoms'], cycles.map(r => [dated(r.at), r.entry.content.flow, r.entry.content.context, r.entry.content.symptoms.join(', ')]))); wrap.append(panel); }
   for (const note of data.notes) wrap.append(el('p', note, 'footnote'));
   wrap.append(button('Download review and inputs', () => {
-    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'})); const link = el('a'); link.href = url; link.download = `helpyourself-log-review-${end}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'})); const link = el('a'); link.href = url; link.download = `longlivehealth-log-review-${end}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, 'quiet'));
   return wrap;
 }
@@ -1008,7 +1056,7 @@ async function associationsView() {
   const source = el('select');
   function refreshSources() {
     source.replaceChildren();
-    for (const item of sources.sources.filter(item => item.record_type === outcome.value)) { const option = el('option', `${item.platform}:${item.source_id}`); option.value = `${item.platform}:${item.source_id}`; source.append(option); }
+    for (const item of sources.sources.filter(item => item.record_type === outcome.value)) { const option = el('option', sourceLabel(`${item.platform}:${item.source_id}`)); option.value = `${item.platform}:${item.source_id}`; source.append(option); }
   }
   outcome.onchange = refreshSources; refreshSources();
   const end = el('input'); end.type = 'date'; end.required = true;
@@ -1022,7 +1070,7 @@ async function associationsView() {
   const output = section('Result'); output.append(empty('Run a declared analysis or open a saved result.'));
   const names = input => input.value.split('\n').map(s => s.trim()).filter(Boolean);
   function show(result) {
-    output.replaceChildren(el('h2', 'Result'), el('p', `Source: ${result.parameters.source} · End date: ${result.parameters.end_date}`, 'muted'));
+    output.replaceChildren(el('h2', 'Result'), el('p', `Source: ${sourceLabel(result.parameters.source)} · End date: ${result.parameters.end_date}`, 'muted'));
     for (const row of result.results) {
       const card = el('article', null, 'observation'); card.append(el('h3', row.behavior), badge(row.state), el('p', `${row.sample_days}/90 complete days · ${row.missing_days} missing or excluded`));
       if (row.estimate) {
@@ -1034,7 +1082,7 @@ async function associationsView() {
     }
     for (const note of result.notes) output.append(el('p', note, 'footnote'));
     output.append(detail('Fixed model protocol', result.protocol), button('Download result and inputs', () => {
-      const url = URL.createObjectURL(new Blob([JSON.stringify(result, null, 2)], {type: 'application/json'})); const link = el('a'); link.href = url; link.download = `helpyourself-associations-${result.result_id}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(result, null, 2)], {type: 'application/json'})); const link = el('a'); link.href = url; link.download = `longlivehealth-associations-${result.result_id}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     }, 'quiet'));
   }
   form.onsubmit = event => { event.preventDefault(); action(run, async () => {
@@ -1054,10 +1102,33 @@ async function hrvView() {
   for (const note of result.notes) wrap.append(el('p', note, 'notice'));
   if (!result.sources.length) wrap.append(empty('No archived NN or heartbeat windows in the last 90 days.'));
   for (const source of result.sources) {
-    const panel = section(source.source); panel.append(detail('Acquisition protocol', source.protocol));
+    const panel = section(sourceLabel(source.source)); panel.append(detail('Acquisition protocol', source.protocol));
     panel.append(table(['Date', 'lnRMSSD', 'Baseline days', 'Prior median', 'Prior MAD'], source.days.map(day => [day.date, numeric(day.ln_rmssd), `${day.baseline_days}/28`, numeric(day.baseline?.median), numeric(day.baseline?.mad)])));
     for (const window of source.windows) panel.append(detail(`${window.date} · ${window.state} · ${window.record_id}`, window));
     wrap.append(panel);
   }
   return wrap;
+}
+
+
+function showPasswordChange() {
+  root.replaceChildren();
+  const form = el('form', null, 'login-form panel');
+  form.append(el('h1', 'Change your initial password'));
+  const current = el('input'); current.type = 'password'; current.autocomplete = 'current-password'; current.required = true;
+  const replacement = el('input'); replacement.type = 'password'; replacement.autocomplete = 'new-password'; replacement.required = true; replacement.minLength = 12;
+  const confirmation = el('input'); confirmation.type = 'password'; confirmation.autocomplete = 'new-password'; confirmation.required = true;
+  const submit = el('button', 'Change password and sign out', 'primary'); submit.type = 'submit';
+  notice = el('p', '', 'notice'); notice.role = 'alert';
+  form.append(field('Current password', current), field('New password (at least 12 characters)', replacement), field('Confirm new password', confirmation), notice, submit);
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    if (replacement.value !== confirmation.value) { notice.textContent = 'New passwords do not match.'; return; }
+    action(submit, async () => {
+      await client.post('user/password/change', {current_password: current.value, new_password: replacement.value}, controller.signal);
+      current.value = ''; replacement.value = ''; confirmation.value = '';
+      showLogin('Password changed. Sign in with your new password.');
+    });
+  });
+  root.append(form);
 }

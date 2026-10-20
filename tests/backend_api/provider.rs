@@ -44,11 +44,11 @@ pub async fn mock() -> (String, tokio::task::JoinHandle<()>) {
 #[test]
 fn structured_response_requires_valid_complete_json() {
     assert_eq!(
-        helpyourself::provider::parse_json::<Value>("```json\n{\"ok\":true}\n```").unwrap()["ok"],
+        longlivehealth::provider::parse_json::<Value>("```json\n{\"ok\":true}\n```").unwrap()["ok"],
         true
     );
-    assert!(helpyourself::provider::parse_json::<Value>("```json {} ").is_err());
-    assert!(helpyourself::provider::parse_json::<Value>("not json").is_err());
+    assert!(longlivehealth::provider::parse_json::<Value>("```json {} ").is_err());
+    assert!(longlivehealth::provider::parse_json::<Value>("not json").is_err());
 }
 
 #[tokio::test]
@@ -85,12 +85,12 @@ async fn temporary_provider_failure_retries_but_auth_failure_does_not() {
         let task = tokio::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
-        let mut config: helpyourself::config::Config =
-            toml::from_str(helpyourself::config::TEMPLATE).unwrap();
+        let mut config: longlivehealth::config::Config =
+            toml::from_str(longlivehealth::config::TEMPLATE).unwrap();
         config.providers.analysis.enabled = true;
         config.providers.analysis.api_key = "synthetic-analysis-key".into();
         config.providers.analysis.base_url = format!("http://{address}/v1");
-        let result = helpyourself::provider::probe(&config.providers.analysis).await;
+        let result = longlivehealth::provider::probe(&config.providers.analysis).await;
         assert_eq!(result.is_ok(), code == 429);
         assert_eq!(
             attempts.load(Ordering::SeqCst),

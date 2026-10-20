@@ -1,6 +1,6 @@
 use crate::{add_user, archive, confirm, fixture, observation_payload};
-use helpyourself::laboratory::normalized;
-use helpyourself::reports::{ReviewItem, ReviewRequest, TrendRequest, trends};
+use longlivehealth::laboratory::normalized;
+use longlivehealth::reports::{ReviewItem, ReviewRequest, TrendRequest, trends};
 
 #[tokio::test]
 async fn partial_review_history_and_conflicts_are_transactional() {
@@ -81,7 +81,7 @@ async fn partial_review_history_and_conflicts_are_transactional() {
             .as_array()
             .unwrap()
             .len(),
-        2
+        1
     );
     assert!(
         state

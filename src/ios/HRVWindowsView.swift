@@ -14,7 +14,7 @@ struct HRVWindowsView: View {
                 if result["sources"].arrayValue.isEmpty { Text("No archived NN or heartbeat windows in the last 90 days.") }
             }
             ForEach(Array(result["sources"].arrayValue.enumerated()), id: \.offset) { _, source in
-                Section(source["source"].stringValue) {
+                Section(model.sourceLabel(source["source"].stringValue)) {
                     ForEach(["device_model", "firmware", "protocol_id", "context", "posture"], id: \.self) { key in
                         LabeledContent(key.replacingOccurrences(of: "_", with: " ").capitalized, value: source["protocol"][key].stringValue.isEmpty ? "Unknown" : source["protocol"][key].stringValue).font(.caption)
                     }
@@ -44,7 +44,7 @@ struct HRVWindowsView: View {
                     }
                 }
             }
-        }.navigationTitle("HRV windows").task { await load() }.refreshable { await load() }
+        }.navigationTitle("HRV windows").initialTask { await load() }.refreshable { await load() }
     }
     private func load() async {
         guard let client = model.client, let token = model.session?.token else { return }

@@ -1,6 +1,6 @@
 use crate::{add_user, fixture};
 use axum::http::StatusCode;
-use helpyourself::{
+use longlivehealth::{
     health::{ConnectionRequest, HealthRecordInput, SyncRequest},
     models::ListRequest,
 };
@@ -13,7 +13,7 @@ async fn raw_health_is_indexed_replayable_exported_isolated_and_deleted() {
     let other = add_user(&state, "bob").await;
     let token = crate::token(&state, "alice").await;
     let other_token = crate::token(&state, "bob").await;
-    let app = helpyourself::app::create_application(state.clone());
+    let app = longlivehealth::app::create_application(state.clone());
     for platform in ["apple_health", "health_connect"] {
         let connection = state
             .database
@@ -75,11 +75,12 @@ async fn raw_health_is_indexed_replayable_exported_isolated_and_deleted() {
             .unwrap();
         let raw_id = file["raw_id"].as_str().unwrap();
         let path = file["relative_path"].as_str().unwrap();
-        assert!(path.starts_with(if platform == "apple_health" {
-            "raw/apple_health/"
+        let source = if platform == "apple_health" {
+            "apple_health"
         } else {
-            "raw/google_health/"
-        }));
+            "google_health"
+        };
+        assert!(path.starts_with(&format!("raw/{}/{source}/", user.user_id)));
         let bytes = std::fs::read(state.config.data_dir.join(path)).unwrap();
         assert_eq!(
             serde_json::from_slice::<Value>(&bytes).unwrap(),
@@ -104,7 +105,7 @@ async fn raw_health_is_indexed_replayable_exported_isolated_and_deleted() {
             json!([])
         );
         let export = state.database.request_export(&user.user_id).await.unwrap();
-        helpyourself::maintenance::export_next(&state)
+        longlivehealth::maintenance::export_next(&state)
             .await
             .unwrap();
         let export_path = state
@@ -136,7 +137,7 @@ async fn raw_health_is_indexed_replayable_exported_isolated_and_deleted() {
                 .await
                 .is_err()
         );
-        helpyourself::maintenance::cleanup(&state).await.unwrap();
+        longlivehealth::maintenance::cleanup(&state).await.unwrap();
         assert!(!state.config.data_dir.join(path).exists());
     }
 }
@@ -144,16 +145,74 @@ async fn raw_health_is_indexed_replayable_exported_isolated_and_deleted() {
 #[test]
 fn raw_cleanup_paths_cannot_escape_a_source_and_owner() {
     let user = uuid::Uuid::new_v4();
-    assert!(helpyourself::raw::valid_relative_path(&format!(
-        "raw/photos/{user}/image"
+    assert!(longlivehealth::raw::valid_relative_path(&format!(
+        "raw/{user}/function_health/image"
     )));
     for path in [
+        format!("raw/function_health/{user}/image"),
+        format!("raw/{user}/function_health/nested/image"),
+        format!("raw/{user}/function_health/../image"),
+    ] {
+        assert!(!longlivehealth::raw::valid_relative_path(&path));
+    }
+    for path in [
         "raw/../../etc/passwd",
-        "raw/photos/not-a-user/image",
+        "raw/function_health/not-a-user/image",
         "raw/unknown/user/file",
-        "raw/photos/../file",
+        "raw/function_health/../file",
         "raw\\photos\\file",
     ] {
-        assert!(!helpyourself::raw::valid_relative_path(path));
+        assert!(!longlivehealth::raw::valid_relative_path(path));
     }
+}
+
+#[tokio::test]
+async fn report_source_groups_originals_and_source_changes_preserve_bytes() {
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "alice").await;
+    let file_id = crate::archive(&state, "alice").await;
+    let old = state.database.file(&user.user_id, &file_id).await.unwrap();
+    let bytes = std::fs::read(state.config.data_dir.join(&old.relative_path)).unwrap();
+    for source in ["Function Health", "Other Clinic", "Function Health"] {
+        let report = state
+            .database
+            .report_summary(&user.user_id, &file_id)
+            .await
+            .unwrap();
+        state
+            .database
+            .review(
+                &user.user_id,
+                longlivehealth::reports::ReviewRequest {
+                    report_id: file_id.clone(),
+                    expected_revision: report.revision,
+                    context: Some(serde_json::from_value(json!({"source_name":source})).unwrap()),
+                    observations: vec![],
+                },
+            )
+            .await
+            .unwrap();
+        let file = state.database.file(&user.user_id, &file_id).await.unwrap();
+        assert!(file.relative_path.starts_with(&format!(
+            "raw/{}/{}/",
+            user.user_id,
+            longlivehealth::raw::source_folder(source)
+        )));
+        assert!(file.relative_path.ends_with(".png"));
+        assert_eq!(
+            std::fs::read(state.config.data_dir.join(&file.relative_path)).unwrap(),
+            bytes
+        );
+        assert!(state.config.data_dir.join(&file.relative_path).exists());
+    }
+    longlivehealth::maintenance::cleanup(&state).await.unwrap();
+    longlivehealth::raw::remove_orphans(&state.database, &state.config.data_dir)
+        .await
+        .unwrap();
+    let file = state.database.file(&user.user_id, &file_id).await.unwrap();
+    assert_eq!(
+        std::fs::read(state.config.data_dir.join(file.relative_path)).unwrap(),
+        bytes
+    );
+    assert!(!state.config.data_dir.join(old.relative_path).exists());
 }

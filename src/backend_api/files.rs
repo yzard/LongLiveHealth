@@ -165,7 +165,7 @@ pub async fn receive_upload(
         });
     }
     let file_id = uuid::Uuid::new_v4().to_string();
-    let relative_path = crate::raw::document_path(user_id, &file_id, &content_type);
+    let relative_path = crate::raw::document_path(user_id, &file_id, &content_type, None);
     let processing_path = original
         .as_ref()
         .map(|_| format!("derived/{user_id}/{file_id}/input.jpg"));
@@ -195,8 +195,11 @@ pub async fn receive_upload(
     } else {
         tokio::fs::rename(pending.path(), &final_path).await?;
     }
-    crate::raw::sync_directory(directory).await?;
-    crate::raw::sync_directory(directory.parent().ok_or(AppError::Internal)?).await?;
+    let mut paths = vec![file.relative_path.as_str()];
+    if let Some(path) = file.processing_path.as_deref() {
+        paths.push(path);
+    }
+    crate::raw::sync_archive_directories(&state.config.data_dir, &paths).await?;
     // A crash before the database commit can leave an orphan; never leave a row pointing at an unwritten file.
     let saved = state.database.archive_file(user_id, &file).await;
     let job = match saved {

@@ -4,7 +4,7 @@
 
 历史记录：服务目录、OCR 架构和当前验证证据已由 [独立 OCR 服务审查](2026-10-01-backend-ocr-service.md) 更新；以下保留当时的实现及结果。
 
-日期：2026-10-01。范围是整个 helpyourself 工作树（含此前未提交改动），不是 /home/zyin/dev 的其他项目。审查包括 Rust/SQLite、iOS、Python 辅助与测试、构建/Compose、文档和运行数据边界。适用技能已经读取；同名的 dev/skills 和 .agents/skills 版本也核对，不把无关平台/工具技能强套到本仓库。
+日期：2026-10-01。范围是整个 Long Live Health 工作树（含此前未提交改动），不是 /home/zyin/dev 的其他项目。审查包括 Rust/SQLite、iOS、Python 辅助与测试、构建/Compose、文档和运行数据边界。适用技能已经读取；同名的 dev/skills 和 .agents/skills 版本也核对，不把无关平台/工具技能强套到本仓库。
 
 结论：主档案重构和本环境验证完成；**尚不能宣称全部适用 skills 完全通过**。Axum 的阻塞工作隔离还有两项实际缺口；Swift 的完整 SDK/设备证据尚缺。原件目录、schema、归属、接口、调用者和导出/删除已对齐。详见下方逐项结果。
 
@@ -68,7 +68,7 @@ F01/F02 是技能符合性缺口；F03–F05 是证据/能力限制，不能用�
 | Rust | 50 项测试通过；fmt、严格 Clippy 通过；含来源原件/历史、跨用户、重放、通配删除、HEIC 双输入、失败 OCR 完整回复、导出/账户删除 |
 | Swift | build_ios.sh --core-only 全部源码语法解析；5 项 Core Swift Testing 通过，含字节/500 条批次边界与离线检查点 |
 | 脚本/配置 | 6 项 Python 流程/网络辅助测试、isort/Black、bash -n、Compose config、git diff --check 通过 |
-| Docker | build_docker.sh 成功生成 helpyourself:local；镜像构建内 fmt/Clippy/50 项测试/release 编译通过 |
+| Docker | build_docker.sh 成功生成 longlivehealth:local；镜像构建内 fmt/Clippy/50 项测试/release 编译通过 |
 | 合成部署 | tests/docker/deployment.py 在独立容器/卷完成可信测试 CA HTTPS、登录/上传/审核/趋势/原件/ZIP、重启持久化、停服复制恢复、报告/账户删除，结束清理测试资源 |
 | SQLite 查询计划 | HEALTH_RANGE 使用 health_records_range，有局部排序；原件清理使用 health_revisions_record；索引列表按用户走复合唯一索引。不是大规模性能基准 |
 | 未执行 | macOS/Xcode、签名、模拟器执行、iPhone/Watch、真实报告/实际 OCR 模型、真实临床准确性 |

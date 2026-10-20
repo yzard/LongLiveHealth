@@ -17,16 +17,20 @@ import Foundation
         let records: [JSONValue]
     }
 
-    static func synchronize(store: HKHealthStore, client: APIClient, archive: LocalArchive, connectionID: String, installationID: UUID, includeSelectedRecords: Bool = false) async throws -> [String] {
+    static func synchronize(store: HKHealthStore, client: APIClient, archive: LocalArchive, connectionID: String, installationID: UUID, includeSelectedRecords: Bool, progress: @MainActor (String, Int?) -> Void) async throws -> [String] {
         var failed: [String] = []
         var kinds = characteristics.map(\.rawValue) + ["activity_summary", "cda_document"]
         if #available(iOS 26.0, *), includeSelectedRecords { kinds.append("user_annotated_medications") }
         for kind in kinds {
             try Task.checkCancellation()
+            progress(kind, nil)
             let pendingName = "pending-snapshot-\(kind).json"
             let savedName = "snapshot-\(kind).json"
             if let pending = try archive.load(Checkpoint.self, name: pendingName) {
-                for request in pending.requests { _ = try await client.post("health/sync", body: request) }
+                for request in pending.requests {
+                    let response = try await client.post("health/sync", body: request)
+                    progress(kind, try HealthSyncProgress.totalRecords(in: response))
+                }
                 try archive.save(pending.records, name: savedName)
                 try archive.remove(name: pendingName)
             }
@@ -34,8 +38,13 @@ import Foundation
             do { values = try await read(kind, store: store) }
             catch is CancellationError { throw CancellationError() }
             catch {
-                let requests = try HealthSyncBatch.requests(connectionID: connectionID, recordType: kind, coverageStatus: "error", records: [], maximumRecords: 500, maximumBytes: 40 * 1024 * 1024)
-                for request in requests { _ = try await client.post("health/sync", body: request) }
+                try Task.checkCancellation()
+                if HealthBridge.isProtectedDataError(error) { throw error }
+                let requests = try HealthSyncBatch.requests(connectionID: connectionID, recordType: kind, coverageStatus: "error", records: [], maximumRecords: HealthSyncBatch.maximumRecords, maximumBytes: 40 * 1024 * 1024)
+                for request in requests {
+                    let response = try await client.post("health/sync", body: request)
+                    progress(kind, try HealthSyncProgress.totalRecords(in: response))
+                }
                 failed.append(kind); continue
             }
             let previous = try archive.load([JSONValue].self, name: savedName) ?? []
@@ -54,9 +63,12 @@ import Foundation
             let visibleIDs = Set(records.map { $0["record_id"].stringValue })
             records += previous.filter { !visibleIDs.contains($0["record_id"].stringValue) }
             let requests = try HealthSyncBatch.requests(connectionID: connectionID, recordType: kind,
-                coverageStatus: values.isEmpty ? "no_visible_samples" : "observed", records: changed, maximumRecords: 500, maximumBytes: 40 * 1024 * 1024)
+                coverageStatus: values.isEmpty ? "no_visible_samples" : "observed", records: changed, maximumRecords: HealthSyncBatch.maximumRecords, maximumBytes: 40 * 1024 * 1024)
             try archive.save(Checkpoint(requests: requests, records: records), name: pendingName)
-            for request in requests { _ = try await client.post("health/sync", body: request) }
+            for request in requests {
+                    let response = try await client.post("health/sync", body: request)
+                    progress(kind, try HealthSyncProgress.totalRecords(in: response))
+                }
             try archive.save(records, name: savedName)
             try archive.remove(name: pendingName)
         }

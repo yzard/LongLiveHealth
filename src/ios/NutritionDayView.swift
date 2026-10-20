@@ -31,7 +31,7 @@ struct NutritionDayView: View {
                 }
             }
             ForEach(result["notes"].arrayValue.map(\.stringValue), id: \.self) { Text($0).font(.caption) }
-        }.navigationTitle("Nutrition").task(id: date) { await load() }.refreshable { await load() }
+        }.navigationTitle("Nutrition").initialTask(id: date) { await load() }.refreshable { await load() }
     }
     private func load() async {
         guard let client = model.client, let token = model.session?.token else { return }

@@ -3,8 +3,8 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use helpyourself::app::create_application;
 use http_body_util::BodyExt;
+use longlivehealth::app::create_application;
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -13,7 +13,7 @@ async fn embedded_viewer_assets_are_served_with_correct_types_and_security_heade
     let (_directory, state) = fixture().await;
     let router = create_application(state);
     for (path, content_type, expected) in [
-        ("/", "text/html; charset=utf-8", "<title>helpyourself"),
+        ("/", "text/html; charset=utf-8", "<title>Long Live Health"),
         ("/assets/app.css", "text/css; charset=utf-8", ".sidebar"),
         (
             "/assets/app.mjs",

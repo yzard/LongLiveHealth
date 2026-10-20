@@ -1,4 +1,4 @@
-use helpyourself::{error::AppError, execution::CpuExecutor, temporary::TemporaryFiles};
+use longlivehealth::{error::AppError, execution::CpuExecutor, temporary::TemporaryFiles};
 use std::time::Duration;
 
 #[tokio::test]

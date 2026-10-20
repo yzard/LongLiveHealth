@@ -59,7 +59,7 @@ struct CoachAnswerView: View {
                     Text(claim["text"].stringValue)
                     ForEach(claim["evidence_ids"].arrayValue.map(\.stringValue), id: \.self) { id in
                         if let evidence = run["input"]["evidence"].arrayValue.first(where: { $0["id"].stringValue == id }) {
-                            DisclosureGroup("Source: " + id) { Text(evidence["value"].selfDescription).font(.caption).textSelection(.enabled) }
+                            DisclosureGroup("Source: " + id) { Text(evidence["value"].formattedJSON).font(.caption).textSelection(.enabled) }
                         }
                     }
                 }
@@ -114,7 +114,7 @@ private struct CoachMemoryView: View {
         List {
             Button("Add memory") { selected = Selection(item: nil) }
             Text("Enabled memories provide preferences and context. They do not become confirmed clinical facts. Deletion invalidates saved analyses that used the archive.").font(.caption)
-            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+            ForEach(items, id: \.identifier) { item in
                 Section(item["entry"]["content"]["name"].stringValue) {
                     Text(item["entry"]["content"]["content"].stringValue)
                     Text(item["entry"]["content"]["enabled"].boolValue ? "Enabled" : "Disabled").font(.caption)
@@ -122,8 +122,9 @@ private struct CoachMemoryView: View {
                     Button("Delete", role: .destructive) { Task { await remove(item) } }
                 }
             }
-        }.navigationTitle("Editable memory").task { await load() }
-            .sheet(item: $selected, onDismiss: { Task { await load() } }) { selection in
+        }.navigationTitle("Editable memory").initialTask { await load() }
+            .onChange(of: model.entryMutation) { _, change in if let change { items = change.applying(to: items) { $0["entry"]["kind"].stringValue == "memory" } } }
+            .sheet(item: $selected) { selection in
                 NavigationStack { LogEditor(model: model, existing: selection.item, initialKind: "memory", initialValues: [:], initialDate: Date()) }
             }
     }
@@ -138,6 +139,5 @@ private struct CoachMemoryView: View {
             guard let client = model.client else { return }
             _ = try await model.request("wellness/entries/delete", body: .object(["record_id": item["record_id"], "version": .number((item["version"].numberValue ?? 0) + 1), "batch_id": .string(UUID().uuidString), "kind": .string("memory")]))
         }
-        await load()
     }
 }

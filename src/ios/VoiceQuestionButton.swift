@@ -52,7 +52,7 @@ struct VoiceQuestionButton: View {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
             try session.setActive(true); audioActive = true
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent("helpyourself-question-\(UUID().uuidString).m4a")
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("longlivehealth-question-\(UUID().uuidString).m4a")
             audioURL = url
             let recorder = try AVAudioRecorder(url: url, settings: [AVFormatIDKey: Int(kAudioFormatMPEG4AAC), AVSampleRateKey: 16000, AVNumberOfChannelsKey: 1])
             self.recorder = recorder

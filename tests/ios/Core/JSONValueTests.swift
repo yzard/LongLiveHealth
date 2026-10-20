@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import HelpYourselfCore
+@testable import LongLiveHealthCore
 
 @Test func nestedJSONRoundTripAndStableObservationIdentity() throws {
     let source = Data(#"{"report_id":"r","observation_id":"o","value":"1.23","active":true,"empty":null,"rows":[2]}"#.utf8)

@@ -4,7 +4,7 @@ use tower::ServiceExt;
 #[tokio::test]
 async fn responses_are_private_and_request_ids_are_server_generated() {
     let (_directory, state) = crate::fixture().await;
-    let response = helpyourself::app::create_application(state)
+    let response = longlivehealth::app::create_application(state)
         .oneshot(
             Request::builder()
                 .method("POST")

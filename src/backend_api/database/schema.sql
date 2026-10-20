@@ -5,6 +5,7 @@ CREATE TABLE users (
     credential_version INTEGER NOT NULL DEFAULT 1,
     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     created_at INTEGER NOT NULL,
+    must_change_password INTEGER NOT NULL DEFAULT 0 CHECK (must_change_password IN (0, 1)),
     data_revision INTEGER NOT NULL DEFAULT 0
 );
 
@@ -75,20 +76,13 @@ CREATE TABLE observations (
     user_id TEXT NOT NULL,
     report_id TEXT NOT NULL,
     current_revision INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'rejected')),
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    updated_at INTEGER NOT NULL DEFAULT 0,
     candidate_key TEXT,
     UNIQUE (user_id, observation_id),
     UNIQUE (user_id, report_id, candidate_key),
     FOREIGN KEY (user_id, report_id) REFERENCES reports (user_id, report_id) ON DELETE CASCADE
-);
-CREATE TABLE observation_revisions (
-    user_id TEXT NOT NULL,
-    observation_id TEXT NOT NULL,
-    revision INTEGER NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'rejected')),
-    payload_json TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    PRIMARY KEY (user_id, observation_id, revision),
-    FOREIGN KEY (user_id, observation_id) REFERENCES observations (user_id, observation_id) ON DELETE CASCADE
 );
 CREATE INDEX observations_report ON observations (user_id, report_id);
 CREATE TABLE report_relations (
@@ -133,24 +127,24 @@ CREATE TABLE health_records (
     version INTEGER NOT NULL,
     deleted INTEGER NOT NULL CHECK (deleted IN (0, 1)),
     payload_json TEXT NOT NULL,
-    PRIMARY KEY (user_id, platform, source_id, record_id),
+    raw_id TEXT,
+    PRIMARY KEY (user_id, platform, record_id, source_id),
     FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
 );
 CREATE INDEX health_records_range ON health_records (user_id, record_type, start_at, end_at);
 CREATE INDEX health_records_end ON health_records (user_id, record_type, end_at, start_at);
-CREATE TABLE health_revisions (
+CREATE TABLE health_originals (
     user_id TEXT NOT NULL,
     platform TEXT NOT NULL CHECK (platform IN ('apple_health', 'health_connect', 'manual', 'file_import')),
     source_id TEXT NOT NULL,
     record_id TEXT NOT NULL,
-    revision_id TEXT NOT NULL,
+    raw_id TEXT NOT NULL,
     raw_path TEXT NOT NULL UNIQUE,
-    payload_json TEXT NOT NULL,
     received_at INTEGER NOT NULL,
-    PRIMARY KEY (user_id, revision_id),
+    PRIMARY KEY (user_id, raw_id),
     FOREIGN KEY (user_id, platform, source_id, record_id) REFERENCES health_records (user_id, platform, source_id, record_id) ON DELETE CASCADE
 );
-CREATE INDEX health_revisions_record ON health_revisions (user_id, platform, source_id, record_id);
+CREATE INDEX health_originals_identity ON health_originals (user_id, platform, record_id, source_id);
 CREATE TABLE sync_batches (
     user_id TEXT NOT NULL,
     connection_id TEXT NOT NULL,
@@ -278,4 +272,40 @@ CREATE TRIGGER requeue_daily_views AFTER UPDATE OF data_revision ON users
 WHEN NEW.data_revision != OLD.data_revision
 BEGIN
     UPDATE daily_views SET input_revision=NEW.data_revision,status='queued',result_json=NULL,claim_token=NULL,lease_until=NULL,attempts=0,error_code=NULL WHERE user_id=NEW.user_id;
+END;
+
+ALTER TABLE sessions ADD COLUMN refresh_hash TEXT;
+ALTER TABLE sessions ADD COLUMN refresh_expires_at INTEGER;
+ALTER TABLE sessions ADD COLUMN previous_token_hash TEXT;
+ALTER TABLE sessions ADD COLUMN previous_expires_at INTEGER;
+ALTER TABLE sessions ADD COLUMN previous_refresh_hash TEXT;
+CREATE UNIQUE INDEX sessions_refresh ON sessions (refresh_hash);
+CREATE UNIQUE INDEX sessions_previous_refresh ON sessions (previous_refresh_hash);
+CREATE UNIQUE INDEX sessions_previous_token ON sessions (previous_token_hash);
+
+CREATE INDEX health_records_sources ON health_records (user_id, platform, source_id, record_type, start_at, end_at) WHERE deleted = 0;
+
+CREATE TABLE health_totals (
+    user_id TEXT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
+    record_count INTEGER NOT NULL CHECK (record_count >= 0)
+);
+INSERT INTO health_totals (user_id, record_count)
+SELECT user_id, COUNT(*) FROM health_records
+WHERE platform IN ('apple_health', 'health_connect') AND deleted = 0 GROUP BY user_id;
+CREATE TRIGGER health_total_insert AFTER INSERT ON health_records
+WHEN NEW.platform IN ('apple_health', 'health_connect') AND NEW.deleted = 0
+BEGIN
+    INSERT INTO health_totals (user_id, record_count) VALUES (NEW.user_id, 1)
+    ON CONFLICT (user_id) DO UPDATE SET record_count = record_count + 1;
+END;
+CREATE TRIGGER health_total_delete AFTER DELETE ON health_records
+WHEN OLD.platform IN ('apple_health', 'health_connect') AND OLD.deleted = 0
+BEGIN
+    UPDATE health_totals SET record_count = record_count - 1 WHERE user_id = OLD.user_id;
+END;
+CREATE TRIGGER health_total_update AFTER UPDATE OF deleted ON health_records
+WHEN NEW.platform IN ('apple_health', 'health_connect') AND NEW.deleted != OLD.deleted
+BEGIN
+    INSERT INTO health_totals (user_id, record_count) VALUES (NEW.user_id, 1 - NEW.deleted)
+    ON CONFLICT (user_id) DO UPDATE SET record_count = record_count + OLD.deleted - NEW.deleted;
 END;

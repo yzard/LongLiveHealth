@@ -4,7 +4,7 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 use std::str::FromStr;
 
-pub const CONVERSION_VERSION: &str = "lab-units-v3";
+pub const CONVERSION_VERSION: &str = "lab-units-v5";
 pub const CANONICAL_UNITS: &[&str] = &[
     "mg/dL", "mg/L", "g/L", "g/dL", "mmol/L", "µmol/L", "ng/mL", "µg/L", "µg/mL", "ng/L", "%",
     "mmol/mol", "fL", "U/L", "10^9/L",
@@ -73,15 +73,27 @@ pub fn canonical_unit(raw: &str) -> Option<&'static str> {
         "g/dL" | "g/dl" | "G/DL" => Some("g/dL"),
         "mmol/L" | "mmol/l" | "MMOL/L" => Some("mmol/L"),
         "umol/L" | "umol/l" | "UMOL/L" => Some("µmol/L"),
-        "ng/mL" | "ng/ml" | "NG/ML" => Some("ng/mL"),
+        "ng/mL" | "ng/ml" | "NG/ML" | "NG/mL" | "NG/ml" => Some("ng/mL"),
         "ug/L" | "ug/l" | "UG/L" => Some("µg/L"),
         "ug/mL" | "ug/ml" | "UG/ML" => Some("µg/mL"),
         "ng/L" | "ng/l" | "NG/L" => Some("ng/L"),
+        "ng/dL" | "ng/dl" | "NG/dL" | "NG/dl" | "NG/DL" => Some("ng/dL"),
+        "pg/mL" | "pg/ml" | "PG/mL" | "PG/ML" => Some("pg/mL"),
+        "pg" | "PG" => Some("pg"),
+        "mIU/L" | "mIU/l" | "uIU/mL" | "uIU/ml" => Some("mIU/L"),
+        "mL/min/1.73m2" | "ml/min/1.73m2" | "mL/min/{1.73_m2}" => Some("mL/min/1.73m2"),
+        "s" | "sec" | "second(s)" => Some("s"),
+        "10^12/L" | "10*12/L" | "10¹²/L" | "10^6/uL" | "10*6/uL" | "x10(6)/uL" | "M/uL" => {
+            Some("10^12/L")
+        }
         "%" | "%NGSP" | "NGSP%" => Some("%"),
         "mmol/mol" | "MMOL/MOL" => Some("mmol/mol"),
         "fL" | "fl" => Some("fL"),
         "U/L" | "IU/L" => Some("U/L"),
-        "10^9/L" | "10⁹/L" | "10^3/uL" | "10³/uL" => Some("10^9/L"),
+        "10^9/L" | "10⁹/L" | "10^3/uL" | "10³/uL" | "10*9/L" | "10*3/uL" | "K/uL" | "x10(3)/uL"
+        | "x10^3/uL" | "×10^3/uL" | "×10³/uL" | "x10^9/L" | "x10(9)/L" | "×10^9/L" | "×10⁹/L" => {
+            Some("10^9/L")
+        }
         _ => None,
     }
 }

@@ -28,7 +28,7 @@ command -v xcodegen >/dev/null || { echo 'Install XcodeGen before building iOS' 
 command -v xcodebuild >/dev/null || { echo 'Select a full Xcode installation before building iOS' >&2; exit 1; }
 mkdir -p build/ios dist/ios
 xcodegen generate --spec src/ios/project.yml --project build/ios
-XCODE=(xcodebuild -project build/ios/Helpyourself.xcodeproj -scheme Helpyourself -derivedDataPath build/ios/DerivedData)
+XCODE=(xcodebuild -project build/ios/LongLiveHealth.xcodeproj -scheme LongLiveHealth -derivedDataPath build/ios/DerivedData)
 "${XCODE[@]}" -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGN_IDENTITY=- build-for-testing
 if [ -n "$TEST_DESTINATION" ]; then
     # Native tests use synthetic data and a loopback-only API fixture.
@@ -50,6 +50,6 @@ PY
     "${XCODE[@]}" -sdk iphonesimulator -destination "$TEST_DESTINATION" -parallel-testing-enabled NO CODE_SIGN_IDENTITY=- test-without-building
 fi
 "${XCODE[@]}" -sdk iphoneos -destination 'generic/platform=iOS' -configuration Release CODE_SIGNING_ALLOWED=NO build
-rm -rf "$PROJECT_ROOT/dist/ios/Helpyourself.app"
-ditto build/ios/DerivedData/Build/Products/Release-iphoneos/Helpyourself.app dist/ios/Helpyourself.app
-echo 'Unsigned device app: dist/ios/Helpyourself.app. Signing and provisioning are required to install it.'
+rm -rf "$PROJECT_ROOT/dist/ios/LongLiveHealth.app"
+ditto build/ios/DerivedData/Build/Products/Release-iphoneos/LongLiveHealth.app dist/ios/LongLiveHealth.app
+echo 'Unsigned device app: dist/ios/LongLiveHealth.app. Signing and provisioning are required to install it.'

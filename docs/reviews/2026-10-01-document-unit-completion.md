@@ -2,7 +2,7 @@
 
 后续：F01/F02 已于 2026-10-02 整改并通过负载与生命周期验证，当前结论见[服务端补齐验收](2026-10-02-server-lifecycle-and-load.md)；下文保留发现当日的证据与状态。
 
-日期：2026-10-01。范围是 helpyourself 整个仓库中的本轮变更及已有 skills 发现复核。用户授权按[补齐计划](../implementation-document-units.md)逐项实施；未使用其他项目或代理，未提交 Git、发布镜像或启动用户 playground，也未改动真实健康数据。
+日期：2026-10-01。范围是 Long Live Health 整个仓库中的本轮变更及已有 skills 发现复核。用户授权按[补齐计划](../implementation-document-units.md)逐项实施；未使用其他项目或代理，未提交 Git、发布镜像或启动用户 playground，也未改动真实健康数据。
 
 结论：计划中 7 项文档输入/单位补齐已实现并通过本环境验收。API schema v7、导出 v3、document-evidence-v1、laboratory-page-v2、lab-units-v2 一致；没有迁移或旧接口兼容包装。**全仓库适用 skills 尚不能标成全部通过**：F01/F02 原有阻塞工作隔离仍需整改，Apple SDK/设备及真实报告准确性缺少外部证据。
 
@@ -36,7 +36,7 @@
 
 ## Skills 复查
 
-本轮复查以下适用技能；项目专属 Receipt Master 条款不应用于 helpyourself，用户明确的 TOML/current schema/无迁移和既有会话契约优先。同名重复技能沿用[独立服务审查](2026-10-01-backend-ocr-service.md)已读取版本的对应要求。
+本轮复查以下适用技能；项目专属 Receipt Master 条款不应用于 Long Live Health，用户明确的 TOML/current schema/无迁移和既有会话契约优先。同名重复技能沿用[独立服务审查](2026-10-01-backend-ocr-service.md)已读取版本的对应要求。
 
 | Skill | 本轮检查与结论 |
 | --- | --- |

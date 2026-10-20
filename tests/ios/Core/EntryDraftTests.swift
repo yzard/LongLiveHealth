@@ -1,5 +1,5 @@
 import Testing
-@testable import HelpYourselfCore
+@testable import LongLiveHealthCore
 
 @Test func entryDraftPreservesUnknownsAndRoundTripsSets() throws {
     let entry = try EntryDraft.encode(kind: "training", values: ["activity": "Strength", "duration_minutes": "45", "ended_at": "2026-01-01T01:00:00Z", "paused_minutes": "0", "sets": "Squat, 5, 60\nPress, 3, 20"])

@@ -1,5 +1,5 @@
 use crate::observation_payload;
-use helpyourself::laboratory::{canonical_unit, interpret, metrics, normalized};
+use longlivehealth::laboratory::{canonical_unit, interpret, metrics, normalized};
 
 #[test]
 fn analyte_specific_conversions_and_aliases_retain_printed_payload() {
@@ -16,6 +16,10 @@ fn analyte_specific_conversions_and_aliases_retain_printed_payload() {
         ("albumin", "45", "g/L", "4.5", "g/dL"),
         ("crp", "1", "mg/L", "0.1", "mg/dL"),
         ("wbc", "5", "10^3/µL", "5", "10^9/L"),
+        ("wbc", "5", "K/uL", "5", "10^9/L"),
+        ("wbc", "5", "x10(3)/uL", "5", "10^9/L"),
+        ("wbc", "5", "10*3/uL", "5", "10^9/L"),
+        ("wbc", "5", "10*9/L", "5", "10^9/L"),
         ("mcv", "90", "fL", "90", "fL"),
         ("alp", "60", "IU/L", "60", "U/L"),
     ] {
@@ -123,4 +127,22 @@ fn small_values_and_identity_precision_are_not_rounded_into_zero() {
     assert_eq!(normalized(&input).unwrap().0, "0.0000001");
     input.raw_unit = Some("mmol/L".into());
     assert_ne!(normalized(&input).unwrap().0, "0");
+}
+
+#[test]
+fn clinical_spelling_aliases_keep_prefix_magnitudes_distinct() {
+    for (aliases, expected) in [
+        (vec!["NG/mL", "NG/ML", "ng/ml", "ng/mL"], "ng/mL"),
+        (vec!["NG/dL", "ng/dl", "NG/DL"], "ng/dL"),
+        (vec!["x 10(3)/uL", "×10³/µL", "x10^9/L", "10*9/L"], "10^9/L"),
+        (vec!["M/uL", "x10(6)/uL", "10^12/L"], "10^12/L"),
+        (vec!["uIU/mL", "µIU/ml", "mIU/L"], "mIU/L"),
+    ] {
+        for alias in aliases {
+            assert_eq!(canonical_unit(alias), Some(expected), "{alias}");
+        }
+    }
+    assert_ne!(canonical_unit("M/uL"), canonical_unit("K/uL"));
+    assert_ne!(canonical_unit("ng/L"), canonical_unit("ng/mL"));
+    assert_eq!(canonical_unit("Mmol/L"), None);
 }

@@ -1,4 +1,4 @@
-name: Helpyourself
+name: LongLiveHealth
 options:
   bundleIdPrefix: dev.helpyourself
   deploymentTarget:
@@ -11,41 +11,53 @@ settings:
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     TARGETED_DEVICE_FAMILY: '1'
     MARKETING_VERSION: '0.1.0'
-    CURRENT_PROJECT_VERSION: '1'
+    CURRENT_PROJECT_VERSION: '23'
 targets:
-  Helpyourself:
+  LongLiveHealth:
     type: application
     platform: iOS
     sources:
       - path: .
-        excludes: [Core, project.yml, Info.plist, Helpyourself.entitlements]
+        excludes: [Core, project.yml, Info.plist, LongLiveHealth.entitlements]
       - path: Core
     info:
       path: ../../build/ios/Info.plist
       properties:
-        CFBundleDisplayName: helpyourself
+        CFBundleDisplayName: Long Live Health
+        ITSAppUsesNonExemptEncryption: false
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
+        LSSupportsOpeningDocumentsInPlace: false
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: PDF Health Report
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [com.adobe.pdf]
         NSHealthClinicalHealthRecordsShareUsageDescription: Archive your clinical Health Records and their original FHIR data on your own server.
         NSHealthUpdateUsageDescription: Save reviewed blood glucose results to Apple Health after you verify their collection time.
-        NSHealthShareUsageDescription: Sync your selected health history to your own helpyourself server for your archive and trends.
+        NSHealthShareUsageDescription: Sync your selected health history to your own Long Live Health server for your archive and trends.
         NSMicrophoneUsageDescription: Dictate a question for review before sending it to your server.
         NSSpeechRecognitionUsageDescription: Convert your question to text on this device before you choose to submit it.
+        NSFaceIDUsageDescription: Unlock your saved account and health archive using Face ID.
         NSCameraUsageDescription: Scan paper laboratory reports into your personal archive.
+        NSLocalNetworkUsageDescription: Connect to your self-hosted health archive on your local network.
         NSAppTransportSecurity:
-          NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoads: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     entitlements:
-      path: ../../build/ios/Helpyourself.entitlements
+      path: ../../build/ios/LongLiveHealth.entitlements
       properties:
         com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.background-delivery: true
         com.apple.developer.healthkit.access: [health-records]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.helpyourself.ios
+        TARGETED_DEVICE_FAMILY: '1'
         CODE_SIGN_STYLE: Automatic
-  HelpyourselfTests:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  LongLiveHealthTests:
     type: bundle.unit-test
     platform: iOS
     settings:
@@ -55,8 +67,8 @@ targets:
       - path: ../../tests/ios/HealthBridgeTests.swift
       - path: ../../tests/ios/AppModelTests.swift
     dependencies:
-      - target: Helpyourself
-  HelpyourselfUITests:
+      - target: LongLiveHealth
+  LongLiveHealthUITests:
     type: bundle.ui-testing
     platform: iOS
     settings:
@@ -65,11 +77,11 @@ targets:
     sources:
       - path: ../../tests/ios/UITests
     dependencies:
-      - target: Helpyourself
+      - target: LongLiveHealth
 schemes:
-  Helpyourself:
+  LongLiveHealth:
     build:
       targets:
-        Helpyourself: all
+        LongLiveHealth: all
     test:
-      targets: [HelpyourselfTests, HelpyourselfUITests]
+      targets: [LongLiveHealthTests, LongLiveHealthUITests]

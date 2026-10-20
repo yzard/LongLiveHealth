@@ -18,6 +18,7 @@ pub(crate) struct PreparedRecord {
     pub version: i64,
     pub deleted: bool,
     pub payload_json: String,
+    pub raw_json: String,
 }
 pub(crate) struct PreparedBatch {
     pub connection_id: String,
@@ -69,7 +70,7 @@ impl Write for BoundedDigest {
 }
 pub(crate) fn prepare(request: SyncRequest) -> Result<PreparedBatch, AppError> {
     if uuid::Uuid::parse_str(&request.batch_id).is_err()
-        || request.records.len() > 500
+        || request.records.len() > 1000
         || request.record_type.is_empty()
         || request.record_type.len() > 128
         || !["observed", "no_visible_samples", "error", "unsupported"]
@@ -99,11 +100,12 @@ pub(crate) fn prepare(request: SyncRequest) -> Result<PreparedBatch, AppError> {
             return Err(AppError::Invalid("Invalid health record"));
         }
         BoundedDigest::new(MAX_PAYLOAD_BYTES).encode(&record.payload)?;
-        let payload_json = if record.deleted {
+        let raw_json = if record.deleted {
             "{}".to_owned()
         } else {
             serde_json::to_string(&record)?
         };
+        let payload_json = project_json(&raw_json)?;
         let HealthRecordInput {
             record_id,
             source_id,
@@ -123,6 +125,7 @@ pub(crate) fn prepare(request: SyncRequest) -> Result<PreparedBatch, AppError> {
             version,
             deleted,
             payload_json,
+            raw_json,
         });
     }
     Ok(PreparedBatch {
@@ -133,4 +136,96 @@ pub(crate) fn prepare(request: SyncRequest) -> Result<PreparedBatch, AppError> {
         records,
         digest,
     })
+}
+
+/// Keep one query projection; complete provider data lives only in source files.
+/// The semantic digest still detects same-version changes to omitted detail fields.
+pub(crate) fn project_json(text: &str) -> Result<String, AppError> {
+    use serde_json::{Value, json};
+    let mut record: Value = serde_json::from_str(text)?;
+    if record.get("content_hash").and_then(Value::as_str).is_some() {
+        return Ok(serde_json::to_string(&record)?);
+    }
+    if record.as_object().is_some_and(|r| r.is_empty()) {
+        return Ok("{}".into());
+    }
+    let payload = record
+        .get_mut("payload")
+        .and_then(Value::as_object_mut)
+        .ok_or(AppError::Internal)?;
+    let apple = payload
+        .get("raw_archive")
+        .and_then(|r| r.get("format"))
+        .and_then(Value::as_str)
+        == Some("nskeyedarchiver-secure-v1");
+    if apple {
+        payload.remove("raw_archive");
+    }
+    let mut hash = Sha256::new();
+    hash_value(&record, &mut hash)?;
+    let content_hash = hex::encode(hash.finalize());
+    let mut payload = record["payload"].clone();
+    if apple {
+        let fields = payload.as_object_mut().ok_or(AppError::Internal)?;
+        for name in [
+            "series",
+            "voltage_measurements",
+            "device",
+            "metadata",
+            "source_version",
+            "platform_identifier",
+            "start_at_precise",
+            "end_at_precise",
+            "raw_quantity",
+        ] {
+            fields.remove(name);
+        }
+    }
+    Ok(serde_json::to_string(
+        &json!({"payload":payload,"content_hash":content_hash}),
+    )?)
+}
+
+// A language-independent digest encoding shared with the offline importer:
+// tagged values, big-endian lengths/IEEE754 numbers, sorted UTF-8 object keys.
+fn hash_value(value: &serde_json::Value, hash: &mut Sha256) -> Result<(), AppError> {
+    use serde_json::Value;
+    match value {
+        Value::Null => hash.update(b"n"),
+        Value::Bool(v) => hash.update(if *v { b"t" } else { b"f" }),
+        Value::Number(v) => {
+            if v.is_i64() || v.is_u64() {
+                hash.update(b"i");
+                let text = v.to_string();
+                hash.update((text.len() as u64).to_be_bytes());
+                hash.update(text.as_bytes());
+            } else {
+                hash.update(b"d");
+                hash.update(v.as_f64().ok_or(AppError::Internal)?.to_be_bytes());
+            }
+        }
+        Value::String(v) => {
+            hash.update(b"s");
+            hash.update((v.len() as u64).to_be_bytes());
+            hash.update(v.as_bytes());
+        }
+        Value::Array(values) => {
+            hash.update(b"a");
+            hash.update((values.len() as u64).to_be_bytes());
+            for v in values {
+                hash_value(v, hash)?;
+            }
+        }
+        Value::Object(values) => {
+            hash.update(b"o");
+            hash.update((values.len() as u64).to_be_bytes());
+            let mut keys = values.keys().collect::<Vec<_>>();
+            keys.sort();
+            for key in keys {
+                hash_value(&Value::String(key.clone()), hash)?;
+                hash_value(&values[key], hash)?;
+            }
+        }
+    }
+    Ok(())
 }

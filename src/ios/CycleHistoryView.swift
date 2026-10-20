@@ -35,7 +35,7 @@ struct CycleHistoryView: View {
                     let prediction = entry["entry"]["content"]
                     VStack(alignment: .leading) {
                         Text(prediction["start_date"].stringValue + " to " + prediction["end_date"].stringValue)
-                        Text(prediction["source"].stringValue).font(.headline)
+                        Text(model.sourceLabel(prediction["source"].stringValue)).font(.headline)
                         if let generated = prediction["generated_at"].numberValue { Text("Generated " + Date(timeIntervalSince1970: generated).formatted()).font(.caption) }
                         Text(prediction["uncertainty"].stringValue).font(.caption)
                         Button("Correct source prediction") { editing = Selection(existing: entry, kind: "cycle_prediction") }
@@ -43,8 +43,8 @@ struct CycleHistoryView: View {
                 }
             }
             NavigationLink("Manage recorded entries", destination: DailyLogsView(model: model))
-        }.navigationTitle("Cycle and life stages").task(id: date) { await load() }
-            .sheet(item: $editing, onDismiss: { Task { await load() } }) { selection in NavigationStack { LogEditor(model: model, existing: selection.existing, initialKind: selection.kind, initialValues: [:], initialDate: date) } }
+        }.navigationTitle("Cycle and life stages").initialTask(id: date) { await load() }
+            .sheet(item: $editing) { selection in NavigationStack { LogEditor(model: model, existing: selection.existing, initialKind: selection.kind, initialValues: [:], initialDate: date) } }
     }
     private func load() async {
         guard let token = model.session?.token else { return }

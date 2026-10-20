@@ -89,6 +89,7 @@ impl ObservationPayload {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReportContext {
+    pub source_name: Option<String>,
     pub fasting: Option<bool>,
     pub recent_exercise: Option<String>,
     pub illness: Option<String>,
@@ -299,6 +300,19 @@ impl Database {
                 return Err(AppError::Invalid("New observation cannot have a revision"));
             }
         }
+        if let Some(name) = request
+            .context
+            .as_ref()
+            .and_then(|context| context.source_name.as_ref())
+            && (name.trim().is_empty()
+                || name.len() > 160
+                || name.chars().any(char::is_control)
+                || name.trim().eq_ignore_ascii_case("Apple Health"))
+        {
+            return Err(AppError::Invalid(
+                "Use a clinic or laboratory name of 1-160 bytes; Apple Health is reserved",
+            ));
+        }
         let context = request
             .context
             .as_ref()
@@ -319,6 +333,57 @@ impl Database {
             return Err(AppError::Conflict(
                 "Report changed; reload before reviewing",
             ));
+        }
+        if let Some(context) = request.context.as_ref() {
+            let original = sqlx::query(queries::REPORT_ORIGINAL)
+                .bind(user_id)
+                .bind(user_id)
+                .bind(&request.report_id)
+                .fetch_one(&mut *transaction)
+                .await?;
+            let file_id: String = original.get("file_id");
+            let old: String = original.get("relative_path");
+            let new = crate::raw::document_path(
+                user_id,
+                &file_id,
+                &original.get::<String, _>("content_type"),
+                context.source_name.as_deref(),
+            );
+            if new != old {
+                let target = self.data_dir.join(&new);
+                tokio::fs::create_dir_all(target.parent().ok_or(AppError::Internal)?).await?;
+                // Link before commit; keep the old original until its cleanup task runs.
+                // A failed transaction leaves only an unreferenced link for orphan recovery.
+                match tokio::fs::hard_link(self.data_dir.join(&old), &target).await {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                        let old_bytes = tokio::fs::read(self.data_dir.join(&old)).await?;
+                        if tokio::fs::read(&target).await? != old_bytes {
+                            return Err(AppError::Conflict("Original destination differs"));
+                        }
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+                crate::raw::sync_archive_directories(&self.data_dir, &[&new]).await?;
+                sqlx::query(queries::RELOCATE_ORIGINAL)
+                    .bind(&new)
+                    .bind(user_id)
+                    .bind(&file_id)
+                    .execute(&mut *transaction)
+                    .await?;
+                // Cancel an older cleanup when a source is renamed back. The API
+                // serializes relocation with cleanup through the file mutation lock.
+                sqlx::query(queries::CANCEL_PATH_CLEANUP)
+                    .bind(&new)
+                    .execute(&mut *transaction)
+                    .await?;
+                sqlx::query(queries::INSERT_CLEANUP)
+                    .bind(uuid::Uuid::new_v4().to_string())
+                    .bind(old)
+                    .bind(now()?)
+                    .execute(&mut *transaction)
+                    .await?;
+            }
         }
         for observation in request.observations {
             let (id, revision) = if let Some(id) = observation.observation_id {
@@ -350,7 +415,7 @@ impl Database {
                     .await?;
                 (id, 1)
             };
-            sqlx::query(queries::INSERT_OBSERVATION_REVISION)
+            sqlx::query(queries::SAVE_OBSERVATION)
                 .bind(user_id)
                 .bind(id)
                 .bind(revision)

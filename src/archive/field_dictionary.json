@@ -97,31 +97,8 @@
         "end_at": "Record end as Unix seconds in UTC. Duration calculations use half-open intervals.",
         "version": "Current source record version. It does not identify the database schema.",
         "deleted": "Integer tombstone flag: 1 means deleted and 0 means present.",
-        "payload_json": "Complete serialized record payload. Original values and units remain distinct from derived values."
-      }
-    },
-    "health_revisions": {
-      "meaning": "Retained original JSON revisions of source records.",
-      "fields": {
-        "user_id": "Archive owner identifier. Every exported row belongs to the manifest owner.",
-        "platform": "apple_health, health_connect, manual, or file_import. This identifies the ingestion platform.",
-        "source_id": "Producer identifier within the platform. Different producers are not merged automatically.",
-        "record_id": "Source record identifier, scoped to user, platform and source_id.",
-        "revision_id": "Unique archive revision identifier for a received health record.",
-        "raw_path": "Archive-relative path to the exact stored JSON revision under raw/<provider>/<user_id>/.",
-        "payload_json": "Complete serialized record payload. Original values and units remain distinct from derived values.",
-        "received_at": "Server receipt time as Unix seconds in UTC, separate from observation time."
-      }
-    },
-    "observation_revisions": {
-      "meaning": "Observation history. States are pending, confirmed or rejected. Only eligible confirmed values enter numeric trends.",
-      "fields": {
-        "user_id": "Archive owner identifier. Every exported row belongs to the manifest owner.",
-        "observation_id": "Identifier of an observation, scoped to its owner.",
-        "revision": "Monotonically increasing revision for this observation or report.",
-        "status": "Stored workflow state. See the table-specific state description.",
-        "payload_json": "Complete serialized record payload. Original values and units remain distinct from derived values.",
-        "created_at": "Creation time as Unix seconds in UTC. It is not a clinical collection date."
+        "payload_json": "Minimal query projection and semantic content digest; complete source data is in raw.",
+        "raw_id": "Current original file ID."
       }
     },
     "observations": {
@@ -131,7 +108,10 @@
         "user_id": "Archive owner identifier. Every exported row belongs to the manifest owner.",
         "report_id": "Identifier of the report that owns this row.",
         "current_revision": "Revision selected as the current observation state. Earlier revisions remain in the archive.",
-        "candidate_key": "Extraction candidate identity used to avoid repeated candidates, or null for manual additions."
+        "candidate_key": "Extraction candidate identity used to avoid repeated candidates, or null for manual additions.",
+        "status": "Current review state.",
+        "payload_json": "Current observation values.",
+        "updated_at": "Last update time."
       }
     },
     "raw_files": {
@@ -141,7 +121,7 @@
         "user_id": "Archive owner identifier. Every exported row belongs to the manifest owner.",
         "upload_id": "Client request identifier used to prevent duplicate uploads, scoped to the owner.",
         "original_name": "Original user-visible filename. It is not an extraction destination or executable path.",
-        "relative_path": "Archive-relative original file path under raw/<provider>/<user_id>/.",
+        "relative_path": "Archive-relative original file path under raw/<user_id>/<provider>/.",
         "processing_path": "Historical path of a processing copy. The copy is excluded from exports and cleared during restoration.",
         "processing_sha256": "SHA-256 of the processing copy, or null. Restoration clears this value with processing_path.",
         "content_type": "Stored MIME type of the original file.",
@@ -221,6 +201,18 @@
         "attempts": "Attempts since the last source revision.",
         "error_code": "Calculation failure code or null.",
         "requested_at": "Last synchronous computation time as Unix seconds."
+      }
+    },
+    "health_originals": {
+      "meaning": "Original file catalog for export and deletion; contains no historical values.",
+      "fields": {
+        "user_id": "Archive owner identifier. Every exported row belongs to the manifest owner.",
+        "platform": "apple_health, health_connect, manual, or file_import. This identifies the ingestion platform.",
+        "source_id": "Producer identifier within the platform. Different producers are not merged automatically.",
+        "record_id": "Source record identifier, scoped to user, platform and source_id.",
+        "raw_path": "Archive-relative path to the exact stored JSON revision under raw/<user_id>/<provider>/.",
+        "received_at": "Server receipt time as Unix seconds in UTC, separate from observation time.",
+        "raw_id": "Unique archive revision identifier for a received health record."
       }
     }
   },

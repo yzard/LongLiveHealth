@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "HelpYourselfCore",
+    name: "LongLiveHealthCore",
     platforms: [.iOS(.v17), .macOS(.v14)],
-    products: [.library(name: "HelpYourselfCore", targets: ["HelpYourselfCore"])],
+    products: [.library(name: "LongLiveHealthCore", targets: ["LongLiveHealthCore"])],
     targets: [
-        .target(name: "HelpYourselfCore", path: "src/ios/Core"),
-        .testTarget(name: "HelpYourselfCoreTests", dependencies: ["HelpYourselfCore"], path: "tests/ios/Core")
+        .target(name: "LongLiveHealthCore", path: "src/ios/Core"),
+        .testTarget(name: "LongLiveHealthCoreTests", dependencies: ["LongLiveHealthCore"], path: "tests/ios/Core")
     ]
 )

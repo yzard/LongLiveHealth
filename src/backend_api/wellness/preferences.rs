@@ -14,6 +14,8 @@ const SOURCE: &str = "helpyourself.preferences";
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
+    #[serde(default)] // Existing saved preferences predate display aliases.
+    pub source_aliases: BTreeMap<String, String>,
     pub source_priority: BTreeMap<String, Vec<String>>,
     pub favorite_metrics: Vec<String>,
     pub sleep_target_minutes: Option<u16>,
@@ -27,6 +29,18 @@ pub struct SavePreferences {
 }
 impl Preferences {
     fn validate(&self) -> Result<(), AppError> {
+        if self.source_aliases.len() > 1000
+            || self.source_aliases.iter().any(|(key, alias)| {
+                !crate::sources::valid_key(key)
+                    || alias.trim().is_empty()
+                    || alias.chars().count() > 100
+                    || alias.chars().any(char::is_control)
+            })
+        {
+            return Err(AppError::Invalid(
+                "Use source aliases of 1 to 100 characters",
+            ));
+        }
         super::validate_priorities(&self.source_priority)?;
         if self.favorite_metrics.len() > super::KINDS.len()
             || self
@@ -61,7 +75,7 @@ impl Database {
             Ok(json!({"version":row.get::<i64,_>("version"),"preferences":preferences}))
         } else {
             Ok(
-                json!({"version":0,"preferences":Preferences {source_priority:BTreeMap::new(),favorite_metrics:vec![],sleep_target_minutes:None}}),
+                json!({"version":0,"preferences":Preferences {source_aliases:BTreeMap::new(),source_priority:BTreeMap::new(),favorite_metrics:vec![],sleep_target_minutes:None}}),
             )
         }
     }

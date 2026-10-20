@@ -46,7 +46,7 @@ health-daily-v2 的 sample_count 统计实际参与计算的记录，source_reco
 
 ## Skills 复查与验收范围
 
-本轮继续按[全仓库适用性审查](2026-10-01-document-unit-completion.md)复核，落实其中两个尚未整改的服务端发现。没有触发条件的动画、品牌、C++、Office/PDF 文档制作、Pages/Sites 等技能不机械应用。通用技能中的 Receipt Master 特例不适用本仓库；保留 helpyourself 的显式 TOML、持久会话、durable worker 和无迁移约定。
+本轮继续按[全仓库适用性审查](2026-10-01-document-unit-completion.md)复核，落实其中两个尚未整改的服务端发现。没有触发条件的动画、品牌、C++、Office/PDF 文档制作、Pages/Sites 等技能不机械应用。通用技能中的 Receipt Master 特例不适用本仓库；保留 Long Live Health 的显式 TOML、持久会话、durable worker 和无迁移约定。
 
 | Skill | 本轮证据 |
 | --- | --- |

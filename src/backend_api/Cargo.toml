@@ -1,5 +1,5 @@
 [package]
-name = "helpyourself"
+name = "longlivehealth"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
@@ -9,7 +9,7 @@ autotests = false
 path = "lib.rs"
 
 [[bin]]
-name = "helpyourself"
+name = "longlivehealth"
 path = "main.rs"
 
 [[test]]

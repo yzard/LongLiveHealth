@@ -29,7 +29,7 @@ struct DeviceTrendsView: View {
                 if let failure { Text(failure).foregroundStyle(.secondary) }
             }
             ForEach(Array(result["sources"].arrayValue.enumerated()), id: \.offset) { _, source in
-                Section(source["source"].stringValue) {
+                Section(model.sourceLabel(source["source"].stringValue)) {
                     Text(source["state"].stringValue.replacingOccurrences(of: "_", with: " ")).font(.caption)
                     Chart {
                         ForEach(Array(source["points"].arrayValue.enumerated().filter { $0.offset % max(1, source["points"].arrayValue.count / 1000) == 0 }), id: \.offset) { _, point in
@@ -77,7 +77,7 @@ struct DeviceTrendsView: View {
                 NavigationLink("Export the source archive", destination: SettingsView(model: model))
             }
         }.navigationTitle("Device trends")
-            .task(id: kind) { await reload() }.refreshable { await reload() }
+            .initialTask(id: kind) { await reload() }.refreshable { await reload() }
     }
     private func reload() async {
         guard let client = model.client, let token = model.session?.token else { return }

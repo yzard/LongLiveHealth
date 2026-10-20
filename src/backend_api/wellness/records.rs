@@ -70,7 +70,7 @@ impl Database {
             return Err(AppError::Invalid("Sample offset is too large"));
         }
         let revision = self.data_revision(user).await?;
-        let row = sqlx::query_as::<_, StoredHealthRecord>(queries::SPECIALTY_GET)
+        let mut row = sqlx::query_as::<_, StoredHealthRecord>(queries::SPECIALTY_GET)
             .bind(user)
             .bind(&request.platform)
             .bind(&request.source_id)
@@ -78,6 +78,7 @@ impl Database {
             .fetch_optional(&self.pool)
             .await?
             .ok_or(AppError::NotFound)?;
+        self.hydrate_health_record(user, &mut row).await?;
         let record_id = row.record_id.clone();
         let platform = row.platform.clone();
         let source = row.source_id.clone();

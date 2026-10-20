@@ -11,13 +11,86 @@ nonisolated final class SmokeTests: XCTestCase {
         let frame = app.buttons[name].frame
         app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
     }
+    @MainActor private func dismissPasswordPrompts(_ app: XCUIApplication) {
+        for _ in 0..<3 {
+            guard app.buttons["Not Now"].waitForExistence(timeout: 2) else { return }
+            tapButton(app, "Not Now")
+            _ = app.buttons["Not Now"].waitForNonExistence(timeout: 2)
+        }
+    }
     @MainActor private func tapTab(_ app: XCUIApplication, _ name: String) {
-        let tab = name == "Health" ? "Data" : name == "Settings" ? "Overview" : name
+        let tab = (name == "Health" || name == "Archive") ? "Data" : name == "Settings" ? "Overview" : name
         let frame = app.tabBars.buttons[tab].frame
         app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
-        if name == "Health", app.buttons["Apple Health and sync coverage"].exists { app.buttons["Apple Health and sync coverage"].tap() }
+        if name == "Health", !app.navigationBars["Apple Health"].exists {
+            for _ in 0..<4 {
+                if app.buttons["Apple Health"].exists { break }
+                app.navigationBars.buttons.firstMatch.tap()
+            }
+            app.buttons["Apple Health"].tap()
+        }
+        if name == "Archive" {
+            if app.navigationBars["Apple Health"].exists { app.navigationBars.buttons.firstMatch.tap() }
+            if app.navigationBars["Data"].exists { app.buttons["Health Report"].tap() }
+        }
         if name == "Settings", !app.navigationBars["Settings"].exists { app.buttons["Settings"].firstMatch.tap() }
     }
+    @MainActor func testPDFShareOpensHealthReportImport() async throws {
+        let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
+        safari.open(URL(string: "http://127.0.0.1:18765/shared-report.pdf")!)
+        if safari.buttons["Continue"].waitForExistence(timeout: 3) { safari.buttons["Continue"].tap() }
+        let share = safari.buttons["Share"]
+        if !share.waitForExistence(timeout: 2) {
+            safari.buttons["More"].tap()
+        }
+        XCTAssertTrue(share.waitForExistence(timeout: 15))
+        share.tap()
+        let sharing = XCUIApplication(bundleIdentifier: "com.apple.SharingUIService")
+        let open = sharing.descendants(matching: .any).matching(NSPredicate(format: "label ==[c] %@", "Long Live Health")).firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 10))
+        open.tap()
+        let app = XCUIApplication()
+        XCTAssertTrue(app.navigationBars["Import Health Report"].waitForExistence(timeout: 15))
+        // Safari may suffix a repeated download (shared-report-1.pdf).
+        let shared = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ AND label ENDSWITH %@", "shared-report", ".pdf")).firstMatch
+        XCTAssertTrue(shared.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textFields["Clinic or laboratory"].firstMatch.exists)
+        for _ in 0..<10 {
+            guard shared.exists else { break }
+            shared.swipeLeft()
+            app.buttons["Discard"].tap()
+        }
+        app.buttons["Later"].tap()
+    }
+
+    @MainActor func testAdminMustChangePasswordBeforeOpeningArchive() async throws {
+        var reset = URLRequest(url: URL(string: "http://127.0.0.1:18765/api/v1/test/reset")!)
+        reset.httpMethod = "POST"
+        _ = try await URLSession.shared.data(for: reset)
+        let app = XCUIApplication(); app.launch()
+        let server = app.textFields["http://192.168.1.20:8080"]
+        XCTAssertTrue(server.waitForExistence(timeout: 10))
+        server.tap()
+        let previous = server.value as? String ?? ""
+        if previous != "http://192.168.1.20:8080" { server.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: previous.count)) }
+        server.typeText("http://127.0.0.1:18765")
+        app.textFields["Username"].tap(); app.textFields["Username"].typeText("admin")
+        app.secureTextFields["Password"].tap(); app.secureTextFields["Password"].typeText("admin")
+        app.buttons["Sign in"].tap()
+        dismissPasswordPrompts(app)
+        XCTAssertTrue(app.navigationBars["Change password"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.tabBars.buttons["Data"].exists)
+        let current = app.secureTextFields["Current password"]
+        current.tap(); current.typeText("admin")
+        let replacement = app.secureTextFields["New password (at least 12 characters)"]
+        replacement.tap(); replacement.typeText("new-admin-password")
+        let confirmation = app.secureTextFields["Confirm new password"]
+        confirmation.tap(); confirmation.typeText("new-admin-password")
+        app.buttons["Change password and sign out"].tap()
+        XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 10))
+        app.terminate()
+    }
+
     @MainActor func testLoginTabsAndHealthAuthorization() async throws {
         addUIInterruptionMonitor(withDescription: "Synthetic password prompt") { alert in
             if alert.buttons["Not Now"].exists { alert.buttons["Not Now"].tap(); return true }
@@ -25,39 +98,55 @@ nonisolated final class SmokeTests: XCTestCase {
         }
         let app = XCUIApplication()
         app.launch()
-        if app.buttons["Not Now"].exists { app.buttons["Not Now"].tap() }
+        dismissPasswordPrompts(app)
         if app.buttons["Settings"].exists {
             app.buttons["Settings"].tap()
             app.buttons["Sign out and clear this device"].tap()
         }
-        XCTAssertTrue(app.textFields["https://health.example.com"].waitForExistence(timeout: 10))
-        app.textFields["https://health.example.com"].tap()
-        let oldServer = app.textFields["https://health.example.com"].value as? String ?? ""
-        if oldServer != "https://health.example.com" {
-            app.textFields["https://health.example.com"].typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: oldServer.count))
+        XCTAssertTrue(app.textFields["http://192.168.1.20:8080"].waitForExistence(timeout: 10))
+        app.textFields["http://192.168.1.20:8080"].tap()
+        let oldServer = app.textFields["http://192.168.1.20:8080"].value as? String ?? ""
+        if oldServer != "http://192.168.1.20:8080" {
+            app.textFields["http://192.168.1.20:8080"].typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: oldServer.count))
         }
-        app.textFields["https://health.example.com"].typeText("http://localhost:18765")
+        app.textFields["http://192.168.1.20:8080"].typeText("http://localhost:18765")
         app.textFields["Username"].tap()
         app.textFields["Username"].typeText("simulator")
         app.secureTextFields["Password"].tap()
         app.secureTextFields["Password"].typeText("synthetic-test-password")
         app.buttons["Sign in"].tap()
-        XCTAssertTrue(app.tabBars.buttons["Archive"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.tabBars.buttons["Data"].waitForExistence(timeout: 20))
         tapTab(app, "Archive")
-        if app.buttons["Not Now"].waitForExistence(timeout: 3) { app.buttons["Not Now"].tap() }
-        XCTAssertTrue(app.staticTexts["Add your first report"].exists)
+        dismissPasswordPrompts(app)
+        tapTab(app, "Archive")
+        XCTAssertTrue(app.staticTexts["Add your first report"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Import PDF"].exists)
+        XCTAssertTrue(app.buttons["Import PDF"].isHittable)
+        app.buttons["Import PDF"].tap()
+        XCTAssertTrue(app.buttons["Choose PDF from Files"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Choose PDF from Files"].isEnabled)
+        app.textFields["Clinic or laboratory"].tap()
+        app.textFields["Clinic or laboratory"].typeText("Function Health")
+        app.buttons["Choose PDF from Files"].tap()
+        XCTAssertTrue(app.buttons["Cancel"].waitForExistence(timeout: 10))
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["Import PDF"].waitForExistence(timeout: 5))
+
         // Relaunch after the system password sheet to verify Keychain restoration.
         app.terminate()
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Archive"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.tabBars.buttons["Data"].waitForExistence(timeout: 10))
         tapTab(app, "Archive")
-        app.buttons["Add"].tap()
+        app.buttons["Import"].tap()
         XCTAssertTrue(app.buttons["Import PDF or image"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Import PDF or image"].isEnabled)
+        app.textFields["Clinic or laboratory"].tap()
+        app.textFields["Clinic or laboratory"].typeText("Function Health")
         app.buttons["Import PDF or image"].tap()
         XCTAssertTrue(app.buttons["Cancel"].waitForExistence(timeout: 10))
         app.buttons["Cancel"].tap()
         XCTAssertTrue(app.buttons["Cancel"].waitForNonExistence(timeout: 5))
-        app.buttons["Add"].tap()
+        app.buttons["Import"].tap()
         XCTAssertTrue(app.buttons["Choose photo"].waitForExistence(timeout: 5))
         app.buttons["Choose photo"].tap()
         XCTAssertTrue(app.buttons["Cancel"].waitForExistence(timeout: 10))
@@ -65,6 +154,64 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.buttons["Cancel"].waitForNonExistence(timeout: 5))
         let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         if system.buttons["Not Now"].exists { system.buttons["Not Now"].tap() }
+        tapTab(app, "Overview")
+        XCTAssertTrue(app.staticTexts["Yesterday"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["7 hr 30 min"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["Device trends"].exists)
+        XCTAssertFalse(app.buttons["Timeline"].exists)
+        XCTAssertFalse(app.buttons["Breathing practice"].exists)
+        XCTAssertFalse(app.datePickers.firstMatch.exists)
+        XCTAssertFalse(app.buttons["LDL"].exists)
+        func aliasRequestCounts() async throws -> [String: Int] {
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:18765/api/v1/test/counts")!)
+            request.httpMethod = "POST"
+            let (data, _) = try await URLSession.shared.data(for: request)
+            return try JSONDecoder().decode([String: Int].self, from: data)
+        }
+        let beforeAliases = try await aliasRequestCounts()
+        // Alias changes update retained summaries; editor cancellation leaves the saved alias intact.
+        tapTab(app, "Data")
+        if app.navigationBars["Health Report"].exists { app.navigationBars.buttons.firstMatch.tap() }
+        reveal(app, app.buttons["Source aliases"])
+        app.buttons["Source aliases"].tap()
+        let aliasRow = app.buttons["sourceAliasRow-apple_health:watch"]
+        XCTAssertTrue(aliasRow.waitForExistence(timeout: 10))
+        aliasRow.tap()
+        let aliasField = app.textFields["sourceAliasName"]
+        XCTAssertTrue(aliasField.waitForExistence(timeout: 5))
+        aliasField.tap(); aliasField.typeText("My Watch")
+        app.buttons["Save"].tap()
+        XCTAssertTrue(aliasRow.waitForExistence(timeout: 10))
+        aliasRow.tap()
+        XCTAssertTrue(aliasField.waitForExistence(timeout: 5))
+        aliasField.tap(); aliasField.typeText(" unsaved")
+        app.buttons["Cancel"].tap()
+        app.buttons["Discard"].tap()
+        XCTAssertTrue(aliasRow.waitForExistence(timeout: 5))
+        tapTab(app, "Overview")
+        XCTAssertTrue(app.staticTexts["My Watch"].firstMatch.waitForExistence(timeout: 5))
+        let afterAliases = try await aliasRequestCounts()
+        XCTAssertEqual(afterAliases["wellness/day"], beforeAliases["wellness/day"])
+        XCTAssertEqual(afterAliases["wellness/preferences/save", default: 0] - beforeAliases["wellness/preferences/save", default: 0], 1)
+        tapTab(app, "Browse")
+        XCTAssertTrue(app.buttons["LDL"].waitForExistence(timeout: 10))
+        app.buttons["LDL"].tap()
+        XCTAssertTrue(app.staticTexts["All sources"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Function Health"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Local Clinic"].firstMatch.exists)
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.buttons["Calcium"].waitForExistence(timeout: 10))
+        app.buttons["Calcium"].tap()
+        XCTAssertTrue(app.staticTexts["About this metric"].waitForExistence(timeout: 10))
+        let aboutFrame = app.staticTexts["About this metric"].frame
+        reveal(app, app.staticTexts["Historical values"])
+        XCTAssertTrue(app.staticTexts["Historical values"].exists)
+        XCTAssertGreaterThan(app.staticTexts["Historical values"].frame.minY, 0)
+        XCTAssertGreaterThan(aboutFrame.minY, 0)
+        reveal(app, app.staticTexts["See laboratory note"])
+        XCTAssertTrue(app.staticTexts["See laboratory note"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["NewYork-Presbyterian"].firstMatch.exists)
+        app.navigationBars.buttons.firstMatch.tap()
         tapTab(app, "Trends")
         XCTAssertTrue(app.switches["Compare a second metric"].waitForExistence(timeout: 5))
         app.switches["Compare a second metric"].coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
@@ -73,8 +220,11 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Personal research preview"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Review lipid history and recent health data"].isEnabled)
         tapTab(app, "Health")
-        XCTAssertTrue(app.buttons["Connect Apple Health"].waitForExistence(timeout: 5))
-        app.buttons["Connect Apple Health"].tap()
+        XCTAssertTrue(app.buttons["Sync Now"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Last 30 days")).firstMatch.exists)
+        XCTAssertFalse(app.buttons["Sync now"].exists)
+        XCTAssertFalse(app.buttons["Connect Apple Health"].exists)
+        app.buttons["Sync Now"].tap()
         // Exercise the actual simulator Health permission UI, including denial.
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         if springboard.buttons["Cancel"].waitForExistence(timeout: 8) { springboard.buttons["Cancel"].tap() }
@@ -89,6 +239,22 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "fixture.png")).firstMatch.waitForExistence(timeout: 10))
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "fixture.png")).firstMatch.tap()
         XCTAssertTrue(app.buttons["Collection context"].waitForExistence(timeout: 10))
+        app.buttons["Collection context"].tap()
+        XCTAssertTrue(app.navigationBars["Collection context"].waitForExistence(timeout: 5))
+        // Cancel preserves the underlying report and makes no read request.
+        var countsRequest = URLRequest(url: URL(string: "http://127.0.0.1:18765/api/v1/test/reset-counts")!)
+        countsRequest.httpMethod = "POST"
+        _ = try await URLSession.shared.data(for: countsRequest)
+        tapButton(app, "Cancel")
+        XCTAssertTrue(app.buttons["Collection context"].waitForExistence(timeout: 5))
+        tapTab(app, "Trends")
+        tapTab(app, "Archive")
+        XCTAssertTrue(app.buttons["Collection context"].waitForExistence(timeout: 5))
+        countsRequest.url = URL(string: "http://127.0.0.1:18765/api/v1/test/counts")!
+        let (countData, _) = try await URLSession.shared.data(for: countsRequest)
+        let counts = try JSONSerialization.jsonObject(with: countData) as? [String: Int]
+        XCTAssertNil(counts?["reports/get"])
+        XCTAssertNil(counts?["reports/list"])
         app.buttons["Collection context"].tap()
         XCTAssertTrue(app.navigationBars["Collection context"].waitForExistence(timeout: 5))
         tapButton(app, "Save")
@@ -138,18 +304,18 @@ nonisolated final class SmokeTests: XCTestCase {
             tapTab(app, "Settings")
             app.buttons["Sign out and clear this device"].tap()
         }
-        let server = app.textFields["https://health.example.com"]
+        let server = app.textFields["http://192.168.1.20:8080"]
         XCTAssertTrue(server.waitForExistence(timeout: 10))
         server.tap()
         let previous = server.value as? String ?? ""
-        if previous != "https://health.example.com" { server.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: previous.count)) }
+        if previous != "http://192.168.1.20:8080" { server.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: previous.count)) }
         server.typeText("http://127.0.0.1:18765")
         app.textFields["Username"].tap(); app.textFields["Username"].typeText("simulator")
         app.secureTextFields["Password"].tap(); app.secureTextFields["Password"].typeText("synthetic-test-password")
         app.buttons["Sign in"].tap()
-        XCTAssertTrue(app.tabBars.buttons["Archive"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["Data"].waitForExistence(timeout: 15))
         tapTab(app, "Archive")
-        if app.buttons["Not Now"].waitForExistence(timeout: 3) { app.buttons["Not Now"].tap() }
+        dismissPasswordPrompts(app)
         app.terminate(); app.launch()
         tapTab(app, "Archive")
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "fixture.png")).firstMatch.waitForExistence(timeout: 10))
@@ -165,10 +331,7 @@ nonisolated final class SmokeTests: XCTestCase {
         tapButton(app, "Save")
         XCTAssertTrue(app.navigationBars["Add result"].waitForNonExistence(timeout: 10))
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Manual fixture result")).firstMatch.waitForExistence(timeout: 5))
-        app.buttons.matching(identifier: "Revision history").firstMatch.tap()
-        XCTAssertTrue(app.navigationBars["Revision history"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Revision ")).firstMatch.waitForExistence(timeout: 5))
-        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertFalse(app.buttons.matching(identifier: "Revision history").firstMatch.exists)
         let evidence = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "text layer:")).firstMatch
         reveal(app, evidence)
         evidence.tap()
@@ -190,8 +353,8 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Excluded from trends: duplicate. Original data is retained."].waitForNonExistence(timeout: 10))
         tapTab(app, "Trends")
         let datedResult = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "2026-10-01")).firstMatch
-        XCTAssertTrue(datedResult.waitForExistence(timeout: 10))
         reveal(app, datedResult)
+        XCTAssertTrue(datedResult.waitForExistence(timeout: 10))
         datedResult.tap()
         XCTAssertTrue(app.navigationBars["Original · page 1"].waitForExistence(timeout: 5))
         tapButton(app, "Done")

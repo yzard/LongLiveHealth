@@ -1,4 +1,4 @@
-use helpyourself::config::{Config, TEMPLATE};
+use longlivehealth::config::{Config, TEMPLATE};
 
 #[test]
 fn configuration_is_owned_by_the_service_root() {

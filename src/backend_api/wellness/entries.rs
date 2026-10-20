@@ -492,7 +492,13 @@ impl Database {
                 },
             )
             .await?;
-        Ok(json!({"sync":result,"record_id":request.record_id}))
+        let row = sqlx::query_as::<_, StoredHealthRecord>(queries::WELLNESS_ENTRY)
+            .bind(user)
+            .bind(&request.record_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        let record = row.map(entry_view).transpose()?;
+        Ok(json!({"sync":result,"record_id":request.record_id,"record":record}))
     }
     pub async fn list_wellness_entries(
         &self,
@@ -528,10 +534,7 @@ impl Database {
         drop(stream);
         let mut entries = Vec::with_capacity(rows.len());
         for row in rows {
-            let raw: Value = serde_json::from_str(&row.payload_json)?;
-            let entry: Entry = serde_json::from_value(raw["payload"]["entry"].clone())
-                .map_err(|_| AppError::Conflict("Stored entry format is unsupported"))?;
-            entries.push(json!({"record_id":row.record_id,"version":row.version,"at":row.start_at,"source":"manual:helpyourself","timezone":raw["payload"]["timezone"],"entry":entry,"calculation":entry.calculation()?}));
+            entries.push(entry_view(row)?);
         }
         Ok(json!({"entries":entries,"missing_is_zero":false}))
     }
@@ -548,25 +551,43 @@ impl Database {
             return Err(AppError::Invalid("Invalid entry identifier or kind"));
         }
         let connection_id = self.manual_connection(user).await?;
-        self.sync_health(
-            user,
-            SyncRequest {
-                connection_id,
-                batch_id: request.batch_id,
-                record_type: request.kind.clone(),
-                coverage_status: "observed".into(),
-                records: vec![HealthRecordInput {
-                    record_id: request.record_id,
-                    source_id: "helpyourself".into(),
-                    record_type: request.kind,
-                    start_at: 0,
-                    end_at: 0,
-                    version: request.version,
-                    deleted: true,
-                    payload: json!({}),
-                }],
-            },
-        )
-        .await
+        let record_id = request.record_id.clone();
+        let result = self
+            .sync_health(
+                user,
+                SyncRequest {
+                    connection_id,
+                    batch_id: request.batch_id,
+                    record_type: request.kind.clone(),
+                    coverage_status: "observed".into(),
+                    records: vec![HealthRecordInput {
+                        record_id: request.record_id,
+                        source_id: "helpyourself".into(),
+                        record_type: request.kind,
+                        start_at: 0,
+                        end_at: 0,
+                        version: request.version,
+                        deleted: true,
+                        payload: json!({}),
+                    }],
+                },
+            )
+            .await?;
+        let row = sqlx::query_as::<_, StoredHealthRecord>(queries::WELLNESS_ENTRY)
+            .bind(user)
+            .bind(&record_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        let record = row.map(entry_view).transpose()?;
+        Ok(json!({"sync":result,"record_id":record_id,"record":record}))
     }
+}
+
+fn entry_view(row: StoredHealthRecord) -> Result<Value, AppError> {
+    let raw: Value = serde_json::from_str(&row.payload_json)?;
+    let entry: Entry = serde_json::from_value(raw["payload"]["entry"].clone())
+        .map_err(|_| AppError::Conflict("Stored entry format is unsupported"))?;
+    Ok(
+        json!({"record_id":row.record_id,"version":row.version,"at":row.start_at,"source":"manual:helpyourself","timezone":raw["payload"]["timezone"],"entry":entry,"calculation":entry.calculation()?}),
+    )
 }

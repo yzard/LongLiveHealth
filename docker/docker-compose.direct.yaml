@@ -1,0 +1,8 @@
+# Direct HTTP for LAN testing; the backend keeps its internal listen port 8080.
+# Set LONGLIVEHEALTH_BIND_ADDRESS to the test server's LAN address.
+services:
+  backend_api:
+    ports:
+      - "${LONGLIVEHEALTH_BIND_ADDRESS:-127.0.0.1}:${LONGLIVEHEALTH_HTTP_PORT:-80}:8080"
+  caddy:
+    profiles: [reverse-proxy]

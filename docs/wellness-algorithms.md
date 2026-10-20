@@ -25,7 +25,7 @@ Apple 基线包含截至研究日的 iOS 27／watchOS 27。Series 12／Ultra 4 �
 
 产品页面可见、公开公式可复现、HealthKit 可读取是三个不同状态。H00 必须用目标 SDK 与真机逐项核实类型、授权、地区和设备限制，不能根据 UI 名称发明 HealthKit 标识符。旧设备的 SDNN 路径继续保留。[A1][A2][B1]
 
-| 功能 | WHOOP 公开方法 | Apple 公开方法 | Bevel 公开方法 | helpyourself 决策 |
+| 功能 | WHOOP 公开方法 | Apple 公开方法 | Bevel 公开方法 | Long Live Health 决策 |
 | --- | --- | --- | --- | --- |
 | 睡眠与需求 | 睡眠表现、需求、债务和规律性，完整算法不开放 [W1] | 睡眠分数分为时长 50、规律性 30、中断 20 分 [A3] | 时长、分期、效率等参与睡眠分数 [B2] | A01：基础分项与 SRI，不复刻总分或生理睡眠债 |
 | 恢复 | HRV、静息心率、睡眠等组成 Recovery [W2] | Readiness 综合活动、生命体征和睡眠，0–10 分 [A2] | Recovery 使用 HRV、静息心率、睡眠等，支持不同 HRV 设置 [B1][B3] | A02：同协议 HRV 和个人基线，综合恢复分研究保留 |

@@ -1,5 +1,5 @@
 use crate::{add_user, fixture};
-use helpyourself::health::{AggregateRequest, ConnectionRequest, HealthRecordInput, SyncRequest};
+use longlivehealth::health::{AggregateRequest, ConnectionRequest, HealthRecordInput, SyncRequest};
 use serde_json::json;
 
 fn record() -> HealthRecordInput {
@@ -116,8 +116,8 @@ async fn steps_from_different_sources_are_not_added_and_dst_uses_real_day_bounda
         .await
         .unwrap();
     let mut first = record();
-    first.start_at = helpyourself::reports::parse_time("2026-03-08T00:00:00-05:00").unwrap();
-    first.end_at = helpyourself::reports::parse_time("2026-03-09T00:00:00-04:00").unwrap();
+    first.start_at = longlivehealth::reports::parse_time("2026-03-08T00:00:00-05:00").unwrap();
+    first.end_at = longlivehealth::reports::parse_time("2026-03-09T00:00:00-04:00").unwrap();
     first.payload["value"] = json!(2300);
     let mut second = first.clone();
     second.source_id = "phone".into();
@@ -174,7 +174,7 @@ async fn failed_query_preserves_success_coverage_and_invalidates_old_export() {
         .await
         .unwrap();
     let export = state.database.request_export(&user.user_id).await.unwrap();
-    helpyourself::maintenance::export_next(&state)
+    longlivehealth::maintenance::export_next(&state)
         .await
         .unwrap();
     let mut failure = batch(&connection.connection_id, vec![]);
@@ -200,9 +200,9 @@ async fn failed_query_preserves_success_coverage_and_invalidates_old_export() {
 
 #[test]
 fn sleep_overlaps_merge_and_heart_rate_ignores_unknown_units() {
-    use helpyourself::health::{StoredHealthRecord, aggregate_records};
+    use longlivehealth::health::{StoredHealthRecord, aggregate_records};
     let day = chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
-    let start = helpyourself::reports::parse_time("2026-08-01").unwrap();
+    let start = longlivehealth::reports::parse_time("2026-08-01").unwrap();
     let stored = |id: &str, from: i64, to: i64, kind: &str, payload: serde_json::Value| {
         let input = HealthRecordInput {
             record_id: id.into(),
@@ -302,7 +302,7 @@ async fn aggregation_ignores_large_non_numeric_fields_without_changing_raw_paylo
         .unwrap();
     let mut valid = record();
     valid.record_type = "heart_rate".into();
-    valid.start_at = helpyourself::reports::parse_time("2026-08-01").unwrap();
+    valid.start_at = longlivehealth::reports::parse_time("2026-08-01").unwrap();
     valid.end_at = valid.start_at;
     valid.payload = json!({"value":60,"unit":"count/min"});
     let mut invalid_number = valid.clone();
@@ -367,9 +367,9 @@ async fn aggregation_ignores_large_non_numeric_fields_without_changing_raw_paylo
 
 #[test]
 fn extreme_finite_quantities_and_timestamps_have_explicit_numeric_outcomes() {
-    use helpyourself::health::{StoredHealthRecord, aggregate_records};
+    use longlivehealth::health::{StoredHealthRecord, aggregate_records};
     let day = chrono::NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
-    let instant = helpyourself::reports::parse_time("2026-08-01").unwrap();
+    let instant = longlivehealth::reports::parse_time("2026-08-01").unwrap();
     let row = |id: &str, kind: &str, unit: &str, from: i64, to: i64| StoredHealthRecord {
         platform: "apple_health".into(),
         source_id: "synthetic".into(),
@@ -416,4 +416,151 @@ fn extreme_finite_quantities_and_timestamps_have_explicit_numeric_outcomes() {
     .unwrap();
     assert_eq!(extreme["days"][0]["value_status"], "available");
     assert!(extreme["days"][0]["value"].as_f64().unwrap() > 0.0);
+}
+
+#[tokio::test]
+async fn sync_total_counts_current_unique_records_across_replay_updates_and_connections() {
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "totals").await;
+    let other = add_user(&state, "other-totals").await;
+    let connection = state
+        .database
+        .create_connection(
+            &user.user_id,
+            ConnectionRequest {
+                platform: "apple_health".into(),
+                installation_id: uuid::Uuid::new_v4().to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let request = batch(&connection.connection_id, vec![record()]);
+    let encoded = serde_json::to_string(&request).unwrap();
+    let first = state
+        .database
+        .sync_health(&user.user_id, request)
+        .await
+        .unwrap();
+    assert_eq!(first["total_records"], 1);
+    let replay = state
+        .database
+        .sync_health(&user.user_id, serde_json::from_str(&encoded).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(replay["total_records"], 1);
+    let second_connection = state
+        .database
+        .create_connection(
+            &user.user_id,
+            ConnectionRequest {
+                platform: "apple_health".into(),
+                installation_id: uuid::Uuid::new_v4().to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let duplicate = state
+        .database
+        .sync_health(
+            &user.user_id,
+            batch(&second_connection.connection_id, vec![record()]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(duplicate["total_records"], 1);
+    let mut revision = record();
+    revision.version = 2;
+    revision.payload["value"] = json!(999);
+    let updated = state
+        .database
+        .sync_health(
+            &user.user_id,
+            batch(&connection.connection_id, vec![revision]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated["total_records"], 1);
+    let mut second = record();
+    second.record_id = "sample-2".into();
+    let added = state
+        .database
+        .sync_health(
+            &user.user_id,
+            batch(&connection.connection_id, vec![second]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(added["total_records"], 2);
+    assert_eq!(
+        state.database.health_coverage(&user.user_id).await.unwrap()["total_records"],
+        2
+    );
+    assert_eq!(
+        state
+            .database
+            .health_coverage(&other.user_id)
+            .await
+            .unwrap()["total_records"],
+        0
+    );
+    let mut deletion = record();
+    deletion.deleted = true;
+    deletion.version = 3;
+    let removed = state
+        .database
+        .sync_health(
+            &user.user_id,
+            batch(&connection.connection_id, vec![deletion]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(removed["total_records"], 1);
+}
+
+#[tokio::test]
+async fn current_raw_record_matches_revision_even_when_receipt_clock_moves_backwards() {
+    use sqlx::Connection;
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "alice").await;
+    let connection = state
+        .database
+        .create_connection(
+            &user.user_id,
+            ConnectionRequest {
+                platform: "apple_health".into(),
+                installation_id: uuid::Uuid::new_v4().to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    state
+        .database
+        .sync_health(
+            &user.user_id,
+            batch(&connection.connection_id, vec![record()]),
+        )
+        .await
+        .unwrap();
+    let mut next = record();
+    next.version = 2;
+    next.payload["value"] = json!(200);
+    state
+        .database
+        .sync_health(&user.user_id, batch(&connection.connection_id, vec![next]))
+        .await
+        .unwrap();
+    let mut sql = sqlx::SqliteConnection::connect_with(
+        &sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(state.config.data_dir.join("database.sqlite")),
+    )
+    .await
+    .unwrap();
+    sqlx::query("UPDATE health_originals SET received_at = 0 WHERE raw_id IN (SELECT raw_id FROM health_records WHERE version = 2)").execute(&mut sql).await.unwrap();
+    let result = state
+        .database
+        .health_records(&user.user_id, 100, 0)
+        .await
+        .unwrap();
+    assert_eq!(result["records"][0]["record"]["version"], 2);
+    assert_eq!(result["records"][0]["record"]["payload"]["value"], 200);
 }

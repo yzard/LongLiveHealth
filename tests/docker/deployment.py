@@ -23,7 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = ROOT / 'build' / 'deployment-check'
 OUTPUT.mkdir(parents=True, exist_ok=True)
-PROJECT = 'helpyourself-check-' + uuid.uuid4().hex[:8]
+PROJECT = 'longlivehealth-check-' + uuid.uuid4().hex[:8]
 parser = argparse.ArgumentParser()
 parser.add_argument('--ocr', action='store_true', help='Run actual Qwen3.8/NInfer GPU inference on a synthetic page')
 parser.add_argument('--webgui', type=Path, help='Run browser checks with the given Playwright index.mjs module')
@@ -44,17 +44,17 @@ def free_port():
 http_port, https_port = free_port(), free_port()
 environment = dict(
     os.environ,
-    HELPYOURSELF_API_DATA_DIR=str(OUTPUT / (PROJECT + '-api')),
-    HELPYOURSELF_OCR_DATA_DIR=str(OUTPUT / (PROJECT + '-ocr')),
+    LONGLIVEHEALTH_API_DATA_DIR=str(OUTPUT / (PROJECT + '-api')),
+    LONGLIVEHEALTH_OCR_DATA_DIR=str(OUTPUT / (PROJECT + '-ocr')),
     PUID=str(os.getuid()),
     PGID=str(os.getgid()),
-    HELPYOURSELF_BIND_ADDRESS='127.0.0.1',
-    HELPYOURSELF_DOMAIN='localhost',
-    HELPYOURSELF_HTTP_PORT=str(http_port),
-    HELPYOURSELF_HTTPS_PORT=str(https_port),
+    LONGLIVEHEALTH_BIND_ADDRESS='127.0.0.1',
+    LONGLIVEHEALTH_DOMAIN='localhost',
+    LONGLIVEHEALTH_HTTP_PORT=str(http_port),
+    LONGLIVEHEALTH_HTTPS_PORT=str(https_port),
 )
-api_root = Path(environment['HELPYOURSELF_API_DATA_DIR'])
-ocr_root = Path(environment['HELPYOURSELF_OCR_DATA_DIR'])
+api_root = Path(environment['LONGLIVEHEALTH_API_DATA_DIR'])
+ocr_root = Path(environment['LONGLIVEHEALTH_OCR_DATA_DIR'])
 for root in (api_root, ocr_root):
     root.mkdir(mode=0o700)
     os.chmod(root, 0o700)
@@ -404,7 +404,7 @@ try:
             '--user',
             f'{os.getuid()}:{os.getgid()}',
             'backend_api',
-            '/app/helpyourself',
+            '/app/longlivehealth',
             '--data-dir',
             '/data',
             'create-user',
@@ -712,17 +712,18 @@ try:
     with zipfile.ZipFile(io.BytesIO(download(f'exports/{export_id}/download'))) as archive:
         assert archive.read(raw_path) == raw
         assert 'sessions.jsonl' not in archive.namelist()
-        assert 'observation_revisions.jsonl' in archive.namelist()
+        assert 'observations.jsonl' in archive.namelist()
+        assert 'observation_revisions.jsonl' not in archive.namelist()
         assert json.loads(archive.read('manifest.json'))['version'] == 1
         if options.load:
-            assert sum(json.loads(line)['platform'] == 'apple_health' for line in archive.read('health_revisions.jsonl').splitlines()) == 3 + 9 * bool(options.webgui)
-            assert len([name for name in archive.namelist() if name.startswith('raw/apple_health/')]) == 3 + 9 * bool(
+            assert sum(json.loads(line)['platform'] == 'apple_health' for line in archive.read('health_originals.jsonl').splitlines()) == 3 + 9 * bool(options.webgui)
+            assert len([name for name in archive.namelist() if '/apple_health/' in name and name.startswith('raw/')]) == 3 + 9 * bool(
                 options.webgui
             )
         if options.ocr:
             assert archive.read(pdf_upload['file']['relative_path']) == pdf
             assert b'2.586' in archive.read('extraction_inputs.jsonl')
-            assert b'lab-units-v3' in archive.read('observations.csv')
+            assert b'lab-units-v5' in archive.read('observations.csv')
             assert archive.read(scan_upload['file']['relative_path']) == scanned
     command(compose + ['restart', 'backend_api'])
     assert eventually(lambda: api('reports/get', {'report_id': report}), 60)['observations'][0]['status'] == 'confirmed'
@@ -744,7 +745,7 @@ try:
                 f'127.0.0.1:{restored_port}:8080',
                 '-v',
                 f'{snapshot}:/data',
-                'helpyourself-backend-api:local',
+                'longlivehealth-backend-api:local',
             ]
         )
         .decode()
@@ -792,7 +793,7 @@ try:
         'restart_persistence': True,
         'stopped_copy_restores_complete_archive': True,
         'report_and_account_deletion': True,
-        'image': 'helpyourself-backend-api:local',
+        'image': 'longlivehealth-backend-api:local',
         'synthetic_only': True,
         'health_load_and_limit_checks': load_result,
         'real_qwen3_8_ninfer_inference': options.ocr,

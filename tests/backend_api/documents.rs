@@ -1,5 +1,5 @@
-use helpyourself::documents::{parse_pdf_layer, pdf_evidence};
-use helpyourself::reports::ExtractionInputRequest;
+use longlivehealth::documents::{parse_pdf_layer, pdf_evidence};
+use longlivehealth::reports::ExtractionInputRequest;
 
 pub fn mixed_pdf() -> Vec<u8> {
     use lopdf::{Document, Object, Stream, dictionary};
@@ -36,7 +36,7 @@ pub fn mixed_pdf() -> Vec<u8> {
 async fn real_poppler_preserves_text_positions_and_does_not_skip_mixed_pages() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("mixed.pdf");
-    let cpu = helpyourself::execution::CpuExecutor::new(2).unwrap();
+    let cpu = longlivehealth::execution::CpuExecutor::new(2).unwrap();
     std::fs::write(&path, mixed_pdf()).unwrap();
     let text = pdf_evidence(&cpu, &path, 1).await.unwrap();
     let layer = text.text_layer.unwrap();
@@ -93,7 +93,7 @@ async fn evidence_is_archived_exported_owner_scoped_and_deleted_with_report() {
     let mut config = (*state.config).clone();
     config.ocr.url = address.trim_end_matches("/v1").into();
     state.config = std::sync::Arc::new(config);
-    let app = helpyourself::app::create_application(state.clone());
+    let app = longlivehealth::app::create_application(state.clone());
     let token = crate::token(&state, "alice").await;
     let (status, upload) = crate::upload(
         &app,
@@ -104,7 +104,7 @@ async fn evidence_is_archived_exported_owner_scoped_and_deleted_with_report() {
     .await;
     assert_eq!(status, axum::http::StatusCode::OK);
     let report = upload["file"]["file_id"].as_str().unwrap();
-    helpyourself::worker::extract_next(&state).await.unwrap();
+    longlivehealth::worker::extract_next(&state).await.unwrap();
     let document = state.database.report(&alice.user_id, report).await.unwrap();
     let inputs = document["extraction_inputs"].as_array().unwrap();
     assert_eq!(inputs.len(), 3);
@@ -151,7 +151,7 @@ async fn evidence_is_archived_exported_owner_scoped_and_deleted_with_report() {
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(received, evidence);
     let export = state.database.request_export(&alice.user_id).await.unwrap();
-    helpyourself::maintenance::export_next(&state)
+    longlivehealth::maintenance::export_next(&state)
         .await
         .unwrap();
     let path = state
