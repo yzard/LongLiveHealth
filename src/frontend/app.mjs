@@ -85,7 +85,7 @@ async function post(path, body) {
   return result;
 }
 function sourceLabel(key) {
-  return sourcePreferences.preferences.source_aliases?.[key] || (key === 'manual:helpyourself' ? 'Long Live Health' : '') || sourceCatalog.find(item => item.source_key === key)?.name || key;
+  return sourcePreferences.preferences.source_aliases?.[key] || (key === 'manual:longlivehealth' ? 'Long Live Health' : '') || sourceCatalog.find(item => item.source_key === key)?.name || key;
 }
 function sourceText(key) {
   const node = el('span', sourceLabel(key)); node.dataset.sourceKey = key; return node;
@@ -966,7 +966,7 @@ async function timelineView() {
     for (const item of data.events) {
       const row = el('div', null, 'record-row');
       row.append(el('p', `${dated(item.at)} · ${item.record_type.replaceAll('_', ' ')}`), el('p', `${sourceLabel(item.source)} · revision ${item.version} · ${item.time_semantics === 'upload' ? 'Uploaded' : 'Record starts'}`, 'footnote'));
-      row.append(button('Open details', () => item.record_type === 'report' ? route('reports', item.record_id) : route(item.source === 'manual:helpyourself' ? 'entries' : item.record_type === 'sleep' ? 'sleep' : 'health'), 'quiet')); panel.append(row);
+      row.append(button('Open details', () => item.record_type === 'report' ? route('reports', item.record_id) : route(item.source === 'manual:longlivehealth' ? 'entries' : item.record_type === 'sleep' ? 'sleep' : 'health'), 'quiet')); panel.append(row);
     }
     cursor = data.next_cursor;
     more.hidden = !cursor;

@@ -481,7 +481,7 @@ impl Database {
                     coverage_status: "observed".into(),
                     records: vec![HealthRecordInput {
                         record_id: request.record_id.clone(),
-                        source_id: "helpyourself".into(),
+                        source_id: "longlivehealth".into(),
                         record_type: kind.into(),
                         start_at: request.at,
                         end_at: request.at,
@@ -562,7 +562,7 @@ impl Database {
                     coverage_status: "observed".into(),
                     records: vec![HealthRecordInput {
                         record_id: request.record_id,
-                        source_id: "helpyourself".into(),
+                        source_id: "longlivehealth".into(),
                         record_type: request.kind,
                         start_at: 0,
                         end_at: 0,
@@ -588,6 +588,6 @@ fn entry_view(row: StoredHealthRecord) -> Result<Value, AppError> {
     let entry: Entry = serde_json::from_value(raw["payload"]["entry"].clone())
         .map_err(|_| AppError::Conflict("Stored entry format is unsupported"))?;
     Ok(
-        json!({"record_id":row.record_id,"version":row.version,"at":row.start_at,"source":"manual:helpyourself","timezone":raw["payload"]["timezone"],"entry":entry,"calculation":entry.calculation()?}),
+        json!({"record_id":row.record_id,"version":row.version,"at":row.start_at,"source":"manual:longlivehealth","timezone":raw["payload"]["timezone"],"entry":entry,"calculation":entry.calculation()?}),
     )
 }

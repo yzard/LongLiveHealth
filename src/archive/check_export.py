@@ -121,7 +121,7 @@ def audit(path, max_bytes):
         require(sum(entry.file_size for entry in entries) <= max_bytes, 'Archive exceeds the uncompressed size limit')
         require('manifest.json' in names, 'Missing manifest')
         manifest = read_object(archive, 'manifest.json')
-        require(manifest.get('format') == 'helpyourself-export', 'Unknown archive format')
+        require(manifest.get('format') == 'longlivehealth-export', 'Unknown archive format')
         require(type(manifest.get('version')) is int and manifest['version'] == 1, 'Only export version 1 is supported')
         version = manifest['version']
         require(manifest.get('database_schema_version') == 7, 'Unknown database schema')

@@ -10,7 +10,7 @@ use tokio::io::AsyncWriteExt;
 const RESERVED_SOURCES: &[&str] = &[
     "apple_health",
     "google_health",
-    "helpyourself",
+    "longlivehealth",
     "gpx",
     "tcx",
     "fit",
@@ -79,7 +79,7 @@ pub fn health_path(
     let source = match platform {
         "apple_health" => "apple_health",
         "health_connect" => "google_health",
-        "manual" => "helpyourself",
+        "manual" => "longlivehealth",
         "file_import" => match source_id {
             "gpx-1.1" => "gpx",
             "tcx-2" => "tcx",

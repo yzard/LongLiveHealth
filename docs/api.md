@@ -99,7 +99,7 @@ platform 为 apple_health/health_connect；第二项只提供服务器协议，�
 
 coverage_status：observed/no_visible_samples/error/unsupported；它描述该批查询，不代表 Apple 已授予读取权限或整个历史完整。服务器保存最近批次状态、首次/最近成功时间；visible_start_at/visible_end_at 是当前平台/类型的归档范围，不证明中间完整。iOS 每次锚点查询上限 1000 个对象，按字节及记录数拆请求；先持久化全部批次及候选锚点，全部得到回执才推进。断线或响应丢失重放相同批次；特征/活动环/CDA/药物快照独立检查点，不从隐藏或空结果推断删除。
 
-日聚合版本 health-daily-v2，分析快照引用同一版本。支持 heart_rate/resting_heart_rate/hrv_sdnn/steps/sleep/workout。数量类型严格检查单位；前 3 项为样本均值，步数按区间重叠比例分配，睡眠/运动为同来源区间并集。每个来源分别输出；没有数据时无条目或 value=null，不能当作零。每个 day/source 的 sample_count 是实际参与计算的记录数；source_record_count 是该日来源候选数，excluded_sample_count 是未参与数。value_status 为 available/missing/numeric_overflow；后两种 value=null。非数值、错误单位、不适用睡眠类别及无重叠区间不进入计算，原始载荷仍完整归档。最多 367 天、50,000 条候选明细，超限明确失败而非截断。
+日聚合版本 health-daily-v2，分析快照引用同一版本。支持 heart_rate/resting_heart_rate/hrv_sdnn/steps/sleep/workout/active_energy/basal_energy。热量以 kcal 按来源累加，跨日区间按时长比例分配。数量类型严格检查单位；前 3 项为样本均值，步数按区间重叠比例分配，睡眠/运动为同来源区间并集。每个来源分别输出；没有数据时无条目或 value=null，不能当作零。每个 day/source 的 sample_count 是实际参与计算的记录数；source_record_count 是该日来源候选数，excluded_sample_count 是未参与数。value_status 为 available/missing/numeric_overflow；后两种 value=null。非数值、错误单位、不适用睡眠类别及无重叠区间不进入计算，原始载荷仍完整归档。最多 367 天、50,000 条候选明细，超限明确失败而非截断。
 
 ## 限制和错误
 
@@ -127,6 +127,8 @@ All routes below require the current user's Bearer session. Source data remains 
 
 `POST /api/v1/wellness/day` accepts `date` (`YYYY-MM-DD`), `timezone` (IANA name), and `source_priority` (metric names mapped to ordered source IDs). The response includes six metrics, their source alternatives, history, coverage, and archive revision. A source ID combines its platform and producer. Multiple available sources require a choice. Missing data remains null. Personal comparisons require 28 earlier valid days from the same source within 42 days. These comparisons describe data. They do not estimate disease risk.
 
+`wellness/day` version `wellness-day-v5` also returns `combined` on step history/current entries. This is the Overview step total: disjoint intervals add; overlaps select Apple Watch, other wearables, unknown sources, then phones. Equal-rank sources use stable source-key ordering; samples within one source keep their summed values. Partial samples are prorated by duration, since individual step timestamps are unavailable. `health/aggregate` exposes the same result in `combined_days`; its existing per-source `days` remain unchanged. Cached daily views with older algorithm versions are recomputed.
+
 `POST /api/v1/wellness/sources` accepts `{}`. The response lists visible source and type combinations, record counts, and timestamp ranges. An empty range does not establish denied permission.
 
 `POST /api/v1/wellness/entries/save` accepts `record_id` (UUID), `version` (positive integer), `batch_id` (UUID), `at` (Unix seconds), `timezone`, and `entry`. The entry contains `kind` and `content`. Supported kinds are `journal`, `training`, `nutrition`, `cycle`, `body`, `blood_pressure`, and `breathing`. Field definitions and units are in `src/backend_api/wellness/entries.rs`. Unknown fields and invalid units fail the request. Optional numeric fields accept null. Training calculations use CR10 effort and minutes. External training volume remains separate for each exercise.
@@ -137,7 +139,7 @@ All routes below require the current user's Bearer session. Source data remains 
 
 `POST /api/v1/wellness/import/gpx` accepts `filename` and `xml`. The parser accepts UTF-8 GPX 1.1 with its standard namespace, timed track points, and increasing timestamps. The file cannot exceed 4 MiB or 50,000 points. The HTTP JSON body cannot exceed 5 MiB. DTDs are rejected. The archive retains the XML text and SHA-256 digest. Distance uses consecutive points within each segment. Elapsed duration includes pauses and gaps. It is not active exercise duration. FIT is not supported yet. TCX has a separate endpoint below.
 
-Manual entries use `manual:helpyourself`. GPX records use `file_import:gpx-1.1`. TCX records use `file_import:tcx-2`. Their raw envelopes use `raw/<user>/helpyourself`, `raw/<user>/gpx`, and `raw/<user>/tcx`. Public Health sync endpoints cannot write these reserved connections. The initial schema supports these platforms. The database schema uses version 7; the export format uses version 1. No historical migration or compatibility path exists.
+Manual entries use `manual:longlivehealth`. GPX records use `file_import:gpx-1.1`. TCX records use `file_import:tcx-2`. Their raw envelopes use `raw/<user>/longlivehealth`, `raw/<user>/gpx`, and `raw/<user>/tcx`. Public Health sync endpoints cannot write these reserved connections. The initial schema supports these platforms. The database schema uses version 7; the export format uses version 1. No historical migration or compatibility path exists.
 
 `POST /api/v1/wellness/import/list` accepts nullable `after_id` and returns up to 100 imports with `next_after_id`. The list omits XML bodies. `POST /api/v1/wellness/import/delete` accepts `record_id`, `source_id`, and `expected_version`. Deletion invalidates affected analysis and exports, removes archived revisions, and schedules original-file cleanup. Reimporting the same deleted content fails. Uploading identical content under another filename retains the first original.
 
@@ -153,7 +155,7 @@ Manual edits require the next version. A stale version or a change of entry type
 
 `wellness/preferences/get` 返回 `version` 与 `preferences`。`wellness/preferences/save` 接收 `expected_version`、UUID `batch_id` 与完整偏好。偏好包含 `source_priority`、`favorite_metrics` 和可空 `sleep_target_minutes`。收藏为空时显示全部六类指标。睡眠目标是用户指定值，不是生理需求估计。偏好进入手动来源的修订、导出和删除流程。过期修改返回冲突。
 
-`wellness/series` 接收 `record_type`、`start_at`、`end_at` 和 `maximum_gap_seconds`。窗口为左闭右开，最多 90 天、50000 条记录。类型为 `blood_glucose`、`vo2_max`、`body_mass`、`body_fat`、`oxygen_saturation`、`respiratory_rate`。每来源返回原值、换算值、单位、记录 ID 与版本。血糖摘要只在相邻样本间隔不超过指定值时左侧保持，允许间隔为 1–1800 秒。最后一点不推断持续时间。重复时间或未知单位停止该来源摘要。稀疏血糖样本不被认定为 CGM。Apple Health 的百分比输入是 0–1，显示时转换为 0–100。其他平台的 `%` 契约是 0–100，不猜测量级。
+`wellness/series` 接收 `record_type`、`start_at`、`end_at` 和 `maximum_gap_seconds`。窗口为左闭右开，最多 200000 个测量点；VO₂ Max 可一次读取完整历史，其他类型最多 90 天。一个请求返回全部来源，`body_mass` 同时包含手动体重记录。`points` 保留原始记录，`chart_points` 在服务端按同一来源、时间和换算后数值去重，保留不同来源的标记。类型为 `blood_glucose`、`vo2_max`、`body_mass`、`body_fat`、`oxygen_saturation`、`respiratory_rate`。每来源返回原值、换算值、单位、记录 ID 与版本。血糖摘要只在相邻样本间隔不超过指定值时左侧保持，允许间隔为 1–1800 秒。最后一点不推断持续时间。重复时间或未知单位停止该来源摘要。稀疏血糖样本不被认定为 CGM。Apple Health 的百分比输入是 0–1，显示时转换为 0–100。其他平台的 `%` 契约是 0–100，不猜测量级。
 
 `wellness/timeline` 接收 `start_at`、`end_at` 与可空 `cursor`，最多 31 天，每页 200 项。范围包括报告上传、原睡眠区间、运动与手动领域记录。报告时间是上传时间。将返回的 `next_cursor` 原样用于下一页。账户数据修订变化时必须从第一页重新读取。
 
@@ -170,7 +172,7 @@ Manual edits require the next version. A stale version or a change of entry type
 
 `training_day` 手动日志接收 `status`（`rest` 或 `all_sessions_logged`）与 `note`。日期由记录时间和记录时区决定。训练回顾的 `training` 返回最后 7／28 个已结束本地日历日。仅明确休息日计零；所有训练均填写努力分且确认记录完整，才视为完整训练日。不同记录时区的确认不套用，冲突确认保持未知。窗口缺完整日期时，`total_load_au` 与 `daily_mean_au` 为 null，`observed_sum_au` 单独展示已有记录。
 
-`wellness/series` 另支持 `heart_rate`。可选 `declared_maximum` 包含 `bpm` 和必填 `source`。最大心率为 50–300 bpm；无声明时仅显示绝对分区。心率输入接受 `count/min` 与 `bpm`。相邻样本间隔在 `maximum_gap_seconds` 内才累计时间，最后一点无持续时间。Edwards 分区为最大值的 50–60、60–70、70–80、80–90、90–100%，左闭右开，100% 纳入末区。任何样本超过最大值，负荷保持 null。网页和 iOS 默认查看最近 24 小时，允许修改采样间隙和最大值来源。默认 15 秒是明确展示的工程假设，不是所有设备的统一协议。
+`wellness/series` 另支持 `heart_rate`。可选 `declared_maximum` 包含 `bpm` 和必填 `source`。最大心率为 50–300 bpm；无声明时仅显示绝对分区。心率输入接受 `count/min` 与 `bpm`。相邻样本间隔在 `maximum_gap_seconds` 内才累计时间，最后一点无持续时间。Edwards 分区为最大值的 50–60、60–70、70–80、80–90、90–100%，左闭右开，100% 纳入末区。任何样本超过最大值，负荷保持 null。网页默认查看最近 24 小时并允许修改采样协议；iOS Browse 查询最近 30 天的实际心率采样，默认显示最新一天。默认 15 秒是明确展示的工程假设，不是所有设备的统一协议。
 
 `sleep_correction` 包含 `source`、`session_start`、`session_end`、`classification`、可空 `corrected_asleep_minutes`、`basis_revisions` 和必填 `note`。记录时间必须等于会话开始时间。分类为 `main_sleep`、`nap` 或 `unclassified_session`。会话最多七天，最多引用 1000 条记录。人工估计不能超过会话时长。睡眠页面将人工时长单列，保留设备分期、原时长和效率。来源修订或会话范围变化后显示 `stale_basis`，多个修正显示冲突。修正不生成分钟状态，不改变 SRI。
 
@@ -250,7 +252,7 @@ both credentials. Schema 4 migrates existing sessions without extending or reviv
 
 Before renewal, the client generates a 32-byte CSPRNG successor and atomically persists it
 with the current refresh secret in Keychain. The server stores SHA-256 digests only. The access
-secret is SHA-256 of the domain-separated string `helpyourself-access-v1:<successor>`; its digest
+secret is SHA-256 of the domain-separated string `longlivehealth-access-v1:<successor>`; its digest
 is stored for authentication. A transaction swaps both secrets and keeps the previous access
 credential valid for at most five minutes for in-flight requests. An identical predecessor /
 successor pair is retryable after a lost response, including after the access expiry. A consumed
@@ -334,3 +336,26 @@ Aliases are 1–100 characters without controls; remove a map entry to restore t
 label. Save uses the existing preference version and batch ID, retains other preferences,
 and rejects concurrent edits. Existing saved preferences have an empty alias map.
 Aliases do not change source identities, raw paths, chart grouping, or deduplication.
+
+Daily aggregation CPU chunks use bounded asynchronous admission: at most four waiting chunks, each waiting up to ten seconds for the shared CPU executor. Temporary contention with Health sync no longer immediately discards a daily summary with 429. Queue exhaustion or timeout still returns 429; upload admission remains bounded and fail-fast.
+
+
+Numeric Browse responses include `chart_ranges` for H/D/W/M/6M/Y. Each range contains
+source, unit, first/last sample times, display time, minimum, maximum and unique
+sample count. Buckets are calendar-aligned minutes, hours, days, days, weeks and months,
+respectively, using the chart timezone (UTC for clinical and daily views). Sources and incompatible units never merge.
+Clients draw a vertical minimum–maximum bar, or one point for a single value.
+Original point/history arrays remain available. Heart quantity-series subsamples
+are indexed as compact `quantity_samples`, including their precise times.
+
+Apple Health display-source renaming alone is an idempotent measurement replay.
+The server restores the previous label and checks the full semantic digest before
+accepting it; changed measured values, times or source identifiers still conflict.
+
+Build 35 adds bucket `start_at`/`end_at`, latest sample values, and per-period
+`chart_ranges.summaries` for range headers. `wellness/series` accepts an IANA
+`timezone`; omitted timezone remains UTC for shipped clients. Clinical and daily
+summary charts keep their UTC date semantics. Half-year windows use Jan–Jun and
+Jul–Dec. Week windows start Sunday; DST days retain their actual duration.
+
+Browse daily charts use the metric’s canonical unit even when today has no selected value. Historical source alternatives remain visible without a preferred source. Workouts measures elapsed workout duration; Active Energy and Resting Energy show source-separated calorie totals.

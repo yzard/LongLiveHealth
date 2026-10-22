@@ -57,7 +57,7 @@ HealthKit 读取授权无法用授权状态 API 判定；用户拒绝和没有�
 
 本轮验证完成：12 项 Core 测试、8 项 AppModel/HealthKit 测试、3 项 XCTest 界面流程全部通过。界面回归覆盖默认 admin 强制改密码、登录/标签切换、编辑取消后无多余读取、HealthKit 授权、报告编辑/证据/关联/分析。后端 127 项测试通过、1 项已有负载测试跳过，Clippy 无警告；归档工具 9 项、前端 12 项测试通过。另用独立 Docker 数据目录验证默认账号、普通重启保留密码和 RESET_ADMIN_PASSWORD=true 重置。测试夹具不使用真实健康资料。
 
-日志：`build/ios/validation/accounts-ios-2026-10-14.log`；测试结果：`build/ios/DerivedData/Logs/Test/Test-Helpyourself-2026.10.14_11-52-53--0400.xcresult`。
+日志：`build/ios/validation/accounts-ios-2026-10-14.log`；测试结果：the historical result bundle under `build/ios/DerivedData/Logs/Test/`。
 
 ## 2026-10-15 Health 同步暂停修复（build 4）
 
@@ -154,7 +154,7 @@ protected-data behavior. Distribution entitlements are checked by the export scr
 
 Build 0.1.0 (14) uploaded successfully at 2026-10-15 15:40 EDT. App Store Connect
 reported the package processing; Testing availability was not yet confirmed.
-Logs are in `build/ios/validation/helpyourself-build14-*.log`.
+Historical build 14 logs are under `build/ios/validation/`.
 
 
 ## Persistent login and device unlock (build 15)
@@ -261,11 +261,121 @@ the alias. The cache is persisted under the server/user archive and cleared on l
 
 The product, home-screen name and PDF share destination use `Long Live Health`.
 The Xcode project/scheme and Swift module use `LongLiveHealth`; the portable module
-is `LongLiveHealthCore`. Build 23 applies this name.
-The repository and its working directory remain `helpyourself` by user request.
-The shipping bundle ID `dev.helpyourself.ios`, Keychain service, background-transfer
-identifier, reminder identifiers and HealthKit sync metadata remain unchanged so an
-upgrade retains authentication, queued uploads and deduplication identity. These are
-persisted identifiers, not product display names. Manual source IDs and export format
-markers also remain stable; manual-source display labels resolve to Long Live Health unless
-the user has assigned an alias. No data rewrite or health-history resync is needed.
+is `LongLiveHealthCore`. The GitHub repository is `yzard/LongLiveHealth` and the
+working directory is `longlivehealth`.
+
+Build 24 introduces the new app identity `dev.longlivehealth.ios`. Keychain,
+background transfers, reminders, HealthKit sync metadata, manual data sources and
+archive format identifiers all use `longlivehealth`. This is a separate App Store
+Connect app, not an in-place update of the previous installation. Users sign in
+again and grant Health access. The new installation cannot access the previous
+app's local sync anchors or pending uploads, so its first sync reads health history
+again; server record identity still deduplicates previously imported Apple Health
+records. Keep the previous app until any pending local imports have completed.
+Existing server accounts and health records are preserved.
+
+### Build 25 navigation
+
+Manual recording is under Data → Manual entries: Record weight opens the body measurement editor; Record an event or observation opens the shared editor with the existing record types. Browse supports metric-name, identifier, and unit search. Metric detail screens keep charts and descriptions visible and open historical rows through Historical Values.
+
+Build 25 passed compilation and device signing. The 26 portable core tests and 23 native tests passed. The focused UI run exercised manual weight cancellation, Browse filtering, and the separate laboratory history list; the broader flow reported a source-alias label assertion failure. Do not treat that run as a fully passing regression suite.
+
+### Build 26 metric and activity navigation
+
+Browse now exposes the seven supported measurement series directly, including Weight. Weight combines Apple Health and manual body entries for the last 30 days, with source colors and a separate history list. Overview hosts breathing practice. Trends embeds recent activity with past-day and past-seven-day windows; those rows describe recorded events, not statistical trends. The former standalone timeline and Device trends links are removed.
+
+The focused simulator UI test `testBrowseWeightAndActivityPlacement` passed, covering weight search, manual-weight history, retained search on return, and practice/activity placement. Device Release build and signing passed. The importer supports additional HealthKit quantities that still lack dedicated Browse charts; this change does not claim complete chart coverage.
+
+### Build 27 Browse charts
+
+Daily metrics, laboratory charts, measurement series, and sleep-stage charts share time-axis scrolling, zoom-in/zoom-out, Show all, sparse time labels, and explicit vertical-axis units. Daily dates use a continuous UTC date axis; sleep totals use hours and sleep-stage charts label their categorical stage axis. Zoom retains the visible center and stays within the loaded data range. These controls do not fetch older server data.
+
+Validation: 28 portable core tests passed, simulator build passed, and the focused UI test passed for Sleep zoom controls, horizontal drag, Hours/Weight kg labels, historical navigation, and search retention. Core tests cover zoom bounds, invalid factors, empty and single-point data.
+
+### Build 28 visible chart controls and default source names
+
+The phone had both dev.longlivehealth.ios build 27 and dev.helpyourself.ios build 23 installed under the same display name. The user approved removal of the old app; that bundle was uninstalled. Build 28 was installed successfully.
+
+Chart controls now have visible Zoom in / Zoom out text, with pinch zoom in addition to horizontal scrolling. Source legends sit below the chart and use stable source identity for colors. Custom aliases override the catalog's original source name; that name now takes precedence over generic per-record labels. Browse loads a missing source catalog on first load. Twenty-nine core tests and the focused simulator UI test passed; its retained screenshot verifies the original Apple Watch legend and visible controls.
+
+### Apple Health design reference — Build 30
+
+Use Apple Health as the visual reference for metric browsing. The shared chart
+places a native D / W / M / 6M / Y segmented control above the visible date range,
+unit and chart. The vertical scale is on the right. Keep source colors and their
+legend. Horizontal scrolling browses older loaded measurements. Remove free-form
+zoom buttons, Show all, pinch scaling and zoom instruction labels.
+
+Range changes preserve the underlying metric data and require no extra request.
+The control changes the viewport, not the endpoint's data coverage: existing
+metric-specific loading limits still apply (VO₂ Max loads all available history).
+Months/years use calendar intervals, including leap years and daylight saving.
+Retain the selected range and position when returning from another tab/detail.
+
+### Browse detail performance — Build 31
+
+VO₂ Max loads its complete bounded history and all sources in one `wellness/series`
+request. Weight receives Apple Health and manual measurements in that same response.
+The API normalizes and deduplicates chart points; original historical records remain
+available. Switching D/W/M/6M/Y uses the response already in memory. The shared chart
+renders only its current calendar window; horizontal swipes move between windows.
+The date header contains the unit once. Redundant Chart, All available history,
+Observed state, and display-unit labels are removed.
+
+Regression coverage checks the single request while switching periods, retained
+manual weight history, source legends, and calendar paging across leap years.
+
+### Browse and heart synchronization — Build 32
+
+Browse has one Heart rate entry, routed to actual measurements rather than daily
+averages. The obsolete DeviceTrendsView and sampling-protocol editor are removed
+from Browse. Heart detail starts on Day, reads the last 30 days, and shows the latest
+measurement time and whether today's data has reached the server. Numeric charts
+share server-calculated min/max bars for dense intervals and points for singleton
+intervals across every period; historical values retain individual samples.
+Automatic sync schedules its next foreground opportunity after completion, and
+retries transient automatic failures without requiring a new observer notification.
+
+### Build 33: live Apple Health sync activity
+
+The archive count in the sync heading is the server's cumulative unique record
+count. It does not increase when existing records are replayed. The Health page
+also displays the current type's acknowledged record count for this run, the
+current upload size and elapsed server wait, and elapsed HealthKit reading time.
+Reading and uploading can appear together because the pipeline prefetches one
+page. Failed uploads do not advance acknowledgements. Counters reset for each
+type; they are not a percentage or an estimate of remaining work. Durable anchors
+and pending batches retain their existing commit-after-acknowledgement behavior.
+
+### Build 35: calendar range charts
+
+Numeric metrics share the same range chart and tap selection. Heart rate adds H
+(one bar per minute); D uses hourly bars, W/M daily bars, 6M weekly bars, and Y
+calendar-month bars. Each source has a separate lane and its own legend color.
+Headers and the latest reading use server-computed summaries. A single value is
+a dot; differing extrema form a rounded vertical bar. Swipe horizontally to page,
+tap a bar to inspect its interval and source. Historical Values remains separate.
+Clinical/daily dates stay UTC; measurement charts send the device IANA timezone.
+
+### Build 36: source visibility and thicker ranges
+
+Tap a source legend row to hide/show its ranges. The current chart retains these
+choices across period changes; toggling is local presentation and sends no API
+request. Hidden sources are excluded from selection, range-envelope labels and
+the latest reading. All sources may be hidden and independently restored.
+Colors remain stable. Each bucket only allocates lanes to visible sources that
+have records in it, so absent sources no longer make the remaining bars thinner.
+Bars use up to 8 points with rounded caps, bounded by available lane spacing.
+
+### Builds 37–38: daily history and equal-width bars
+
+Build 37 restores daily charts when today has no selected value, labels workout
+duration as Workouts, and adds Active Energy and Resting Energy. Browse UI tests
+cover these items plus resting heart rate and HRV with only historical samples.
+Build 38 uses one width across all visible bars and points, constrained by the
+tightest occupied bucket. Source toggles and period navigation remain available.
+Time buckets are minute/hour/day/day/week/calendar-month for H/D/W/M/6M/Y;
+calendar boundaries respect timezone and DST. Missing buckets remain empty.
+Build 38 passed compilation, 32 core tests and signature verification, and was
+installed wirelessly. Three backend chart tests passed, including matching
+interval boundaries across sources. Build 37's focused Browse UI test passed.

@@ -367,10 +367,9 @@ impl Database {
                     let mut previous = stored.get::<Option<String>, _>("payload_json");
                     if previous
                         .as_deref()
-                        .map(crate::health_batch::project_json)
+                        .map(|previous| crate::health_batch::same_content(previous, payload))
                         .transpose()?
-                        .as_deref()
-                        == Some(payload.as_str())
+                        .unwrap_or(false)
                     {
                         continue;
                     }
@@ -388,16 +387,25 @@ impl Database {
                     }
                     if previous
                         .as_deref()
-                        .map(crate::health_batch::project_json)
+                        .map(|previous| crate::health_batch::same_content(previous, payload))
                         .transpose()?
-                        .as_deref()
-                        == Some(payload.as_str())
+                        .unwrap_or(false)
                     {
                         continue;
                     }
-                    return Err(AppError::Conflict(
-                        "Health record changed without a new source version",
-                    ));
+                    if platform != "apple_health"
+                        || !crate::health_batch::only_source_name_changed(
+                            previous.as_deref().ok_or(AppError::Internal)?,
+                            &record.raw_json,
+                        )?
+                    {
+                        return Err(AppError::Conflict(
+                            "Health record changed without a new source version",
+                        ));
+                    }
+                    // A renamed display label is not a new measurement or raw revision.
+                    // Preserve its original provenance without rewriting unchanged samples.
+                    continue;
                 }
             }
             sqlx::query(queries::UPSERT_HEALTH)
@@ -641,20 +649,7 @@ impl Database {
         user_id: &str,
         request: AggregateRequest,
     ) -> Result<Value, AppError> {
-        if ![
-            "heart_rate",
-            "resting_heart_rate",
-            "hrv_sdnn",
-            "steps",
-            "sleep",
-            "workout",
-        ]
-        .contains(&request.record_type.as_str())
-        {
-            return Err(AppError::Invalid(
-                "This record type has no aggregation algorithm",
-            ));
-        }
+        daily_unit(&request.record_type)?;
         let timezone: Tz = request
             .timezone
             .parse()
@@ -669,6 +664,7 @@ impl Database {
         let revision = self.data_revision(user_id).await?;
         let mut cursor = start;
         let mut days = Vec::new();
+        let mut combined_days = Vec::new();
         while cursor <= end {
             let chunk_end = cursor
                 .checked_add_days(chrono::Days::new(6))
@@ -690,10 +686,19 @@ impl Database {
             let kind = request.record_type.clone();
             let result = self
                 .cpu
-                .run(move || aggregate_records(records, &kind, cursor, chunk_end, timezone))
+                .run_interactive(move || {
+                    aggregate_records(records, &kind, cursor, chunk_end, timezone)
+                })
                 .await?;
             days.extend(
                 result["days"]
+                    .as_array()
+                    .ok_or(AppError::Internal)?
+                    .iter()
+                    .cloned(),
+            );
+            combined_days.extend(
+                result["combined_days"]
                     .as_array()
                     .ok_or(AppError::Internal)?
                     .iter()
@@ -710,7 +715,7 @@ impl Database {
             ));
         }
         Ok(
-            json!({"days":days,"timezone":timezone.name(),"algorithm_version":ALGORITHM_VERSION,"source_policy":"separate_sources_no_cross_source_sum","computed_at":now()?,"data_revision":revision}),
+            json!({"days":days,"combined_days":combined_days,"timezone":timezone.name(),"algorithm_version":ALGORITHM_VERSION,"source_policy":"separate_sources_no_cross_source_sum","computed_at":now()?,"data_revision":revision}),
         )
     }
 }
@@ -729,6 +734,19 @@ fn day_boundary(timezone: Tz, date: NaiveDate) -> Result<i64, AppError> {
         ))
 }
 
+pub fn daily_unit(kind: &str) -> Result<&'static str, AppError> {
+    match kind {
+        "sleep" | "workout" => Ok("seconds"),
+        "steps" => Ok("count"),
+        "hrv_sdnn" => Ok("ms"),
+        "heart_rate" | "resting_heart_rate" => Ok("count/min"),
+        "active_energy" | "basal_energy" => Ok("kcal"),
+        _ => Err(AppError::Invalid(
+            "This record type has no aggregation algorithm",
+        )),
+    }
+}
+
 pub fn aggregate_records(
     records: Vec<StoredHealthRecord>,
     kind: &str,
@@ -736,26 +754,20 @@ pub fn aggregate_records(
     end: NaiveDate,
     timezone: Tz,
 ) -> Result<Value, AppError> {
-    if ![
-        "heart_rate",
-        "resting_heart_rate",
-        "hrv_sdnn",
-        "steps",
-        "sleep",
-        "workout",
-    ]
-    .contains(&kind)
-    {
-        return Err(AppError::Invalid(
-            "No aggregate algorithm for this type; raw records remain available",
-        ));
-    }
+    let expected_unit = daily_unit(kind)?;
+    let cumulative = matches!(kind, "steps" | "active_energy" | "basal_energy");
     let mut days = Vec::new();
+    let mut combined_days = Vec::new();
     let mut date = start;
     while date <= end {
         let next = date.succ_opt().ok_or(AppError::Invalid("Date overflow"))?;
         let lower = day_boundary(timezone, date)?;
         let upper = day_boundary(timezone, next)?;
+        if kind == "steps" {
+            let mut combined = crate::wellness::steps::combined_day(&records, lower, upper)?;
+            combined["date"] = json!(date.to_string());
+            combined_days.push(combined);
+        }
         let mut sources: BTreeMap<String, Vec<(&StoredHealthRecord, Value)>> = BTreeMap::new();
         for record in &records {
             if record.end_at < lower || record.start_at >= upper {
@@ -801,16 +813,11 @@ pub fn aggregate_records(
                 let Some(record_unit) = payload.get("unit").and_then(Value::as_str) else {
                     continue;
                 };
-                let expected = match kind {
-                    "steps" => "count",
-                    "hrv_sdnn" => "ms",
-                    _ => "count/min",
-                };
-                if record_unit != expected {
+                if record_unit != expected_unit {
                     continue;
                 }
                 unit = Some(record_unit.to_owned());
-                if kind == "steps" && record.end_at > record.start_at {
+                if cumulative && record.end_at > record.start_at {
                     let overlap = (i128::from(record.end_at.min(upper))
                         - i128::from(record.start_at.max(lower)))
                     .max(0);
@@ -857,7 +864,7 @@ pub fn aggregate_records(
                 )
             } else if numbers.is_empty() {
                 (None, "missing")
-            } else if kind == "steps" {
+            } else if cumulative {
                 (Some(numbers.iter().sum::<f64>()), "interval_prorated_sum")
             } else {
                 (
@@ -883,6 +890,6 @@ pub fn aggregate_records(
         date = next;
     }
     Ok(
-        json!({"days":days,"timezone":timezone.name(),"algorithm_version":ALGORITHM_VERSION,"source_policy":"separate_sources_no_cross_source_sum","computed_at":Utc::now().timestamp()}),
+        json!({"days":days,"combined_days":combined_days,"timezone":timezone.name(),"algorithm_version":ALGORITHM_VERSION,"source_policy":"separate_sources_no_cross_source_sum","computed_at":Utc::now().timestamp()}),
     )
 }

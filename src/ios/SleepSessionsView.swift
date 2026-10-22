@@ -28,12 +28,15 @@ struct SleepSessionsView: View {
                             if session["corrections"].arrayValue.count <= 1 {
                                 Button("Confirm or correct sleep") { correction = SleepCorrectionSelection(source: source["source"].stringValue, session: session) }
                             } else { Text("Delete duplicate corrections in Daily logs before confirming again.").font(.caption) }
+                            BrowseChart(timestamps: session["timeline"].arrayValue.flatMap { [$0["start_at"].numberValue, $0["end_at"].numberValue].compactMap { $0 } }, unit: "Sleep stage", initialPeriod: .day) { range, _ in
                             Chart {
-                                ForEach(Array(session["timeline"].arrayValue.enumerated()), id: \.offset) { _, record in
+                                ForEach(Array(session["timeline"].arrayValue.enumerated().filter { ($0.element["end_at"].numberValue ?? 0) >= range.lowerBound && ($0.element["start_at"].numberValue ?? 0) <= range.upperBound }), id: \.offset) { _, record in
                                     BarMark(xStart: .value("Start", Date(timeIntervalSince1970: record["start_at"].numberValue ?? 0)), xEnd: .value("End", Date(timeIntervalSince1970: record["end_at"].numberValue ?? 0)), y: .value("Stage", stage(record)))
                                         .foregroundStyle(by: .value("Stage", stage(record)))
                                 }
-                            }.frame(height: 220).accessibilityLabel("Observed sleep stage intervals")
+                            }
+                            }
+
                             ForEach(Array(session["timeline"].arrayValue.enumerated()), id: \.offset) { _, record in
                                 VStack(alignment: .leading) {
                                     Text(stage(record))

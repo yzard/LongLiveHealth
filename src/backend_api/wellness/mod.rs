@@ -24,6 +24,7 @@ pub mod review;
 pub mod series;
 pub mod sleep;
 pub mod statistics;
+pub mod steps;
 pub mod timeline;
 pub mod training;
 
@@ -39,10 +40,12 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const VERSION: &str = "wellness-day-v1";
+pub const VERSION: &str = "wellness-day-v5";
 pub const KINDS: &[&str] = &[
     "sleep",
     "workout",
+    "active_energy",
+    "basal_energy",
     "steps",
     "resting_heart_rate",
     "heart_rate",
@@ -103,7 +106,26 @@ impl Database {
                 .get(*kind)
                 .cloned()
                 .unwrap_or_default();
-            metrics.push(select_metric(kind, &request.date, &priorities, &aggregate)?);
+            let mut metric = select_metric(kind, &request.date, &priorities, &aggregate)?;
+            if *kind == "steps" {
+                let combined = aggregate["combined_days"]
+                    .as_array()
+                    .ok_or(AppError::Internal)?;
+                for day in metric["history"].as_array_mut().ok_or(AppError::Internal)? {
+                    day["combined"] = combined
+                        .iter()
+                        .find(|entry| entry["date"] == day["date"])
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                }
+                metric["current"]["combined"] = combined
+                    .iter()
+                    .find(|entry| entry["date"] == request.date)
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                metric["combined_algorithm"] = json!("overlap_device_priority_prorated_v1");
+            }
+            metrics.push(metric);
         }
         let coverage = self.health_coverage(user).await?;
         let current: i64 = sqlx::query_scalar(queries::USER_DATA_REVISION)
@@ -117,7 +139,7 @@ impl Database {
         Ok(
             json!({"date":request.date,"timezone":request.timezone,"data_revision":revision,
             "algorithm_version":VERSION,"computed_at":now()?,"metrics":metrics,"coverage":coverage["coverage"],
-            "source_priority":request.source_priority,"source_policy":"explicit_priority_or_single_source_per_day","evidence_status":"descriptive",
+            "source_priority":request.source_priority,"source_policy":"explicit_priority_or_single_source_per_day","steps_combined_policy":"overlap_device_priority_prorated_v1","evidence_status":"descriptive",
             "notes":["Calendar-day sleep is not a main sleep session.","Missing records are not zero.","Different HRV protocols are not combined."]}),
         )
     }
@@ -184,6 +206,28 @@ pub fn select_metric(
             json!({"date":date,"state":state,"selected":selected,"alternatives":alternatives}),
         );
     }
+    let chart_ranges = crate::chart::ranges(
+        history.iter().flat_map(|day| {
+            let at = day["date"]
+                .as_str()
+                .and_then(|date| chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").ok())
+                .and_then(|date| date.and_hms_opt(0, 0, 0))
+                .map(|date| date.and_utc().timestamp() as f64);
+            day["alternatives"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(move |p| {
+                    Some((
+                        p["source"].as_str()?.to_owned(),
+                        p["unit"].as_str()?.to_owned(),
+                        at?,
+                        p["value"].as_f64()?,
+                    ))
+                })
+        }),
+        chrono_tz::UTC,
+    );
     let current = history
         .iter()
         .find(|d| d["date"] == date)
@@ -213,9 +257,9 @@ pub fn select_metric(
         None
     };
     Ok(
-        json!({"record_type":kind,"current":current,"history":history,"baseline":baseline_result,
+        json!({"chart_ranges":chart_ranges,"record_type":kind,"current":current,"history":history,"baseline":baseline_result,
         "baseline_state":if baseline_result.is_some() {"ready"} else {"calibrating"},"baseline_valid_days":valid_days,
-        "algorithm_version":aggregate["algorithm_version"],"unit":current["selected"]["unit"]}),
+        "algorithm_version":aggregate["algorithm_version"],"unit":crate::health::daily_unit(kind)?}),
     )
 }
 

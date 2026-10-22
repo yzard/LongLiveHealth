@@ -30,7 +30,7 @@ def fixture():
     original = dict(source_id='watch', record_id='sample', payload={'value': 42})
     data['health_records'] = [dict(health, raw_id='raw', deleted=0, payload_json=json.dumps(checker.health_projection(original)))]
     data['health_originals'] = [dict(health, raw_id='raw', raw_path=HEALTH)]
-    manifest = dict(format='helpyourself-export', version=1, user_id=USER,
+    manifest = dict(format='longlivehealth-export', version=1, user_id=USER,
                     tables=[name + '.jsonl' for name in sorted(data)],
                     csv='observations.csv', raw_directory='raw/')
     return data, manifest

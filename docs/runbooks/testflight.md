@@ -2,7 +2,7 @@
 
 ## 发布准备
 
-- Bundle ID：`dev.helpyourself.ios`；版本与 build number 在 `src/ios/project.yml`。上传已使用过的版本/build 组合前必须递增 build number。
+- Bundle ID：`dev.longlivehealth.ios`；版本与 build number 在 `src/ios/project.yml`。上传已使用过的版本/build 组合前必须递增 build number。
 - App 图标来自 `src/ios/Assets.xcassets/AppIcon.appiconset`，1024 × 1024 不透明 PNG。
 - `PrivacyInfo.xcprivacy` 声明 app 自身 UserDefaults 与容器内文件时间读取；App Store Connect 的数据收集/隐私问题仍需根据实际部署填写。该文件不表示健康资料不传到服务器。
 - app 使用 Apple 系统提供的网络/存储加密，plist 声明 `ITSAppUsesNonExemptEncryption=false`；引入自有加密后须重新评估。
@@ -27,7 +27,7 @@ open build/ios/LongLiveHealth.xcarchive
 
 ## 上传与安装
 
-1. 已有 App Store Connect 记录 `Long Live Health`（ID `6822791807`）；Bundle ID `dev.helpyourself.ios`，主语言 English (U.S.)，SKU `helpyourself-ios`。保留同一 App 记录，避免创建新的安装身份。
+1. 新 Bundle ID `dev.longlivehealth.ios` 对应 App Store Connect ID `6825085744`，主语言 English (U.S.)，SKU `longlivehealth-ios`。此前的记录（ID `6822791807`）属于旧安装身份，不能上传新身份的构建。
 2. Xcode Organizer 选择签名后的 Archive → Validate / Distribute App → App Store Connect。仅自己试机时可选 TestFlight Internal Only。
 3. 等 Apple 处理 build，解决 export compliance/处理错误，再在 TestFlight 创建内部测试组，将自己的 App Store Connect 用户和该 build 加入组。
 4. iPhone 安装 Apple TestFlight，接受邀请并安装。无需公开 App Store 上架。外部测试有不同审核流程。
@@ -231,8 +231,8 @@ field and cascading state failures; after restarting the dedicated simulator, th
 entire native/UI suite passed without product or test changes. The result bundle is
 `build/ios/DerivedData/Logs/Test/Test-LongLiveHealth-2026.10.20_15-49-14--0400.xcresult`.
 Release archive and distribution export passed; HealthKit, clinical records,
-background delivery and TestFlight entitlements were verified. Build 23 retains
-`dev.helpyourself.ios` and uses the exact display name `Long Live Health`.
+background delivery and TestFlight entitlements were verified. Build 23 used the previous installation identity and the display name `Long Live Health`.
+Build 24 introduces the separate `dev.longlivehealth.ios` identity.
 Validation logs: `build/ios/validation/build23-final-tests.log`, `archive23.log`,
 `sign23-success.log`; initial interrupted run: `build23-first-run.log`.
 
@@ -244,3 +244,23 @@ Upload evidence: `build/ios/validation/upload23-success.log`.
 Apple processing is separate from upload; installation availability is not yet confirmed.
 App Store Connect independently confirmed `Long Live Health`, version 0.1.0 build 23,
 with status `Processing` after upload.
+
+## 0.1.0 (24)：独立 App 身份
+
+2026-10-20 17:19 EDT 上传成功（`Upload succeeded` / `EXPORT SUCCEEDED`）。
+新 App Store Connect ID 为 `6825085744`，Bundle ID 为
+`dev.longlivehealth.ios`，SKU 为 `longlivehealth-ios`。
+`Personal iPhone Testing` 已创建、开启自动分发并加入账号持有人。
+旧 App 记录 `6822791807` 已按用户要求移至 Removed Apps，停止作为更新目标。
+Apple 仍保留可恢复的历史记录，未声称从其平台永久抹除历史版本。
+
+26 项 Core、23 项原生测试和 4 项界面流程通过。首次 PDF 分享测试因
+测试模拟器上存在同名旧 App 而打开旧安装；卸载该测试安装后，独立重跑
+PDF 分享流程通过。Release Archive、分发签名与全部 HealthKit entitlement
+检查通过。上传完成时尚未确认 Apple 处理完成或进入 Testing。
+日志：`build/ios/validation/identity24-{build,pdf-share,archive,export,upload}.log`。
+
+新 App 需要重新登录 NAS 账号并重新授权 HealthKit；服务器数据继续使用。
+用户已确认旧 App 不再使用，可从 iPhone 删除旧安装，再安装新 TestFlight
+条目，以免 PDF 分享列表出现两个同名 App。新沙盒不继承旧 Keychain、
+待上传文件或本地 HealthKit anchors；首次同步重新读取，由服务器去重。

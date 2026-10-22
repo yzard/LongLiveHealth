@@ -78,7 +78,8 @@ struct ArchiveReviewView: View {
     }
 }
 
-struct ArchiveTimelineView: View {
+struct RecentActivitySection: View {
+    @State private var days = 7
     var model: AppModel
     @State private var events: [JSONValue] = []
     @State private var cursor: JSONValue = .null
@@ -86,33 +87,35 @@ struct ArchiveTimelineView: View {
     @State private var failure: String?
     @State private var loading = false
     var body: some View {
-        List {
-            Section {
-                Text("Last 7 days. Report dates are upload dates. Sleep stages remain individual original intervals.").font(.caption)
+        Section("Recent activity") {
+                Picker("Activity window", selection: $days) {
+                    Text("Past day").tag(1)
+                    Text("Past 7 days").tag(7)
+                }.pickerStyle(.segmented).disabled(loading)
+                Text("Recorded events to compare with your trends. Report dates are upload dates; these are not daily averages.").font(.caption)
                 if let failure { Text(failure).foregroundStyle(.secondary) }
-                Button("Refresh timeline") { Task { await load(reset: true) } }.disabled(loading)
-            }
+                Button("Refresh activity") { Task { await load(reset: true) } }.disabled(loading)
             ForEach(Array(events.enumerated()), id: \.offset) { _, event in
                 VStack(alignment: .leading, spacing: 6) {
                     Text(event["record_type"].stringValue.replacingOccurrences(of: "_", with: " ")).font(.headline)
                     if let at = event["at"].numberValue { Text(Date(timeIntervalSince1970: at).formatted()) }
                     Text("\(model.sourceLabel(event["source"].stringValue)) · revision \(Int(event["version"].numberValue ?? 0))").font(.caption)
-                    if event["source"] == .string("manual:helpyourself") { NavigationLink("Open logs", destination: DailyLogsView(model: model)) }
+                    if event["source"] == .string("manual:longlivehealth") { NavigationLink("Open logs", destination: DailyLogsView(model: model)) }
                     else if event["record_type"] == .string("sleep") { NavigationLink("Open sleep sessions", destination: SleepSessionsView(model: model)) }
                     else if event["record_type"] != .string("report") { NavigationLink("Open source records", destination: HealthView(model: model)) }
                 }
             }
             if cursor != .null { Button("Load more events") { Task { await load(reset: false) } }.disabled(loading) }
             if loading { ProgressView() }
-        }.navigationTitle("Timeline").initialTask { await load(reset: true) }
+        }.initialTask(id: days) { await load(reset: true) }
     }
     private func load(reset: Bool) async {
         guard !loading, let client = model.client, let token = model.session?.token else { return }
         loading = true
         defer { loading = false }
-        if reset { end = Date().timeIntervalSince1970.rounded(.down); cursor = .null; events = [] }
+        if reset { failure = nil; end = Date().timeIntervalSince1970.rounded(.down); cursor = .null; events = [] }
         do {
-            let response = try await model.request("wellness/timeline", body: .object(["start_at": .number(end - 7 * 86400), "end_at": .number(end), "cursor": cursor]))
+            let response = try await model.request("wellness/timeline", body: .object(["start_at": .number(end - Double(days) * 86400), "end_at": .number(end), "cursor": cursor]))
             guard !Task.isCancelled, model.session?.token == token else { return }
             events.append(contentsOf: response["events"].arrayValue); cursor = response["next_cursor"]; failure = nil
         } catch {

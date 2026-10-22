@@ -23,6 +23,7 @@ impl Database {
             .wellness_series(
                 user,
                 super::series::SeriesRequest {
+                    timezone: None,
                     record_type: "blood_glucose".into(),
                     start_at: request.start_at,
                     end_at: request.end_at,

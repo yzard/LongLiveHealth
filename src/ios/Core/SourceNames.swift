@@ -2,12 +2,13 @@ import Foundation
 
 public nonisolated enum SourceNames {
     public static func label(key: String, fallback: String, aliases: JSONValue, catalog: [JSONValue]) -> String {
-        let alias = aliases[key].stringValue
+        let alias = aliases[key].stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         if !alias.isEmpty { return alias }
-        if key == "manual:helpyourself" { return "Long Live Health" }
-        if !fallback.isEmpty && fallback != key { return fallback }
-        let name = catalog.first { $0["source_key"].stringValue == key }?["name"].stringValue ?? ""
-        return name.isEmpty ? key : name
+        if key == "manual:longlivehealth" { return "Long Live Health" }
+        let name = (catalog.first { $0["source_key"].stringValue == key }?["name"].stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty && name != key { return name }
+        let original = fallback.trimmingCharacters(in: .whitespacesAndNewlines)
+        return original.isEmpty ? key : original
     }
     public static func reportKey(name: String, reportID: String) -> String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)

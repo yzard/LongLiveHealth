@@ -200,7 +200,8 @@ pub async fn refresh(
         return Err(AppError::Unauthorized);
     }
     let time = now()?;
-    let token = digest(format!("helpyourself-access-v1:{}", request.next_refresh_token).as_bytes());
+    let token =
+        digest(format!("longlivehealth-access-v1:{}", request.next_refresh_token).as_bytes());
     let expires_at = time + state.config.security.session_ttl_seconds.min(3600);
     let refresh_expires_at = time + 90 * 86400;
     let user = state

@@ -40,7 +40,7 @@ pub async fn catalog(
     for source in health {
         let platform = source["platform"].as_str().ok_or(AppError::Internal)?;
         let id = source["source_id"].as_str().ok_or(AppError::Internal)?;
-        if platform == "manual" && id == "helpyourself.preferences" {
+        if platform == "manual" && id == "longlivehealth.preferences" {
             continue;
         }
         let key = format!("{platform}:{id}");

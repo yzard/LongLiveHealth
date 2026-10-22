@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 enum SessionVault {
-    private static let service = "helpyourself.session"
+    private static let service = "longlivehealth.session"
     static func save(_ session: StoredSession) throws {
         let encoded = try JSONEncoder().encode(session)
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "active"]

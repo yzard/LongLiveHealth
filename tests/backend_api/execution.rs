@@ -65,3 +65,51 @@ async fn blocking_panic_releases_capacity_without_reporting_success() {
     assert_eq!(cpu.run(|| Ok(42)).await.unwrap(), 42);
     cpu.shutdown().await;
 }
+
+#[tokio::test]
+async fn interactive_computation_waits_for_busy_cpu_and_cancellation_releases_queue() {
+    let cpu = CpuExecutor::new(1).unwrap();
+    let busy = cpu.clone();
+    let (started, observed) = tokio::sync::oneshot::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    let running = tokio::spawn(async move {
+        busy.run(move || {
+            started.send(()).unwrap();
+            wait.recv().unwrap();
+            Ok(())
+        })
+        .await
+    });
+    observed.await.unwrap();
+    let mut queued = Vec::new();
+    for _ in 0..4 {
+        let waiting = cpu.clone();
+        queued.push(tokio::spawn(async move {
+            waiting.run_interactive(|| Ok(42)).await
+        }));
+    }
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert!(queued.iter().all(|job| !job.is_finished()));
+    assert!(matches!(
+        cpu.run_interactive(|| Ok(0)).await,
+        Err(AppError::RateLimited)
+    ));
+    let canceled = queued.pop().unwrap();
+    canceled.abort();
+    assert!(canceled.await.unwrap_err().is_cancelled());
+    let waiting = cpu.clone();
+    let replacement = tokio::spawn(async move { waiting.run_interactive(|| Ok(42)).await });
+    release.send(()).unwrap();
+    running.await.unwrap().unwrap();
+    for job in queued.into_iter().chain([replacement]) {
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(3), job)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap(),
+            42
+        );
+    }
+    cpu.shutdown().await;
+}

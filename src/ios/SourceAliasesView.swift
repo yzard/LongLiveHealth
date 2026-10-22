@@ -12,7 +12,7 @@ struct SourceAliasesView: View {
     var body: some View {
         List {
             Section {
-                Text("Give each source a name to use in charts and history. Original source identifiers stay unchanged.").font(.caption)
+                Text("Charts and history use the original source name by default. Set an alias only when you want a different name.").font(.caption)
                 if loading { ProgressView("Loading sources") }
                 if let failure { Text(failure).foregroundStyle(.secondary) }
                 if !loading && keys.isEmpty { Text("Import or sync data to add sources.") }

@@ -21,6 +21,16 @@ import Testing
 }
 
 @Test func manualSourceUsesCurrentBrandWithoutChangingStoredIdentity() {
-    #expect(SourceNames.label(key: "manual:helpyourself", fallback: "helpyourself", aliases: .null, catalog: []) == "Long Live Health")
-    #expect(SourceNames.label(key: "manual:helpyourself", fallback: "", aliases: .object(["manual:helpyourself": .string("My log")]), catalog: []) == "My log")
+    #expect(SourceNames.label(key: "manual:longlivehealth", fallback: "longlivehealth", aliases: .null, catalog: []) == "Long Live Health")
+    #expect(SourceNames.label(key: "manual:longlivehealth", fallback: "", aliases: .object(["manual:longlivehealth": .string("My log")]), catalog: []) == "My log")
+}
+
+@Test func originalSourceNamesAreDefaultAliasesAheadOfGenericLabels() {
+    for name in ["Zap Live", "心电图", "Health", "Jaws Apple Watch"] {
+        let key = "apple_health:unique-source"
+        let catalog: [JSONValue] = [.object(["source_key": .string(key), "name": .string(name)])]
+        #expect(SourceNames.label(key: key, fallback: "Apple Health", aliases: .null, catalog: catalog) == name)
+        #expect(SourceNames.label(key: key, fallback: "Apple Health", aliases: .object([key: .string(" ")]), catalog: catalog) == name)
+        #expect(SourceNames.label(key: key, fallback: "Apple Health", aliases: .object([key: .string("My Watch")]), catalog: catalog) == "My Watch")
+    }
 }

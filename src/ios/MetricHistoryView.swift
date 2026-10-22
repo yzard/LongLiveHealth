@@ -7,7 +7,6 @@ struct MetricHistoryView: View {
     @State private var history: JSONValue = .null
     @State private var loading = false
     @State private var failure: String?
-    @State private var preview: DocumentLocation?
 
     private var points: [JSONValue] { history["points"].arrayValue }
     private var records: [JSONValue] { history["records"].arrayValue }
@@ -23,27 +22,16 @@ struct MetricHistoryView: View {
                 if !loading && points.isEmpty && records.isEmpty && failure == nil {
                     Text("No comparable measurements yet. Confirm imported results with a metric, unit and collection date.").foregroundStyle(.secondary)
                 }
-                if !loading && points.isEmpty && !records.isEmpty { Text("Results are listed below. A chart requires an exact numeric result, unit and collection date.").font(.caption).foregroundStyle(.secondary) }
+                if !loading && points.isEmpty && !records.isEmpty { Text("Open Historical Values to see the results. A chart requires an exact numeric result, unit and collection date.").font(.caption).foregroundStyle(.secondary) }
                 if !points.isEmpty {
                     ForEach(chartUnits, id: \.self) { unit in
-                    Text(unit).font(.caption).foregroundStyle(.secondary)
-                    Chart(points.filter { $0["unit"].stringValue == unit }, id: \.historyPointID) { point in
-                        if let value = point["value"].numberValue, let timestamp = point["timestamp"].numberValue {
-                            PointMark(x: .value("Collection date", Date(timeIntervalSince1970: timestamp)), y: .value("Value", value))
-                                .foregroundStyle(by: .value("Source", SourceNames.key(point)))
-                                .symbol(by: .value("Source", SourceNames.key(point)))
-                                .accessibilityLabel(model.sourceLabel(record: point) + ", " + point["sampled_at"].stringValue)
-                                .accessibilityValue("\(value.formatted()) \(point["unit"].stringValue)")
-                        }
+                    MetricChart(model: model, ranges: history["chart_ranges"], unit: unit,
+                                divisor: 1, sourceKeys: sourceKeys, names: sourceNames,
+                                initialPeriod: .week, showsHour: false, heartRate: false)
+                        .environment(\.timeZone, .gmt)
+
                     }
-                    .chartForegroundStyleScale(domain: sourceKeys, range: sourceKeys.enumerated().map { SourceLegend.colors[$0.offset % SourceLegend.colors.count] })
-                    .chartSymbolScale(domain: sourceKeys)
-                    .chartLegend { SourceLegend(model: model, keys: sourceKeys, names: sourceNames) }
-                    .chartLegend(position: .bottom, alignment: .leading)
-                    .frame(height: 260)
-                    .environment(\.timeZone, .gmt)
-                    }
-                    Text("Each point is one measurement. Equivalent units are combined; incompatible units use separate charts. Dates use UTC; sources are shown without averaging their values.").font(.caption).foregroundStyle(.secondary)
+                    Text("A point represents one value; a vertical bar shows the minimum and maximum in that time interval. Sources remain separate and dates use UTC.").font(.caption).foregroundStyle(.secondary)
                 }
                 if let count = history["excluded_count"].numberValue, count > 0 {
                     DisclosureGroup("\(Int(count)) records could not be plotted") {
@@ -74,6 +62,46 @@ struct MetricHistoryView: View {
                     Text("Laboratory method: " + method).font(.caption)
                 }
             }
+            Section {
+                NavigationLink("Historical Values") {
+                    MetricHistoricalValuesView(model: model, records: records, points: points)
+                }
+            }
+        }
+        .navigationTitle(metric["name"].stringValue)
+        .navigationBarTitleDisplayMode(.inline)
+        .initialTask { await reload() }
+        .refreshable { await reload() }
+    }
+
+    private func reload() async {
+        guard let token = model.session?.token else { return }
+        loading = true
+        failure = nil
+        defer { loading = false }
+        do {
+            let result = try await model.request("metrics/history/get", body: .object(["metric_id": metric["metric_id"]]))
+            guard !Task.isCancelled, model.session?.token == token else { return }
+            history = result
+        } catch {
+            guard !Task.isCancelled, model.session?.token == token else { return }
+            failure = error.localizedDescription
+        }
+    }
+
+}
+
+struct MetricHistoricalValuesView: View {
+    var model: AppModel
+    let records: [JSONValue]
+    let points: [JSONValue]
+    @State private var preview: DocumentLocation?
+    @State private var failure: String?
+
+    var body: some View {
+        List {
+            if let failure { Text(failure).foregroundStyle(.secondary) }
+            if records.isEmpty && points.isEmpty { Text("No historical values yet.").foregroundStyle(.secondary) }
             Section("Historical values") {
                 ForEach(records.reversed(), id: \.historyPointID) { record in
                     VStack(alignment: .leading, spacing: 6) {
@@ -109,26 +137,9 @@ struct MetricHistoryView: View {
                 }
             }
         }
-        .navigationTitle(metric["name"].stringValue)
+        .navigationTitle("Historical Values")
         .navigationBarTitleDisplayMode(.inline)
-        .initialTask { await reload() }
-        .refreshable { await reload() }
         .sheet(item: $preview) { DocumentPreview(location: $0) }
-    }
-
-    private func reload() async {
-        guard let token = model.session?.token else { return }
-        loading = true
-        failure = nil
-        defer { loading = false }
-        do {
-            let result = try await model.request("metrics/history/get", body: .object(["metric_id": metric["metric_id"]]))
-            guard !Task.isCancelled, model.session?.token == token else { return }
-            history = result
-        } catch {
-            guard !Task.isCancelled, model.session?.token == token else { return }
-            failure = error.localizedDescription
-        }
     }
 
     private func showSource(_ point: JSONValue) async {

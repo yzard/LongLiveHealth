@@ -165,6 +165,12 @@ pub(crate) fn project_json(text: &str) -> Result<String, AppError> {
     hash_value(&record, &mut hash)?;
     let content_hash = hex::encode(hash.finalize());
     let mut payload = record["payload"].clone();
+    if apple
+        && record["record_type"] == "heart_rate"
+        && let Some(samples) = heart_samples(&payload)
+    {
+        payload["quantity_samples"] = serde_json::to_value(samples)?;
+    }
     if apple {
         let fields = payload.as_object_mut().ok_or(AppError::Internal)?;
         for name in [
@@ -228,4 +234,52 @@ fn hash_value(value: &serde_json::Value, hash: &mut Sha256) -> Result<(), AppErr
         }
     }
     Ok(())
+}
+
+/// HealthKit source display names can change independently of immutable samples.
+/// Restore only that label before comparing the entire original semantic digest.
+pub(crate) fn only_source_name_changed(previous: &str, incoming: &str) -> Result<bool, AppError> {
+    let previous_value: serde_json::Value = serde_json::from_str(previous)?;
+    let mut incoming: serde_json::Value = serde_json::from_str(incoming)?;
+    let Some(payload) = incoming["payload"].as_object_mut() else {
+        return Ok(false);
+    };
+    match previous_value["payload"].get("source_name") {
+        Some(name) => {
+            payload.insert("source_name".into(), name.clone());
+        }
+        None => {
+            payload.remove("source_name");
+        }
+    }
+    same_content(previous, &project_json(&serde_json::to_string(&incoming)?)?)
+}
+
+/// Small query projection only; opaque series archives stay in raw files.
+pub(crate) fn heart_samples(payload: &serde_json::Value) -> Option<Vec<serde_json::Value>> {
+    use serde_json::json;
+    let series = payload["series"].as_array()?;
+    let samples: Option<Vec<_>> = series
+        .iter()
+        .map(|sample| {
+            let at = sample["start_at"].as_f64()?;
+            let text = sample["quantity"].as_str()?;
+            let (value, unit) = text.split_once(' ')?;
+            let value = value.parse::<f64>().ok()?
+                * match unit.trim() {
+                    "count/s" => 60.0,
+                    "count/min" | "bpm" => 1.0,
+                    _ => return None,
+                };
+            (at.is_finite() && value.is_finite() && value > 0.0 && value <= 300.0)
+                .then(|| json!({"at":at,"value":value}))
+        })
+        .collect();
+    samples.filter(|samples| !samples.is_empty())
+}
+
+pub(crate) fn same_content(first: &str, second: &str) -> Result<bool, AppError> {
+    let a: serde_json::Value = serde_json::from_str(&project_json(first)?)?;
+    let b: serde_json::Value = serde_json::from_str(&project_json(second)?)?;
+    Ok(a == b || (a["content_hash"].is_string() && a["content_hash"] == b["content_hash"]))
 }

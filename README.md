@@ -1,6 +1,6 @@
 # Long Live Health
 
-The product is named **Long Live Health**. The GitHub repository and working directory remain `helpyourself`. Existing installation, credential, synchronization and archive identifiers remain stable across upgrades.
+The product is named **Long Live Health**. The GitHub repository is `yzard/LongLiveHealth`; the working directory is `longlivehealth`. The new app uses the `dev.longlivehealth.ios` installation identity. Existing server accounts and health records are retained; install the new app and sign in again.
 
 开源、可自托管的 health data center（健康数据中心）。目标是读取不同设备和平台的可用数据，统一整合、保存与导出，并提供辅助分析。项目采用 [MIT 许可证](LICENSE)，完全没有硬件产品；没有公开接口、健康平台或文件导出通道的封闭设备不支持。
 
@@ -17,6 +17,7 @@ PDF 保留逐页文字与图像证据；当前 17 项指标支持常见单位换
 后端及合成部署测试通过。2026-10-02 的旧版完成 iOS 模拟器与 unsigned Release 构建。2026-10-06 新增界面目前仅完成 Swift 语法解析与可移植核心测试，尚未通过 Apple SDK 构建。真机、真实传感器/临床记录和真实报告准确性仍待验收，设备安装需要签名。[iOS 验证记录](docs/validation/ios-simulator-2026-10-02.md)。
 
 - [后端启动](docs/runbooks/backend.md)
+- [NAS 部署与 Desk GPU OCR](docs/runbooks/nas.md)
 - [OCR 服务配置](docs/runbooks/ocr.md)
 - [iPhone 构建与试用](docs/runbooks/ios.md)
 - [API 契约](docs/api.md)

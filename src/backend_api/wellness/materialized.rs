@@ -21,7 +21,10 @@ impl Database {
             .fetch_optional(&self.pool)
             .await?;
         if let Some(cached) = cached {
-            return Ok(serde_json::from_str(&cached)?);
+            let value: Value = serde_json::from_str(&cached)?;
+            if value["algorithm_version"] == super::VERSION {
+                return Ok(value);
+            }
         }
         let result = self.compute_wellness_day(user, request).await?;
         let revision = result["data_revision"].as_i64().ok_or(AppError::Internal)?;

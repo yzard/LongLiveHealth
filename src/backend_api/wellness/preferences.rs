@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use std::collections::{BTreeMap, BTreeSet};
 const RECORD: &str = "a37f17a5-867c-4f39-b864-76ffdd87953d";
-const SOURCE: &str = "helpyourself.preferences";
+const SOURCE: &str = "longlivehealth.preferences";
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

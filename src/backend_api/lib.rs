@@ -2,6 +2,7 @@ pub mod accounts;
 pub mod analysis;
 pub mod app;
 pub mod authentication;
+pub mod chart;
 pub mod cli;
 mod clinical_labs;
 pub mod config;

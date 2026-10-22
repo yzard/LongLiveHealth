@@ -9,18 +9,31 @@ struct HealthView: View {
     var body: some View {
         List {
             Section {
-                Button {
-                    Task { await model.synchronizeHealth(requestAccess: true, requestSelectedAccess: false, automatic: false); await reload() }
-                } label: {
-                    HStack {
-                        Text("Sync Now")
-                        Spacer()
-                        if model.isHealthSyncRunning { ProgressView().accessibilityHidden(true) }
+                HStack(spacing: 16) {
+                    Button {
+                        Task { await model.synchronizeHealth(requestAccess: true, requestSelectedAccess: false, automatic: false); await reload() }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text("Sync Now")
+                            if model.isHealthSyncRunning { ProgressView().accessibilityHidden(true) }
+                        }.frame(minHeight: 44)
+                    }.disabled(model.isHealthSyncRunning).accessibilityValue(model.isHealthSyncRunning ? "Syncing" : "")
+                    Spacer(minLength: 8)
+                    if model.isHealthSyncRunning {
+                        Button { model.pauseHealthSync() } label: {
+                            Text("Pause Sync").frame(minHeight: 44)
+                        }
                     }
-                }.disabled(model.isHealthSyncRunning).accessibilityValue(model.isHealthSyncRunning ? "Syncing" : "")
-                if model.isHealthSyncRunning { Button("Pause Sync") { model.pauseHealthSync() } }
+                }.buttonStyle(.borderless)
                 if model.keepHealthScreenAwake { Text("Screen stays awake while syncing on this page.").font(.caption).foregroundStyle(.secondary) }
                 Text(model.health.status).font(.caption).fixedSize(horizontal: false, vertical: true)
+                if let activity = model.health.activity, model.health.isSyncing {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(activity.lines(at: context.date), id: \.self) { Text($0) }
+                        }.font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 Button("Select prescriptions and medications") { Task { await model.synchronizeHealth(requestAccess: true, requestSelectedAccess: true, automatic: false); await reload() } }.disabled(model.isHealthSyncRunning)
                 Text("Vision prescriptions and medications require individual selection. Use this button each time you want to archive those records.").font(.caption).foregroundStyle(.secondary)
                 if let note = model.backgroundHealth.registrationError { Text(note).font(.caption).foregroundStyle(.secondary) }

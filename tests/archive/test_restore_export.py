@@ -37,7 +37,7 @@ def archive_fixture(path, broken=False):
     connection.close()
     members['observations.csv'] = b'observation_id,revision\n'
     manifest = dict(
-        format='helpyourself-export',
+        format='longlivehealth-export',
         version=1,
         database_schema_version=7,
         user_id=USER,

@@ -103,7 +103,7 @@ pub async fn lookup(request: Request) -> Result<Value, AppError> {
         .https_only(true)
         .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(15))
-        .user_agent("LongLiveHealth/0.1 (https://github.com/yzard/helpyourself)")
+        .user_agent("LongLiveHealth/0.1 (https://github.com/yzard/LongLiveHealth)")
         .build()
         .map_err(|_| AppError::Internal)?;
     let mut response=client.get(format!("https://world.openfoodfacts.org/api/v2/product/{}.json",request.barcode)).query(&[("fields","code,product_name,brands,nutriments,nutrition_data_per,quantity,serving_size,last_modified_t")]).send().await.map_err(|_|AppError::ProviderUnavailable)?;

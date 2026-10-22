@@ -2,6 +2,7 @@ mod accounts;
 mod analysis;
 mod app;
 mod authentication;
+mod chart;
 mod cli;
 mod config;
 mod database;

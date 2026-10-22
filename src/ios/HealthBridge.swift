@@ -7,6 +7,7 @@ import CryptoKit
 final class HealthBridge {
     var status = "Not connected"
     var isSyncing = false
+    private(set) var activity: HealthSyncActivity?
     var coverage: [JSONValue] = []
     private(set) var totalRecords: Int?
     private let store = HKHealthStore()
@@ -47,8 +48,8 @@ final class HealthBridge {
             ? HKUnit.moleUnit(with: .milli, molarMass: HKUnitMolarMassBloodGlucose).unitDivided(by: .liter())
             : HKUnit(from: "mg/dL")
         return HKQuantitySample(type: type, quantity: HKQuantity(unit: healthUnit, doubleValue: value), start: sampledAt, end: sampledAt,
-            metadata: [HKMetadataKeySyncIdentifier: "helpyourself:\(identifier)", HKMetadataKeySyncVersion: NSNumber(value: revision),
-                       "helpyourself_observation_id": observation["observation_id"].stringValue])
+            metadata: [HKMetadataKeySyncIdentifier: "longlivehealth:\(identifier)", HKMetadataKeySyncVersion: NSNumber(value: revision),
+                       "longlivehealth_observation_id": observation["observation_id"].stringValue])
     }
 
     static func bulkReadTypes(supportsClinical: Bool) -> Set<HKObjectType> {
@@ -71,7 +72,7 @@ final class HealthBridge {
         guard HKHealthStore.isHealthDataAvailable() else { status = "Health data unavailable on this device"; return }
         if !requestAccess, try archive.load(Bool.self, name: "health-enabled.json") != true { return }
         isSyncing = true; totalRecords = nil; status = "Preparing Apple Health sync"
-        defer { isSyncing = false }
+        defer { isSyncing = false; activity = nil }
         do {
             if requestAccess {
                 try await store.requestAuthorization(toShare: [], read: Self.bulkReadTypes(supportsClinical: store.supportsHealthRecords()))
@@ -98,12 +99,13 @@ final class HealthBridge {
                 }
                 try Task.checkCancellation()
                 status = HealthSyncProgress.status(recordType: definition.kind, total: totalRecords)
+                activity = HealthSyncActivity()
                 let pendingName = "pending-\(definition.kind).json"
                 let anchorName = "anchor-\(definition.kind).json"
                 if let pending = try archive.load(SyncCheckpoint.self, name: pendingName) {
                     for request in pending.requests {
                         try Task.checkCancellation()
-                        totalRecords = try HealthSyncProgress.totalRecords(in: await client.post("health/sync", body: request))
+                        try await send(request, client: client)
                         status = HealthSyncProgress.status(recordType: definition.kind, total: totalRecords)
                     }
                     try archive.save(pending.nextAnchor, name: anchorName)
@@ -116,7 +118,10 @@ final class HealthBridge {
                 let read: @MainActor @Sendable (HKQueryAnchor?) async throws -> Page? = { [self] cursor in
                     do {
                         try Task.checkCancellation()
-                        return try await query(definition, anchor: cursor)
+                        activity?.readingSince = Date()
+                        defer { activity?.readingSince = nil }
+                        let page = try await query(definition, anchor: cursor)
+                        return page
                     } catch is CancellationError { throw CancellationError() }
                     catch {
                         try Task.checkCancellation()
@@ -138,7 +143,7 @@ final class HealthBridge {
                     try archive.save(SyncCheckpoint(requests: requests, nextAnchor: page.anchor), name: pendingName)
                     for request in requests {
                         try Task.checkCancellation()
-                        totalRecords = try HealthSyncProgress.totalRecords(in: await client.post("health/sync", body: request))
+                        try await send(request, client: client)
                         status = HealthSyncProgress.status(recordType: definition.kind, total: totalRecords)
                     }
                     try archive.save(page.anchor, name: anchorName)
@@ -149,6 +154,8 @@ final class HealthBridge {
                     failedTypes.append(definition.kind)
                 }
             }
+            activity = nil
+            status = "Syncing activity summaries and other Health records"
             failedTypes += try await HealthSnapshots.synchronize(store: store, client: client, archive: archive, connectionID: connectionID, installationID: installation, includeSelectedRecords: requestSelectedAccess) { kind, total in
                 if let total { totalRecords = total }
                 status = HealthSyncProgress.status(recordType: kind, total: totalRecords)
@@ -162,6 +169,13 @@ final class HealthBridge {
             status = "Sync paused; saved batches retained. Tap Sync Now to resume."
             throw error
         }
+    }
+
+    private func send(_ request: JSONValue, client: APIClient) async throws {
+        activity?.beginSending(records: request["records"].arrayValue.count, at: Date())
+        defer { activity?.endSending() }
+        totalRecords = try HealthSyncProgress.totalRecords(in: await client.post("health/sync", body: request))
+        activity?.confirmSending()
     }
 
     nonisolated static func isProtectedDataError(_ error: Error) -> Bool {

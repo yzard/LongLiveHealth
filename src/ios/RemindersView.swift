@@ -52,7 +52,7 @@ struct RemindersView: View {
         let center = UNUserNotificationCenter.current()
         let pending = await center.pendingNotificationRequests()
         guard model.session?.token == token else { return }
-        center.removePendingNotificationRequests(withIdentifiers: pending.filter { $0.identifier.hasPrefix("helpyourself-reminder:") }.map(\.identifier))
+        center.removePendingNotificationRequests(withIdentifiers: pending.filter { $0.identifier.hasPrefix("longlivehealth-reminder:") }.map(\.identifier))
         status = "Local schedules cleared. Synchronize to apply the current server rules."
     }
     private func schedule() async {
@@ -70,7 +70,7 @@ struct RemindersView: View {
             for item in upcoming.prefix(50) {
                 guard model.session?.token == token else { return }
                 let at = item["at"].numberValue ?? 0
-                let id = "helpyourself-reminder:\(user):\(item["record_id"].stringValue):\(Int(at))"
+                let id = "longlivehealth-reminder:\(user):\(item["record_id"].stringValue):\(Int(at))"
                 let content = UNMutableNotificationContent(); content.title = item["title"].stringValue; content.body = item["body"].stringValue; content.sound = .default
                 let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, at - Date().timeIntervalSince1970), repeats: false)
                 try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))

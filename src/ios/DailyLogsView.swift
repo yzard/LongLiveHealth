@@ -5,11 +5,12 @@ struct DailyLogsView: View {
     @State private var entries: [JSONValue] = []
     @State private var editing: LogSelection?
     @State private var deleting: JSONValue?
-    private struct LogSelection: Identifiable { let id = UUID(); let entry: JSONValue? }
+    private struct LogSelection: Identifiable { let id = UUID(); let entry: JSONValue?; var kind = "journal" }
     var body: some View {
         List {
             Section {
-                Button("Record an observation") { editing = LogSelection(entry: nil) }
+                Button("Record weight") { editing = LogSelection(entry: nil, kind: "body") }
+                Button("Record an event or observation") { editing = LogSelection(entry: nil) }
                 Text("Missing fields remain unknown. Your full export includes entries and revisions.").font(.caption).foregroundStyle(.secondary)
             }
             Section("Last 30 days") {
@@ -37,11 +38,11 @@ struct DailyLogsView: View {
                     }
                 }
             }
-        }.navigationTitle("Daily logs")
+        }.navigationTitle("Manual entries")
             .initialTask { await reload() }.refreshable { await reload() }
             .onChange(of: model.entryMutation) { _, change in if let change { entries = change.applying(to: entries) { ($0["at"].numberValue ?? 0) >= Date().timeIntervalSince1970 - 30 * 86400 && ($0["at"].numberValue ?? 0) <= Date().timeIntervalSince1970 } } }
             .sheet(item: $editing) { selection in
-                NavigationStack { LogEditor(model: model, existing: selection.entry, initialKind: "journal", initialValues: [:], initialDate: Date()) }
+                NavigationStack { LogEditor(model: model, existing: selection.entry, initialKind: selection.kind, initialValues: [:], initialDate: Date()) }
             }
             .confirmationDialog("Delete this log and its revision history? Separate exports and backups remain unchanged.", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
                 Button("Delete log", role: .destructive) { if let entry = deleting { Task { await remove(entry) } } }
@@ -109,7 +110,7 @@ struct LogEditor: View {
             if kind == "training" { Text("Record effort for the whole session on the CR10 scale, ideally about 30 minutes afterward. External weight excludes body mass.").font(.caption) }
             if let failure { Text(failure).foregroundStyle(.red) }
             Button("Save log") { Task { await save() } }.disabled(saving)
-        }.disabled(saving).navigationTitle(existing == nil ? "New observation" : "Edit observation")
+        }.disabled(saving).navigationTitle(existing == nil ? (kind == "body" ? "Record weight" : "New observation") : "Edit observation")
             .toolbar { Button("Cancel") { dismiss() }.disabled(saving) }
             .interactiveDismissDisabled()
             .onAppear {

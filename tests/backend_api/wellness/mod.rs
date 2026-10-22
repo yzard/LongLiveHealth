@@ -77,7 +77,7 @@ async fn daily_view_validates_dates_priorities_and_user_boundaries() {
         )
         .await
         .unwrap();
-    assert_eq!(data["metrics"].as_array().unwrap().len(), 6);
+    assert_eq!(data["metrics"].as_array().unwrap().len(), 8);
     assert!(
         data["metrics"]
             .as_array()
@@ -687,6 +687,7 @@ async fn device_series_keeps_sources_and_uses_actual_healthkit_percentage_units(
             vec![(0, 50.0), (300, 100.0), (600, 200.0)],
         ),
         ("oxygen_saturation", "%", vec![(0, 0.97)]),
+        ("vo2_max", "ml/kg*min", vec![(0, 42.0), (400 * 86400, 44.0)]),
         (
             "heart_rate",
             "count/min",
@@ -721,12 +722,75 @@ async fn device_series_keeps_sources_and_uses_actual_healthkit_percentage_units(
             .unwrap();
     }
     let request = |kind: &str| SeriesRequest {
+        timezone: None,
         declared_maximum: None,
         record_type: kind.into(),
         start_at: 0,
         end_at: 900,
         maximum_gap_seconds: 300,
     };
+    state
+        .database
+        .sync_health(
+            &alice.user_id,
+            SyncRequest {
+                connection_id: connection.connection_id.clone(),
+                batch_id: uuid::Uuid::new_v4().to_string(),
+                record_type: "vo2_max".into(),
+                coverage_status: "observed".into(),
+                records: ["sensor", "other"]
+                    .into_iter()
+                    .map(|source| HealthRecordInput {
+                        record_id: format!("duplicate-{source}"),
+                        source_id: source.into(),
+                        record_type: "vo2_max".into(),
+                        start_at: 0,
+                        end_at: 0,
+                        version: 1,
+                        deleted: false,
+                        payload: json!({"value":42.0,"unit":"mL/kg/min"}),
+                    })
+                    .collect(),
+            },
+        )
+        .await
+        .unwrap();
+    state.database.save_wellness_entry(&alice.user_id, serde_json::from_value(json!({
+        "record_id":uuid::Uuid::new_v4(),"version":1,"batch_id":uuid::Uuid::new_v4(),"at":100,"timezone":"UTC",
+        "entry":{"kind":"body","content":{"weight_kg":72.5,"body_fat_percent":null,"waist_cm":null,"note":""}}
+    })).unwrap()).await.unwrap();
+    let weight = state
+        .database
+        .wellness_series(&alice.user_id, request("body_mass"))
+        .await
+        .unwrap();
+    assert_eq!(weight["sources"][0]["source"], "manual:longlivehealth");
+    assert_eq!(weight["sources"][0]["chart_points"][0]["value"], 72.5);
+    let mut complete = request("vo2_max");
+    complete.start_at = -62_135_596_800;
+    complete.end_at = 500 * 86400;
+    let vo2 = state
+        .database
+        .wellness_series(&alice.user_id, complete)
+        .await
+        .unwrap();
+    let all_sources = vo2["sources"].as_array().unwrap();
+    assert_eq!(all_sources.len(), 2);
+    let sensor = all_sources
+        .iter()
+        .find(|source| source["source"] == "apple_health:sensor")
+        .unwrap();
+    assert_eq!(sensor["chart_points"].as_array().unwrap().len(), 2);
+    assert_eq!(sensor["points"].as_array().unwrap().len(), 3);
+    let mut dense = request("heart_rate");
+    dense.end_at = 500 * 86400;
+    assert!(
+        state
+            .database
+            .wellness_series(&alice.user_id, dense)
+            .await
+            .is_err()
+    );
     let heart = state
         .database
         .wellness_series(&alice.user_id, request("heart_rate"))
@@ -2390,7 +2454,7 @@ async fn calendar_report_validates_bounds_and_preserves_empty_state() {
         .await
         .unwrap();
     assert_eq!(result["calendar_days"], 365);
-    assert_eq!(result["metrics"].as_array().unwrap().len(), 6);
+    assert_eq!(result["metrics"].as_array().unwrap().len(), 8);
     assert!(
         result["metrics"][0]["sources"]
             .as_array()
@@ -2774,4 +2838,83 @@ fn cycle_predictions_preserve_source_uncertainty_and_do_not_become_observations(
     );
     let context:Entry=serde_json::from_value(json!({"kind":"cycle","content":{"flow":"none","symptoms":[],"context":"perimenopause","note":""}})).unwrap();
     assert!(context.validate().is_ok());
+}
+
+mod steps;
+
+#[tokio::test]
+async fn heart_series_preserves_subsample_times_and_reindexes_existing_originals() {
+    use longlivehealth::health::{ConnectionRequest, HealthRecordInput, SyncRequest};
+    let (directory, state) = crate::fixture().await;
+    let user = crate::add_user(&state, "heart-samples").await;
+    let connection = state
+        .database
+        .create_connection(
+            &user.user_id,
+            ConnectionRequest {
+                platform: "apple_health".into(),
+                installation_id: uuid::Uuid::new_v4().to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    state.database.sync_health(&user.user_id, SyncRequest {
+        connection_id: connection.connection_id, batch_id: uuid::Uuid::new_v4().to_string(),
+        record_type: "heart_rate".into(), coverage_status: "observed".into(),
+        records: vec![HealthRecordInput {
+            record_id: "series".into(), source_id: "watch".into(), record_type: "heart_rate".into(),
+            start_at: 0, end_at: 10, version: 1, deleted: false,
+            payload: json!({"value":75,"unit":"count/min","quantity_count":2,
+                "raw_archive":{"format":"nskeyedarchiver-secure-v1","encoding":"base64","data":"AA=="},
+                "series":[{"start_at":0.25,"quantity":"1.2 count/s"},{"start_at":5.25,"quantity":"78 count/min"}]}),
+        }],
+    }).await.unwrap();
+    let request = || {
+        serde_json::from_value(json!({"record_type":"heart_rate","start_at":0,"end_at":60,"maximum_gap_seconds":15,"declared_maximum":null})).unwrap()
+    };
+    let result = state
+        .database
+        .wellness_series(&user.user_id, request())
+        .await
+        .unwrap();
+    let points = result["sources"][0]["chart_points"].as_array().unwrap();
+    assert_eq!(points.len(), 2);
+    assert_eq!(points[0]["at"], 0.25);
+    assert_eq!(points[0]["value"], 72.0);
+    assert_eq!(points[1]["at"], 5.25);
+    let pool = sqlx::SqlitePool::connect(&format!(
+        "sqlite:{}",
+        directory.path().join("database.sqlite").display()
+    ))
+    .await
+    .unwrap();
+    sqlx::query("UPDATE health_records SET payload_json=json_remove(payload_json,'$.payload.quantity_samples') WHERE record_type='heart_rate'").execute(&pool).await.unwrap();
+    assert_eq!(state.database.index_heart_samples().await.unwrap(), 1);
+    assert_eq!(state.database.index_heart_samples().await.unwrap(), 0);
+    let restored = state
+        .database
+        .wellness_series(&user.user_id, request())
+        .await
+        .unwrap();
+    assert_eq!(
+        restored["sources"][0]["chart_points"],
+        result["sources"][0]["chart_points"]
+    );
+    pool.close().await;
+}
+
+#[test]
+fn daily_chart_units_do_not_depend_on_today_or_source_selection() {
+    for kind in longlivehealth::wellness::KINDS {
+        let unit = longlivehealth::health::daily_unit(kind).unwrap();
+        let data = json!({"algorithm_version":"fixture","days":[
+            {"date":"2026-10-20","source":"apple_health:watch","value":60,"unit":unit},
+            {"date":"2026-10-20","source":"apple_health:other","value":65,"unit":unit}]});
+        for date in ["2026-10-20", "2026-10-21"] {
+            let result = select_metric(kind, date, &[], &data).unwrap();
+            assert!(result["current"]["selected"].is_null());
+            assert_eq!(result["unit"], unit);
+            assert_eq!(result["chart_ranges"]["D"].as_array().unwrap().len(), 2);
+        }
+    }
 }

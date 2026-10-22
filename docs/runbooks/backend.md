@@ -1,12 +1,10 @@
 # 后端启动与运维
 
-> Current Desk test deployment (2026-10-15): direct Rust HTTP at
-> `http://192.168.1.20`, host port 80 mapped directly to API container port 8080.
-> Caddy is stopped. `playground/compose.lan.yaml` on Desk now contains the
-> source-controlled `docker/docker-compose.direct.yaml` override; its Caddy profile
-> prevents ordinary Compose startup from reintroducing the proxy. Data, credentials,
-> image and phone origin are unchanged. Historical proxy instructions below describe
-> previous deployment states; Caddy is intended for the later NAS deployment.
+> NAS deployment (2026-10-20): `https://health.zhuoyin.info` through the NAS's
+> existing Caddy. The API uses a prebuilt image and
+> `/data/docker/data/longlivehealth`; GPU OCR remains on Desk at LAN port 8001.
+> See [NAS and Desk deployment](nas.md) for the maintained deployment commands.
+> Dated Desk HTTP addresses below describe earlier test deployments.
 
 
 本版本提供报告原件归档、模型提取、人工复核、趋势、健康原始数据同步、完整导出与删除，以及默认关闭的个人血脂分析。具体字段见 [API 契约](../api.md)，服务行为见 [生命周期审查](../reviews/2026-10-02-server-lifecycle-and-load.md)，当前配置约定见 [必要 OCR 服务审查](../reviews/2026-10-03-required-ocr.md)。
@@ -364,7 +362,7 @@ user's backup-cleanup request, and the empty backups directory was removed.
 Filesystem free space was then 85 GiB. Source files and current DB were retained.
 Validation: 146 backend tests passed (2 ignored), formatter/clippy passed;
 16 offline migration/export/restore tests passed. Logs and size measurements are
-in `build/backend_api/validation/helpyourself-storage6-*` and
+in the historical storage-6 logs under `build/backend_api/validation/` and
 `storage6-archive-tests.log`. Actual end-to-end phone sync speed was not measured.
 
 
@@ -408,11 +406,12 @@ restart. The browser Data page also provides an alias editor.
 
 Use images `longlivehealth-backend-api:local` and `longlivehealth-backend-ocr:local`,
 Compose project `longlivehealth`, executable `/app/longlivehealth`, and the
-`LONGLIVEHEALTH_` deployment variable prefix. Desk remains in
-`/home/zyin/dev/helpyourself`; its persistent service roots are unchanged. LAN testing
-uses direct API HTTP at `http://192.168.1.20`, with no Caddy in the running stack.
-Persisted source IDs, raw paths and archive markers remain stable across this product
-rename. Existing clients keep using the same server URL and account sessions.
+`LONGLIVEHEALTH_` deployment variable prefix. Desk uses
+`/home/zyin/dev/longlivehealth` and runs only the GPU OCR service. The API and
+its data run on NAS, accessed through `https://health.zhuoyin.info`; see [NAS deployment](nas.md).
+The new-identity release uses `longlivehealth` for manual sources, raw source
+folders and archive format markers. Existing Apple Health sample identities and
+medical provenance remain authentic. Use the NAS server URL in clients; existing accounts are retained.
 
 Final-name API and OCR images passed their complete build checks and are deployed.
 API tests: 147 passed, 2 ignored; OCR tests: 10 passed. API HTML and OCR health return
@@ -422,3 +421,37 @@ API image: `sha256:c6c3ddc2424e101ebab6a32e1a5f0decf011fd3599af511a034993203d788
 OCR image: `sha256:8334e015e63141c53897cf4bccea38961b2d99934f1298a32bfd28e49105263b`.
 Provisional-name containers, networks and image tags were removed after verification;
 persistent health data and account records were retained.
+
+### Browse detail queries
+
+`METRIC_HEALTH_HISTORY` explicitly uses `health_records_range`. With millions of
+Apple Health records, SQLite otherwise selected the user/platform uniqueness index
+for the two clinical record types and scanned unrelated records. A bounded read-only
+NAS comparison found the original lookup exceeded five seconds; the indexed lookup
+returned 309 metadata rows in about 3 ms. This is a query measurement, not end-to-end
+API latency. No schema or original-data migration is needed.
+
+Device series includes every source in one response and adds normalized, deduplicated
+`chart_points`, retaining raw `points` for history. Weight includes manual entries.
+VO₂ Max accepts full-history time bounds, still subject to the 50,000-record limit.
+
+### Data permissions
+
+The container drops privileges to PUID/PGID without scanning, checking or changing
+ownership of `/data`. Provision the volume for that service identity during deployment.
+Actual file I/O failures return HTTP 500 with `storage_permission_denied` and an
+explanation of the missing read/write permission. Read-only filesystems and SQLite
+read-only errors return `storage_read_only`. These server-storage failures do not
+invalidate the user's login. API messages exclude private paths and SQL contents.
+The iOS client displays the API error message directly. Unrelated internal errors
+remain generic. If essential startup configuration or the database cannot be opened,
+the service cannot start; its startup failure must be handled by the operator.
+
+### Heart subsample projection
+
+`index-heart-samples` rebuilds compact numeric heart-series projections from existing
+originals. It targets active heart records with quantity_count > 1 and no projection;
+it does not scan or validate every raw file. Original files are unchanged. Reads
+occur outside short transactions of at most 100 updates. Updates check the original
+raw revision and previous projection so a concurrent sync wins safely. Re-running
+skips completed projections. Unsupported series formats remain unexpanded.

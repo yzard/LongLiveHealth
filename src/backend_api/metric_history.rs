@@ -101,7 +101,10 @@ pub async fn history(
         points.retain(|point| point["original"]["clinical_observation"].is_null());
         if let Some(group) = groups.get(&request.metric_id) { points.extend(group.points.clone()); }
         points.sort_by(|a,b| a["timestamp"].as_i64().cmp(&b["timestamp"].as_i64()).then_with(|| a["point_id"].as_str().cmp(&b["point_id"].as_str())));
-        Ok(json!({"metric":definition,"records":records,"points":points,"excluded":excluded,"excluded_count":excluded.len(),
+        let chart_ranges = crate::chart::ranges(points.iter().filter_map(|p| {
+            Some((p["source_key"].as_str().or_else(|| p["source_id"].as_str())?.to_owned(), p["unit"].as_str()?.to_owned(), p["timestamp"].as_f64()?, p["value"].as_f64()?))
+        }), chrono_tz::UTC);
+        Ok(json!({"chart_ranges":chart_ranges,"metric":definition,"records":records,"points":points,"excluded":excluded,"excluded_count":excluded.len(),
             "unassigned_clinical_records":unassigned,"unassigned_clinical_count":unassigned.len(),
             "algorithm_version":"metric-history-v2","conversion_version":crate::laboratory::CONVERSION_VERSION}))
     }).await

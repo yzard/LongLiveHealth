@@ -295,7 +295,7 @@ async fn build_export(state: &AppState, user_id: &str, export_id: &str) -> Resul
     transaction.commit().await?;
     let field_dictionary: Value =
         serde_json::from_str(include_str!("../archive/field_dictionary.json"))?;
-    let manifest = json!({"field_dictionary":field_dictionary,"format":"helpyourself-export","version":1,"database_schema_version":7,"table_counts":table_counts,"table_columns":table_columns,"data_revision":revision,"user_id":user_id,"created_at":now()?,
+    let manifest = json!({"field_dictionary":field_dictionary,"format":"longlivehealth-export","version":1,"database_schema_version":7,"table_counts":table_counts,"table_columns":table_columns,"data_revision":revision,"user_id":user_id,"created_at":now()?,
         "conversion_version":crate::laboratory::CONVERSION_VERSION,"metrics":crate::laboratory::metrics(),"tables":queries::EXPORT_TABLES.iter().map(|(name,_)|format!("{name}.jsonl")).collect::<Vec<_>>(),"raw_directory":"raw/","csv":"observations.csv",
         "notes":"JSONL is lossless. CSV formula-leading text is prefixed with an apostrophe. No passwords, sessions or provider secrets are exported."});
     tokio::fs::write(
@@ -484,5 +484,56 @@ impl<W: Write> Write for DigestMember<'_, W> {
     }
     fn flush(&mut self) -> std::io::Result<()> {
         self.writer.flush()
+    }
+}
+
+impl Database {
+    pub async fn index_heart_samples(&self) -> Result<usize, AppError> {
+        let rows = sqlx::query(queries::HEART_SAMPLE_REINDEX)
+            .fetch_all(&self.pool)
+            .await?;
+        let mut updated = 0;
+        for (index, chunk) in rows.chunks(100).enumerate() {
+            let mut prepared = Vec::new();
+            for row in chunk {
+                let path: String = row.get("raw_path");
+                if !crate::raw::valid_relative_path(&path) {
+                    return Err(AppError::Internal);
+                }
+                let raw = tokio::fs::read(self.data_dir.join(path)).await?;
+                let original: Value = serde_json::from_slice(&raw)?;
+                let Some(samples) = crate::health_batch::heart_samples(&original["payload"]) else {
+                    continue;
+                };
+                let previous: String = row.get("payload_json");
+                let mut projection: Value = serde_json::from_str(&previous)?;
+                projection["payload"]["quantity_samples"] = json!(samples);
+                prepared.push((row, previous, serde_json::to_string(&projection)?));
+            }
+            // Read originals outside the short transaction; commit at most 100 projections.
+            let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+            for (row, previous, projection) in prepared {
+                updated += sqlx::query(queries::UPDATE_HEART_SAMPLE_PROJECTION)
+                    .bind(projection)
+                    .bind(row.get::<String, _>("user_id"))
+                    .bind(row.get::<String, _>("platform"))
+                    .bind(row.get::<String, _>("source_id"))
+                    .bind(row.get::<String, _>("record_id"))
+                    .bind(row.get::<String, _>("raw_id"))
+                    .bind(previous)
+                    .execute(&mut *tx)
+                    .await?
+                    .rows_affected() as usize;
+            }
+            tx.commit().await?;
+            if index % 10 == 0 {
+                tracing::info!(
+                    updated,
+                    remaining = rows.len().saturating_sub((index + 1) * 100),
+                    "Heart sample projections indexed"
+                );
+            }
+        }
+        Ok(updated)
     }
 }

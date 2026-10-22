@@ -226,7 +226,7 @@
     "blood_pressure": "Paired systolic and diastolic pressure in mmHg, optional pulse in bpm, arm and posture.",
     "cycle": "Observed flow, symptoms and explicit cycle, pregnancy, postpartum or perimenopause context. Entries do not establish ovulation.",
     "breathing": "Actual recorded duration in minutes and optional measured breaths per minute.",
-    "preferences": "Source priorities, favorite metrics and optional sleep goal in minutes, under the separate helpyourself.preferences source.",
+    "preferences": "Source priorities, favorite metrics and optional sleep goal in minutes, under the separate longlivehealth.preferences source.",
     "exercise": "Named exercise, equipment, muscle groups, instructions and notes. This library entry does not represent completed activity.",
     "workout_template": "Named sequence of exercise prescriptions, sets, repetitions or duration, external weight and rest. Templates do not contribute training load.",
     "planned_workout": "Dated workout prescription with planned or skipped status. Completion requires a separate training record.",

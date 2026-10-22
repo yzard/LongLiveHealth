@@ -6,7 +6,7 @@ import CryptoKit
 /// own business acknowledgement and retries; the server's stable IDs prevent duplicates.
 @MainActor public final class BackgroundTransfer {
     public static let shared = BackgroundTransfer()
-    public static let identifier = "dev.helpyourself.ios.transfers"
+    public static let identifier = "dev.longlivehealth.ios.transfers"
     private var generation = UUID()
     private var activeSession: URLSession?
     private var eventsFinished = false

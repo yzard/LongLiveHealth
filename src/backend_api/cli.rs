@@ -45,6 +45,7 @@ pub enum Command {
         #[arg(long)]
         username: String,
     },
+    IndexHeartSamples,
     CheckConfig,
     ProbeProviders,
 }
@@ -137,6 +138,12 @@ pub async fn run(cli: Cli) -> Result<(), AppError> {
     let database = Database::open(&config.data_dir).await?;
     let reset_password = matches!(&cli.command, Command::ResetPassword { .. });
     match cli.command {
+        Command::IndexHeartSamples => {
+            println!(
+                "Indexed {} heart records",
+                database.index_heart_samples().await?
+            );
+        }
         Command::CreateUser {
             username,
             password_stdin,

@@ -5,7 +5,7 @@ import io
 import json
 import time
 import zipfile
-from datetime import date, timedelta
+from datetime import datetime, timezone, date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 exports = []
@@ -240,7 +240,7 @@ class Handler(BaseHTTPRequestHandler):
             'wellness/import/list': {'imports': [], 'next_after_id': None},
             'wellness/timeline': {'events': [], 'next_cursor': None},
             'wellness/review': {'days': [], 'measurements': [], 'strength_bests': [], 'notes': []},
-            'wellness/series': {'sources': [], 'notes': []},
+            'wellness/series': {'unit': 'ml/kg*min' if body.get('record_type') == 'vo2_max' else 'kg', 'sources': [{'source': 'apple_health:watch', 'points': [{'at': int(time.time()) - 365 * 86400, 'value': 42, 'record_id': 'older-vo2'}]}] if body.get('record_type') == 'vo2_max' and body.get('start_at', 0) <= int(time.time()) - 365 * 86400 < body.get('end_at', 0) else [], 'notes': []},
             'wellness/preferences/get': source_preferences,
             'wellness/day': {
                 'date': body.get('date'),
@@ -256,17 +256,18 @@ class Handler(BaseHTTPRequestHandler):
                                     date.fromisoformat(body.get('date', '2026-10-01')) - timedelta(days=offset)
                                 ).isoformat(),
                                 'alternatives': [{'source': 'apple_health:watch', 'value': value, 'unit': unit}],
+                                'combined': {'value': value, 'unit': unit} if kind == 'steps' else None,
                             }
-                            for offset in range(9)
+                            for offset in range(1, 10)
                         ],
                     }
-                    for kind, unit, value in [('sleep', 'seconds', 27000), ('steps', 'count', 6500)]
+                    for kind, unit, value in [('sleep', 'seconds', 27000), ('steps', 'count', 6500), ('heart_rate', 'count/min', 75), ('workout', 'seconds', 3600), ('resting_heart_rate', 'count/min', 58), ('hrv_sdnn', 'ms', 40), ('active_energy', 'kcal', 500), ('basal_energy', 'kcal', 1500)]
                 ],
                 'computed_at': 1790985600,
             },
-            'wellness/sources': {'sources': [{'platform': 'apple_health', 'source_id': 'watch', 'record_type': 'sleep', 'record_count': 10}], 'catalog': [{'source_key': 'apple_health:watch', 'name': 'Apple Watch'}]},
+            'wellness/sources': {'sources': [{'platform': 'apple_health', 'source_id': 'watch', 'record_type': 'sleep', 'record_count': 10}, {'platform': 'apple_health', 'source_id': 'watch', 'record_type': 'vo2_max', 'first_at': int(time.time()) - 400 * 86400}], 'catalog': [{'source_key': 'apple_health:watch', 'name': 'Apple Watch'}]},
             'wellness/sleep': {'sources': [], 'algorithm_version': 'synthetic'},
-            'wellness/entries/list': {'entries': []},
+            'wellness/entries/list': {'entries': [{'record_id': 'manual-weight', 'at': time.time() - 60, 'version': 1, 'entry': {'kind': 'body', 'content': {'weight_kg': 72.5}}}] if body.get('kind') == 'body' else []},
             'health/aggregate': {'days': []},
             'health/connect': {'connection_id': 'synthetic-connection'},
             'exports/list': {'exports': exports},
@@ -331,6 +332,60 @@ class Handler(BaseHTTPRequestHandler):
                 response = source_preferences
         if route == 'exports/create':
             exports.append({'export_id': 'synthetic-export', 'status': 'ready', 'created_at': 1790985600})
+        if route == 'wellness/series':
+            if body.get('record_type') == 'heart_rate':
+                response['unit'] = 'count/min'
+                response['sources'] = [{'source': 'apple_health:watch', 'points': [{'at': datetime.now().astimezone().replace(hour=12, minute=21, second=0, microsecond=0).timestamp() + offset * 5, 'value': value, 'record_id': str(offset)} for offset, value in enumerate([70, 75, 90])]}]
+            if body.get('record_type') == 'body_mass':
+                response['sources'] = [{'source': 'manual:longlivehealth', 'points': [{'at': int(time.time()) - 60, 'value': 72.5, 'record_id': 'manual-weight'}]}]
+            for source in response.get('sources', []):
+                source['chart_points'] = source['points']
+        def chart_ranges(points):
+            from datetime import timedelta
+            from zoneinfo import ZoneInfo
+            zone = ZoneInfo(body.get('timezone', 'UTC')) if route == 'wellness/series' else timezone.utc
+            def bounds(at, period, window):
+                dt = datetime.fromtimestamp(at, zone)
+                if period == 'H' or (period == 'D' and not window):
+                    start = dt.replace(second=0, microsecond=0)
+                    width = 60 if period == 'H' and not window else 3600
+                    if width == 3600: start = start.replace(minute=0)
+                    return start.timestamp(), start.timestamp() + width
+                start = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                if (period == 'D' and window) or (period in ('W', 'M') and not window):
+                    end = start + timedelta(days=1)
+                elif (period == 'W' and window) or (period == '6M' and not window):
+                    start -= timedelta(days=(start.weekday() + 1) % 7)
+                    end = start + timedelta(days=7)
+                else:
+                    start = start.replace(day=1)
+                    months = 1
+                    if period == '6M':
+                        start = start.replace(month=1 if start.month <= 6 else 7); months = 6
+                    if period == 'Y' and window:
+                        start = start.replace(month=1); months = 12
+                    n = start.year * 12 + start.month - 1 + months
+                    end = start.replace(year=n // 12, month=n % 12 + 1)
+                return start.timestamp(), end.timestamp()
+            result = {'summaries': {}}
+            for period in ('H', 'D', 'W', 'M', '6M', 'Y'):
+                for window in (False, True):
+                    groups = {}
+                    for source, unit, at, value in points:
+                        start, end = bounds(at, period, window)
+                        groups.setdefault(('' if window else source, unit, start, end), []).append((at, value))
+                    rows = [{'source': source, 'unit': unit, 'at': (start + end) / 2,
+                             'start_at': start, 'end_at': end, 'first_at': min(p[0] for p in samples),
+                             'last_at': max(p[0] for p in samples), 'latest_value': max(samples)[1],
+                             'min': min(p[1] for p in samples), 'max': max(p[1] for p in samples), 'count': len(samples)}
+                            for (source, unit, start, end), samples in groups.items()]
+                    (result['summaries'] if window else result)[period] = rows
+            return result
+        if route == 'wellness/series':
+            response['chart_ranges'] = chart_ranges([(s['source'], response['unit'], p['at'], p['value']) for s in response['sources'] for p in s['points']])
+        if route == 'wellness/day':
+            for metric in response['metrics']:
+                metric['chart_ranges'] = chart_ranges([(p['source'], p['unit'], datetime.fromisoformat(day['date']).replace(tzinfo=timezone.utc).timestamp(), p['value']) for day in metric['history'] for p in day['alternatives']])
         if route == 'test/counts':
             response = request_counts
         if route == 'session/login' and body.get('username') == 'admin':

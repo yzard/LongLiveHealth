@@ -10,6 +10,41 @@ public nonisolated enum OverviewSummary {
         public var id: String { source + "|" + unit }
     }
 
+    public static func devicePriority(name: String) -> Int {
+        let text = name.lowercased()
+        if text.contains("apple watch") || text.contains("applewatch") { return 0 }
+        if ["iphone", "phone", "手机"].contains(where: text.contains) { return 3 }
+        if ["watch", "fitbit", "garmin", "polar", "wahoo", "whoop", "oura", "huawei", "华为", "手表", "手环", "心率带", "wrist", "chest strap", "heart rate strap"].contains(where: text.contains) { return 1 }
+        return 2
+    }
+
+    public static func comparison(metric: JSONValue, endDate: String, days: Int, names: [String: String], sleepTargetMinutes: Double?) -> SourceSummary? {
+        let start = startDate(endDate: endDate, days: days)
+        let history = metric["history"].arrayValue.filter { $0["date"].stringValue >= start && $0["date"].stringValue <= endDate }
+        var coverage: [String: Int] = [:]
+        for day in metric["history"].arrayValue {
+            for source in day["alternatives"].arrayValue where source["value"].numberValue?.isFinite == true {
+                coverage[source["source"].stringValue, default: 0] += 1
+            }
+        }
+        let selected = history.compactMap { day -> JSONValue? in
+            if metric["record_type"] == .string("steps") {
+                return day["combined"]["value"].numberValue?.isFinite == true ? day["combined"] : nil
+            }
+            return day["alternatives"].arrayValue.filter { $0["value"].numberValue?.isFinite == true }.sorted { a, b in
+                let ak = a["source"].stringValue, bk = b["source"].stringValue
+                let ap = devicePriority(name: names[ak] ?? ak), bp = devicePriority(name: names[bk] ?? bk)
+                if ap != bp { return ap < bp }
+                if coverage[ak] != coverage[bk] { return coverage[ak, default: 0] > coverage[bk, default: 0] }
+                return ak < bk
+            }.first
+        }
+        guard !selected.isEmpty, Set(selected.map { $0["unit"].stringValue }).count == 1 else { return nil }
+        let values = selected.compactMap { $0["value"].numberValue }
+        let goal = metric["record_type"] == .string("sleep") ? sleepTargetMinutes : nil
+        return SourceSummary(source: "", unit: selected[0]["unit"].stringValue, average: values.reduce(0, +) / Double(values.count), days: values.count, targetDays: goal.map { target in values.filter { $0 >= target * 60 }.count })
+    }
+
     public static func duration(_ seconds: Double) -> String {
         guard seconds.isFinite, seconds >= 0, seconds < Double(Int.max / 60) else { return "Not available" }
         let minutes = Int((seconds / 60).rounded())
@@ -18,7 +53,8 @@ public nonisolated enum OverviewSummary {
 
     public static func value(_ value: Double, kind: String, unit: String) -> String {
         if kind == "sleep" || kind == "workout" { return duration(value) }
-        return "\(value.formatted(.number.precision(.fractionLength(0...1)))) \(unit)"
+        let displayUnit = unit == "count" ? "" : unit == "count/min" ? "bpm" : unit
+        return "\(value.formatted(.number.precision(.fractionLength(0...1)))) \(displayUnit)".trimmingCharacters(in: .whitespaces)
     }
 
     public static func startDate(endDate: String, days: Int) -> String {

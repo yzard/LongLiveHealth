@@ -43,3 +43,5 @@ Web GUI 的范围与拆分见 [网页实施计划](implementation-webgui.md)，�
 此前目录和构建调整见 [2026-09-27 历史审查](reviews/2026-09-27-structure-audit.md)。其中迁移、schema 版本和测试数量已被本次记录替代。
 
 后台服务全部配置凭据直接内嵌其 config.toml；运行时没有独立密钥文件。当前配置与 skills 更新见[内嵌凭据审查](reviews/2026-10-03-embedded-credentials.md)。
+
+NAS API 与 Desk GPU OCR 的分机部署见 [NAS 部署](runbooks/nas.md)。

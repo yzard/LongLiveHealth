@@ -7,12 +7,13 @@ use crate::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::Row;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SeriesRequest {
     pub record_type: String,
+    pub timezone: Option<String>,
     pub start_at: i64,
     pub end_at: i64,
     pub maximum_gap_seconds: i64,
@@ -27,6 +28,12 @@ impl Database {
         if let Some(maximum) = &request.declared_maximum {
             maximum.validate()?;
         }
+        let timezone = request
+            .timezone
+            .as_deref()
+            .unwrap_or("UTC")
+            .parse::<chrono_tz::Tz>()
+            .map_err(|_| AppError::Invalid("Invalid chart timezone"))?;
         let unit = match request.record_type.as_str() {
             "heart_rate" => "count/min",
             "blood_glucose" => "mg/dL",
@@ -38,7 +45,8 @@ impl Database {
             _ => return Err(AppError::Invalid("Unsupported series type")),
         };
         if request.end_at <= request.start_at
-            || i128::from(request.end_at) - i128::from(request.start_at) > 90 * 86400
+            || (request.record_type != "vo2_max"
+                && i128::from(request.end_at) - i128::from(request.start_at) > 90 * 86400)
             || !(1..=1800).contains(&request.maximum_gap_seconds)
             || chrono::DateTime::from_timestamp(request.start_at, 0).is_none()
             || chrono::DateTime::from_timestamp(request.end_at, 0).is_none()
@@ -55,7 +63,7 @@ impl Database {
             .bind(request.end_at)
             .fetch_all(&self.pool)
             .await?;
-        if rows.len() > 50000 {
+        if rows.len() > 200000 {
             return Err(AppError::TooLarge);
         }
         let mut groups: BTreeMap<String, Vec<Value>> = BTreeMap::new();
@@ -68,19 +76,46 @@ impl Database {
                 raw_unit.as_deref(),
                 raw_value,
             );
-            groups.entry(format!("{}:{}",row.get::<String,_>("platform"),row.get::<String,_>("source_id"))).or_default().push(json!({"at":row.get::<i64,_>("start_at"),"record_id":row.get::<String,_>("record_id"),"version":row.get::<i64,_>("version"),"value":value,"raw_value":raw_value,"raw_unit":raw_unit}));
+            groups.entry(format!("{}:{}",row.get::<String,_>("platform"),row.get::<String,_>("source_id"))).or_default().push(json!({"at":row.get::<f64,_>("start_at"),"record_id":row.get::<String,_>("record_id"),"version":row.get::<i64,_>("version"),"value":value,"raw_value":raw_value,"raw_unit":raw_unit}));
+        }
+        if request.record_type == "body_mass" {
+            let entries = self
+                .list_wellness_entries(
+                    user,
+                    super::entries::ListRequest {
+                        start_at: request.start_at,
+                        end_at: request.end_at,
+                        kind: Some("body".into()),
+                    },
+                )
+                .await?;
+            for entry in entries["entries"].as_array().into_iter().flatten() {
+                let value = entry["entry"]["content"]["weight_kg"].clone();
+                if !value.is_null() {
+                    groups.entry("manual:longlivehealth".into()).or_default().push(json!({
+                        "at": entry["at"], "record_id": entry["record_id"], "version": entry["version"],
+                        "value": value, "raw_value": value, "raw_unit": "kg"
+                    }));
+                }
+            }
         }
         let mut sources = Vec::new();
-        for (source, points) in groups {
+        for (source, mut points) in groups {
+            points.sort_by(|a, b| {
+                a["at"]
+                    .as_f64()
+                    .unwrap_or_default()
+                    .total_cmp(&b["at"].as_f64().unwrap_or_default())
+            });
             let invalid = points.iter().filter(|p| p["value"].is_null()).count();
             let mut duplicate = false;
             let mut samples = Vec::new();
             for point in &points {
-                if let (Some(at), Some(value)) = (point["at"].as_i64(), point["value"].as_f64()) {
-                    if samples.last().is_some_and(|(last, _)| *last == at) {
+                if let (Some(at), Some(value)) = (point["at"].as_f64(), point["value"].as_f64()) {
+                    if samples.last().is_some_and(|(last, _)| *last == at as i64) {
                         duplicate = true;
                     }
-                    samples.push((at, value));
+                    samples.push((at as i64, value));
                 }
             }
             let state = if invalid > 0 {
@@ -111,13 +146,43 @@ impl Database {
             } else {
                 None
             };
-            sources.push(json!({"source":source,"points":points,"state":state,"invalid_count":invalid,"glucose_summary":glucose,"heart_rate_summary":heart_rate}));
+            // Deduplicate display measurements after unit normalization. Preserve
+            // original records and duplicate warnings for protocol summaries/history.
+            let mut seen = BTreeSet::new();
+            let chart_points: Vec<Value> = points
+                .iter()
+                .filter(
+                    |point| match (point["at"].as_f64(), point["value"].as_f64()) {
+                        (Some(at), Some(value)) => seen.insert((at.to_bits(), value.to_bits())),
+                        _ => false,
+                    },
+                )
+                .cloned()
+                .collect();
+            sources.push(json!({"source":source,"chart_points":chart_points,"points":points,"state":state,"invalid_count":invalid,"glucose_summary":glucose,"heart_rate_summary":heart_rate}));
         }
+        let chart_ranges = crate::chart::ranges(
+            sources.iter().flat_map(|source| {
+                source["chart_points"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|p| {
+                        Some((
+                            source["source"].as_str()?.to_owned(),
+                            unit.to_owned(),
+                            p["at"].as_f64()?,
+                            p["value"].as_f64()?,
+                        ))
+                    })
+            }),
+            timezone,
+        );
         if revision != self.data_revision(user).await? {
             return Err(AppError::Conflict("Archive changed; refresh the series"));
         }
         Ok(
-            json!({"record_type":request.record_type,"unit":unit,"start_at":request.start_at,"end_at":request.end_at,"sources":sources,"data_revision":revision,"computed_at":now()?,"algorithm_version":"device-series-v1","evidence_status":"descriptive","parameters":{"maximum_gap_seconds":request.maximum_gap_seconds,"interpolation":"left_hold_between_samples_within_gap","glucose_range_mg_dl":[70,180]},"notes":["Sources are not combined. Invalid units and duplicate timestamps stop glucose summaries.","Coverage describes recorded intervals. It does not establish that the source is a continuous glucose monitor.","The last sample has no inferred duration. Sparse laboratory and finger-stick values do not describe a full day.","Glucose ranges describe these records and are not personal treatment targets."]}),
+            json!({"chart_ranges":chart_ranges,"record_type":request.record_type,"unit":unit,"start_at":request.start_at,"end_at":request.end_at,"sources":sources,"data_revision":revision,"computed_at":now()?,"algorithm_version":"device-series-v1","evidence_status":"descriptive","parameters":{"maximum_gap_seconds":request.maximum_gap_seconds,"interpolation":"left_hold_between_samples_within_gap","glucose_range_mg_dl":[70,180]},"notes":["Sources are not combined. Invalid units and duplicate timestamps stop glucose summaries.","Coverage describes recorded intervals. It does not establish that the source is a continuous glucose monitor.","The last sample has no inferred duration. Sparse laboratory and finger-stick values do not describe a full day.","Glucose ranges describe these records and are not personal treatment targets."]}),
         )
     }
 }

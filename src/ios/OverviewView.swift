@@ -34,13 +34,29 @@ struct OverviewView: View {
             if loading { ProgressView("Loading summaries") }
             if let failure { Text(failure).foregroundStyle(.secondary) }
             if cached { Label("Cached data · refresh when connected", systemImage: "wifi.slash").font(.caption) }
-            Section("Yesterday") { summary(days: 1) }
-            Section("Last 7 days") {
-                Text("Seven complete days ending yesterday. Averages use recorded days only.").font(.caption).foregroundStyle(.secondary)
-                summary(days: 7)
-            }
             Section {
-                Text("Open Browse to explore individual metrics and all their sources.").font(.caption).foregroundStyle(.secondary)
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 14) {
+                    GridRow {
+                        Text("Metric")
+                        Text("Yesterday")
+                        VStack(alignment: .leading) {
+                            Text("Last 7 days")
+                            Text("Daily average").font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }.font(.caption.bold())
+                    ForEach(Array(visibleMetrics.enumerated()), id: \.offset) { _, metric in
+                        Divider().gridCellUnsizedAxes(.horizontal)
+                        GridRow(alignment: .top) {
+                            Text(metricTitle(metric["record_type"].stringValue)).font(.subheadline)
+                            comparisonCell(metric, days: 1)
+                            comparisonCell(metric, days: 7)
+                        }
+                    }
+                }
+                if !loading && visibleMetrics.isEmpty { Text("No synced measurements yet.").foregroundStyle(.secondary) }
+            }
+            Section("Practice") {
+                NavigationLink("Breathing practice", destination: BreathingPracticeView(model: model))
             }
         }
         .navigationTitle("Overview")
@@ -60,32 +76,18 @@ struct OverviewView: View {
         }
     }
 
-    @ViewBuilder private func summary(days: Int) -> some View {
-        if !loading && visibleMetrics.isEmpty { Text("No synced measurements yet.").foregroundStyle(.secondary) }
-        ForEach(Array(visibleMetrics.enumerated()), id: \.offset) { _, metric in
-            let kind = metric["record_type"].stringValue
-            let sources = OverviewSummary.sources(metric: metric, endDate: dateKey, days: days, sleepTargetMinutes: preferences["preferences"]["sleep_target_minutes"].numberValue)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(metricTitle(kind)).font(.headline)
-                if sources.isEmpty {
-                    Text(metric["current"]["state"] == .string("query_limit_exceeded") ? "Too much data to summarize. Open Browse for details." : "No recorded data").foregroundStyle(.secondary)
+    @ViewBuilder private func comparisonCell(_ metric: JSONValue, days: Int) -> some View {
+        let names = Dictionary(model.sourceCatalog.map { ($0["source_key"].stringValue, $0["name"].stringValue) }, uniquingKeysWith: { first, _ in first })
+        let kind = metric["record_type"].stringValue
+        let summary = OverviewSummary.comparison(metric: metric, endDate: dateKey, days: days, names: names, sleepTargetMinutes: preferences["preferences"]["sleep_target_minutes"].numberValue)
+        VStack(alignment: .leading, spacing: 4) {
+            if let summary {
+                Text(OverviewSummary.value(summary.average, kind: kind, unit: summary.unit)).monospacedDigit()
+                if let met = summary.targetDays {
+                    Text(met == summary.days ? "Goal met" : "Below goal").font(.caption2).foregroundStyle(met == summary.days ? Color.green : Color.orange)
                 }
-                ForEach(sources) { source in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(OverviewSummary.value(source.average, kind: kind, unit: source.unit)).font(.title3).monospacedDigit()
-                        if days > 1 { Text("Daily average · \(source.days)/7 days recorded").font(.caption) }
-                        if let met = source.targetDays, let target = preferences["preferences"]["sleep_target_minutes"].numberValue {
-                            Label(days == 1 ? (met == 1 ? "Sleep goal met" : "Below your sleep goal") : "Sleep goal met on \(met)/\(source.days) recorded days", systemImage: met == source.days ? "checkmark.circle" : "info.circle")
-                                .font(.caption).foregroundStyle(met == source.days ? Color.green : Color.orange)
-                            Text("Your goal: " + OverviewSummary.duration(target * 60)).font(.caption).foregroundStyle(.secondary)
-                        } else {
-                            Text(kind == "sleep" ? "No sleep goal set" : "No reference range set").font(.caption).foregroundStyle(.secondary)
-                        }
-                        Text(model.sourceLabel(source.source)).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }.padding(.vertical, 4)
-        }
+            } else { Text("—").foregroundStyle(.secondary) }
+        }.font(.subheadline)
     }
 
     private func reload() async {
@@ -97,6 +99,7 @@ struct OverviewView: View {
         cached = false
         defer { if key == requestKey { loading = false } }
         do {
+            if model.sourceCatalog.isEmpty { _ = try await model.request("wellness/sources", body: .object([:])) }
             preferences = try archive.load(JSONValue.self, name: "wellness-preferences.json") ?? .null
             let saved = try await model.request("wellness/preferences/get", body: .object([:]))
             guard !Task.isCancelled, model.session?.token == token, key == requestKey else { return }
@@ -130,8 +133,8 @@ struct DailyMetricView: View {
         switch metric["record_type"].stringValue {
         case "sleep": "Time recorded asleep during each calendar day. Overlapping sleep intervals from the same source are merged, then their durations are added. The chart uses hours; history uses hours and minutes."
         case "workout": "Recorded workout duration per calendar day. Overlapping intervals from the same source are merged before their durations are added."
-        case "steps": "Recorded steps per day, summed within each source. Records crossing midnight are allocated in proportion to their duration within each day."
-        case "heart_rate": "Heartbeats per minute. Each daily point is the arithmetic mean of valid samples from that source: sum of sample values divided by sample count."
+        case "active_energy", "basal_energy": "Energy recorded per calendar day, in kilocalories (kcal). Samples are added within each source. Intervals crossing midnight are divided in proportion to duration; different sources are not added together."
+        case "steps": "This chart shows each source separately. Overview combines non-overlapping step intervals and applies device priority only where they overlap. Partial intervals are estimated in proportion to duration."
         case "resting_heart_rate": "Resting heart rate reported by the source, in beats per minute. Each daily point is the arithmetic mean of that day's valid samples."
         case "hrv_sdnn": "SDNN is the standard deviation of normal heartbeat intervals, reported in milliseconds by the source. Each daily point averages valid SDNN samples; the app does not recalculate SDNN from raw heartbeats."
         default: "The daily value is calculated from valid records within each source."
@@ -140,36 +143,36 @@ struct DailyMetricView: View {
     var body: some View {
         List {
             Section("All sources") {
-                Chart {
-                    ForEach(Array(metric["history"].arrayValue.enumerated()), id: \.offset) { _, day in
-                        ForEach(Array(day["alternatives"].arrayValue.enumerated()), id: \.offset) { _, source in
-                        if let value = source["value"].numberValue {
-                            PointMark(x: .value("Day", day["date"].stringValue), y: .value("Value", metric["record_type"] == .string("sleep") ? value / 3600 : value))
-                                .foregroundStyle(by: .value("Source", source["source"].stringValue))
-                        }
-                        }
-                    }
-                }.chartForegroundStyleScale(domain: sourceKeys, range: sourceKeys.enumerated().map { SourceLegend.colors[$0.offset % SourceLegend.colors.count] })
-                .chartLegend { SourceLegend(model: model, keys: sourceKeys, names: [:]) }
-                .frame(height: 220).accessibilityLabel("Daily values from all sources")
-                Text("\(metric["record_type"] == .string("sleep") ? "Hours" : metric["unit"].stringValue) · Points do not imply continuous coverage.").font(.caption)
+                if metric["current"]["state"] == .string("query_limit_exceeded") {
+                    Text("This history exceeds the daily query limit. Its records are saved, but the chart could not be loaded.").foregroundStyle(.secondary)
+                }
+                MetricChart(model: model, ranges: metric["chart_ranges"], unit: metric["unit"].stringValue,
+                            divisor: ["sleep", "workout"].contains(metric["record_type"].stringValue) ? 3600 : 1,
+                            sourceKeys: sourceKeys, names: [:], initialPeriod: .week, showsHour: false, heartRate: metric["record_type"] == .string("resting_heart_rate"))
+                    .environment(\.timeZone, .gmt)
+
             }
             Section("About this metric") {
-                Text("Display unit: " + (metric["record_type"] == .string("sleep") ? "hours and minutes" : metric["unit"].stringValue))
                 Text(calculationDescription)
                 Text("Sources are summarized separately. Missing records are not counted as zero.").font(.caption)
                 Text("The comparison uses 28 prior valid days from the selected source within 42 days. It describes your data and does not estimate disease risk.").font(.caption)
             }
-            Section("Daily records") {
-                ForEach(Array(metric["history"].arrayValue.reversed().enumerated()), id: \.offset) { _, day in
-                    DisclosureGroup(day["date"].stringValue) {
-                        ForEach(Array(day["alternatives"].arrayValue.enumerated()), id: \.offset) { _, source in
-                            VStack(alignment: .leading) {
-                                Text(metricValue(source, kind: metric["record_type"].stringValue))
-                                Text(model.sourceLabel(source["source"].stringValue)).font(.caption)
+            Section {
+                NavigationLink("Historical Values") {
+                    List {
+                        Section("Daily records") {
+                            ForEach(Array(metric["history"].arrayValue.reversed().enumerated()), id: \.offset) { _, day in
+                                DisclosureGroup(day["date"].stringValue) {
+                                    ForEach(Array(day["alternatives"].arrayValue.enumerated()), id: \.offset) { _, source in
+                                        VStack(alignment: .leading) {
+                                            Text(metricValue(source, kind: metric["record_type"].stringValue))
+                                            Text(model.sourceLabel(source["source"].stringValue)).font(.caption)
+                                        }
+                                    }
+                                }
                             }
                         }
-                    }
+                    }.navigationTitle("Historical Values").navigationBarTitleDisplayMode(.inline)
                 }
             }
 
@@ -182,12 +185,11 @@ private func metricValue(_ selected: JSONValue, kind: String) -> String {
     return OverviewSummary.value(value, kind: kind, unit: selected["unit"].stringValue)
 }
 func metricTitle(_ kind: String) -> String {
-    ["sleep": "Sleep", "workout": "Activity", "steps": "Steps", "resting_heart_rate": "Resting heart rate", "heart_rate": "Heart rate", "hrv_sdnn": "HRV SDNN"][kind] ?? kind
+    ["sleep": "Sleep", "workout": "Workouts", "active_energy": "Active Energy", "basal_energy": "Resting Energy", "steps": "Steps", "resting_heart_rate": "Resting heart rate", "heart_rate": "Heart rate", "hrv_sdnn": "HRV SDNN"][kind] ?? kind
 }
 
 struct DataCenterView: View {
     var model: AppModel
-    @State private var sources: [JSONValue] = []
     var body: some View {
         List {
             Section("Import") {
@@ -202,21 +204,15 @@ struct DataCenterView: View {
                 }.accessibilityValue(model.isHealthSyncRunning ? "Syncing" : "")
                 NavigationLink("Import GPX, TCX, or FIT activities", destination: TrainingImportsView(model: model))
             }
+            Section("Manual entry") {
+                NavigationLink("Manual entries", destination: DailyLogsView(model: model))
+            }
             Section("Export") {
                 NavigationLink("Export your complete archive", destination: SettingsView(model: model))
             }
             Section("Sources") {
                 NavigationLink("Source aliases", destination: SourceAliasesView(model: model))
-            }
-            Section("Archived sources") {
-                if sources.isEmpty { Text("No visible records. Sync to start archiving data.").foregroundStyle(.secondary) }
-                ForEach(Array(sources.enumerated()), id: \.offset) { _, source in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(model.sourceLabel(SourceNames.key(source)))
-                        Text("\(source["platform"].stringValue) · \(source["record_type"].stringValue)").font(.caption)
-                        Text("\(Int(source["record_count"].numberValue ?? 0)) records").font(.caption)
-                    }
-                }
+                NavigationLink("Sources Record Count", destination: SourceRecordCountsView(model: model))
             }
         }.navigationTitle("Data")
             .navigationDestination(for: DataDestination.self) { destination in
@@ -226,15 +222,6 @@ struct DataCenterView: View {
                 }
             }
             .toolbar { NavigationLink(destination: SettingsView(model: model)) { Label("Settings", systemImage: "gearshape") } }
-            .initialTask { await reload() }.refreshable { await reload() }
-    }
-    private func reload() async {
-        guard let client = model.client, let token = model.session?.token else { return }
-        do {
-            let result = try await model.request("wellness/sources", body: .object([:]))
-            guard !Task.isCancelled, model.session?.token == token else { return }
-            sources = result["sources"].arrayValue
-        } catch { if !Task.isCancelled, model.session?.token == token { model.errorMessage = error.localizedDescription } }
     }
 }
 

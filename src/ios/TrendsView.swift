@@ -13,7 +13,6 @@ struct TrendsView: View {
                 NavigationLink("Cycle and life stages", destination: CycleHistoryView(model: model))
                 NavigationLink("Compare measurements", destination: ComparisonView(model: model))
                 NavigationLink("Long-term health report", destination: HealthReportView(model: model))
-                NavigationLink("Device trends", destination: DeviceTrendsView(model: model))
                 NavigationLink("Review daily logs", destination: ArchiveReviewView(model: model))
             }
             Section("Choose metrics") {
@@ -23,6 +22,7 @@ struct TrendsView: View {
             }
             TrendSeries(model: model, metric: selected, openPreview: { preview = $0 }).id(selected)
             if comparing && second != selected { TrendSeries(model: model, metric: second, openPreview: { preview = $0 }).id(second) }
+            RecentActivitySection(model: model)
         }.navigationTitle("Trends")
             .sheet(item: $preview) { DocumentPreview(location: $0) }
     }

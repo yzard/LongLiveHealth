@@ -118,6 +118,8 @@ SELECT platform
      , end_at
      , version
      , json_object('payload', json_object(
+           'source_name', json_extract(payload_json, '$.payload.source_name'),
+           'device', json_extract(payload_json, '$.payload.device'),
            'value', CASE WHEN json_type(payload_json, '$.payload.value') IN ('integer', 'real')
                          THEN json_extract(payload_json, '$.payload.value') ELSE NULL END,
            'unit', CASE WHEN json_extract(payload_json, '$.payload.unit') IN ('count', 'ms', 'count/min')
@@ -498,19 +500,25 @@ pub const EXTRACTION_INPUT: &str = "SELECT input_json FROM extraction_inputs WHE
 pub const WELLNESS_SOURCES: &str = "SELECT platform, source_id, record_type, COUNT(*) AS record_count, MIN(start_at) AS first_at, MAX(end_at) AS last_at FROM health_records WHERE user_id = ? AND deleted = 0 GROUP BY platform, source_id, record_type ORDER BY platform, source_id, record_type";
 
 // Domain reads are bounded independently from the complete raw archive.
-pub const WELLNESS_ENTRIES: &str = "SELECT platform, source_id, record_id, record_type, start_at, end_at, version, payload_json FROM health_records WHERE user_id = ? AND platform = 'manual' AND source_id = 'helpyourself' AND deleted = 0 AND start_at >= ? AND start_at < ? AND (? IS NULL OR record_type = ?) ORDER BY start_at DESC, record_id LIMIT 1001";
+pub const WELLNESS_ENTRIES: &str = "SELECT platform, source_id, record_id, record_type, start_at, end_at, version, payload_json FROM health_records WHERE user_id = ? AND platform = 'manual' AND source_id = 'longlivehealth' AND deleted = 0 AND start_at >= ? AND start_at < ? AND (? IS NULL OR record_type = ?) ORDER BY start_at DESC, record_id LIMIT 1001";
 pub const TRAINING_IMPORTS: &str = "SELECT source_id, record_id, start_at, end_at, version, json_extract(payload_json, '$.payload.filename') AS filename, json_extract(payload_json, '$.payload.distance_m') AS distance_m FROM health_records WHERE user_id = ? AND platform = 'file_import' AND source_id IN ('gpx-1.1','tcx-2','fit') AND deleted = 0 AND (? IS NULL OR record_id > ?) ORDER BY record_id LIMIT 101";
 
 pub const WELLNESS_SERIES: &str = r#"
-SELECT platform, source_id, record_id, version, start_at,
-       CASE WHEN json_type(payload_json,'$.payload.value') IN ('integer','real')
-            THEN CAST(json_extract(payload_json,'$.payload.value') AS REAL) ELSE NULL END AS value,
-       CASE WHEN json_type(payload_json,'$.payload.unit')='text'
-            THEN substr(json_extract(payload_json,'$.payload.unit'),1,64) ELSE NULL END AS unit
-  FROM health_records
+WITH records AS (
+ SELECT * FROM health_records
  WHERE user_id=? AND record_type=? AND deleted=0 AND start_at>=? AND start_at<?
- ORDER BY platform,source_id,start_at,record_id
- LIMIT 50001
+), samples AS (
+ SELECT platform,source_id,record_id,version,CAST(start_at AS REAL) AS start_at,
+        CASE WHEN json_type(payload_json,'$.payload.value') IN ('integer','real')
+             THEN CAST(json_extract(payload_json,'$.payload.value') AS REAL) END AS value,
+        substr(json_extract(payload_json,'$.payload.unit'),1,64) AS unit
+ FROM records WHERE json_array_length(payload_json,'$.payload.quantity_samples') IS NULL
+ UNION ALL
+ SELECT r.platform,r.source_id,r.record_id || ':' || j.key,r.version,
+        CAST(json_extract(j.value,'$.at') AS REAL),CAST(json_extract(j.value,'$.value') AS REAL),'count/min'
+ FROM records r,json_each(r.payload_json,'$.payload.quantity_samples') j
+)
+SELECT * FROM samples ORDER BY platform,source_id,start_at,record_id LIMIT 200001
 "#;
 
 pub const WELLNESS_TIMELINE: &str = r#"
@@ -550,8 +558,8 @@ pub const GET_DERIVED_RESULT: &str =
 pub const LIMIT_DERIVED_RESULTS: &str = "DELETE FROM derived_results WHERE user_id=? AND result_id NOT IN (SELECT result_id FROM derived_results WHERE user_id=? ORDER BY created_at DESC,result_id LIMIT 100)";
 
 pub const HRV_WINDOWS: &str = "SELECT platform, source_id, record_id, record_type, start_at, end_at, version, payload_json FROM health_records WHERE user_id = ? AND deleted = 0 AND record_type IN ('nn_intervals', 'heartbeat_series') AND start_at >= ? AND start_at < ? ORDER BY start_at, record_id LIMIT 1001";
-pub const WELLNESS_LIBRARY: &str = "SELECT platform, source_id, record_id, record_type, start_at, end_at, version, payload_json FROM health_records WHERE user_id = ? AND platform = 'manual' AND source_id = 'helpyourself' AND record_type = ? AND deleted = 0 ORDER BY start_at DESC, record_id LIMIT 1001";
-pub const FOOD_PORTION: &str = "SELECT platform, source_id, record_id, record_type, start_at, end_at, version, payload_json FROM health_records WHERE user_id = ? AND platform = 'manual' AND source_id = 'helpyourself' AND record_id = ? AND record_type IN ('food', 'recipe') AND deleted = 0";
+pub const WELLNESS_LIBRARY: &str = "SELECT platform, source_id, record_id, record_type, start_at, end_at, version, payload_json FROM health_records WHERE user_id = ? AND platform = 'manual' AND source_id = 'longlivehealth' AND record_type = ? AND deleted = 0 ORDER BY start_at DESC, record_id LIMIT 1001";
+pub const FOOD_PORTION: &str = "SELECT platform, source_id, record_id, record_type, start_at, end_at, version, payload_json FROM health_records WHERE user_id = ? AND platform = 'manual' AND source_id = 'longlivehealth' AND record_id = ? AND record_type IN ('food', 'recipe') AND deleted = 0";
 
 pub const SPECIALTY_LIST: &str = "SELECT platform,source_id,record_id,record_type,start_at,version FROM health_records WHERE user_id=? AND deleted=0 AND ((?='ecg' AND record_type='electrocardiogram') OR (?='clinical' AND json_type(payload_json,'$.payload.fhir')='object') OR (?='blood_pressure' AND record_type='HKCorrelationTypeIdentifierBloodPressure')) AND (? IS NULL OR (platform,source_id,record_id)>(?,?,?)) ORDER BY platform,source_id,record_id LIMIT 51";
 pub const SPECIALTY_GET: &str = "SELECT platform,source_id,record_id,record_type,start_at,end_at,version,payload_json FROM health_records WHERE user_id=? AND platform=? AND source_id=? AND record_id=? AND deleted=0";
@@ -572,13 +580,14 @@ pub const LIST_USERS: &str = "SELECT user_id, username, username = 'admin' AS is
 pub const CHANGE_OWN_PASSWORD: &str = "UPDATE users SET password_hash = ?, must_change_password = 0, credential_version = credential_version + 1 WHERE user_id = ? AND credential_version = ? AND is_active = 1 AND EXISTS (SELECT 1 FROM sessions WHERE user_id = users.user_id AND ((token_hash = ?4 AND expires_at > ?5) OR (previous_token_hash = ?4 AND previous_expires_at > ?5))) RETURNING user_id";
 pub const CLEAR_ADMIN_LOGIN_WINDOW: &str = "DELETE FROM login_windows WHERE username_hash = ?";
 
-pub const WELLNESS_ENTRY: &str = "SELECT platform, source_id, record_id, record_type, start_at, end_at, version, payload_json FROM health_records WHERE user_id = ? AND platform = 'manual' AND source_id = 'helpyourself' AND record_id = ? AND deleted = 0";
+pub const WELLNESS_ENTRY: &str = "SELECT platform, source_id, record_id, record_type, start_at, end_at, version, payload_json FROM health_records WHERE user_id = ? AND platform = 'manual' AND source_id = 'longlivehealth' AND record_id = ? AND deleted = 0";
 
 pub const HEALTH_RECORD_TOTAL: &str =
     "SELECT COALESCE((SELECT record_count FROM health_totals WHERE user_id = ?), 0)";
 
 // Only project the chart payload; HealthKit raw archives can be several MiB each.
-pub const METRIC_HEALTH_HISTORY: &str = "SELECT source_id, record_id, record_type, start_at, json_object('value', json_extract(payload_json, '$.payload.value'), 'unit', json_extract(payload_json, '$.payload.unit'), 'source_name', json_extract(payload_json, '$.payload.source_name'), 'fhir', json_extract(payload_json, '$.payload.fhir')) AS chart_payload FROM health_records WHERE user_id = ? AND platform = 'apple_health' AND deleted = 0 AND (record_type = ? OR record_type = 'HKClinicalTypeIdentifierLabResultRecord') ORDER BY start_at, source_id, record_id LIMIT 10001";
+// Avoid the platform primary-key scan across all health types on large archives.
+pub const METRIC_HEALTH_HISTORY: &str = "SELECT source_id, record_id, record_type, start_at, json_object('value', json_extract(payload_json, '$.payload.value'), 'unit', json_extract(payload_json, '$.payload.unit'), 'source_name', json_extract(payload_json, '$.payload.source_name'), 'fhir', json_extract(payload_json, '$.payload.fhir')) AS chart_payload FROM health_records INDEXED BY health_records_range WHERE user_id = ? AND platform = 'apple_health' AND deleted = 0 AND (record_type = ? OR record_type = 'HKClinicalTypeIdentifierLabResultRecord') ORDER BY start_at, source_id, record_id LIMIT 10001";
 
 // Input contains only bounded record/source identifiers and payload lengths, never raw health payloads.
 pub const HEALTH_BATCH_CURRENT: &str = "SELECT json_extract(item.value, '$[0]') AS input_source, json_extract(item.value, '$[1]') AS input_id, current.version, current.deleted, CASE WHEN LENGTH(CAST(current.payload_json AS BLOB)) = json_extract(item.value, '$[2]') THEN current.payload_json ELSE NULL END AS payload_json, current.record_type, EXISTS(SELECT 1 FROM health_records AS tombstone WHERE tombstone.user_id = ?1 AND tombstone.platform = ?2 AND tombstone.source_id IN (json_extract(item.value, '$[0]'), '*') AND tombstone.record_id = json_extract(item.value, '$[1]') AND tombstone.deleted = 1) AS tombstoned FROM json_each(?3) AS item LEFT JOIN health_records AS current ON current.user_id = ?1 AND current.platform = ?2 AND current.source_id = json_extract(item.value, '$[0]') AND current.record_id = json_extract(item.value, '$[1]')";
@@ -599,3 +608,6 @@ pub const CANCEL_PATH_CLEANUP: &str = "DELETE FROM cleanup_files WHERE relative_
 
 pub const SOURCE_DISPLAY_NAME: &str = "SELECT json_extract(payload_json, '$.payload.source_name') FROM health_records WHERE user_id = ? AND platform = ? AND source_id = ? AND deleted = 0 LIMIT 1";
 pub const REPORT_SOURCE_CATALOG: &str = "SELECT r.report_id, r.context_json, f.original_name FROM reports r JOIN raw_files f ON f.user_id = r.user_id AND f.file_id = r.file_id WHERE r.user_id = ? ORDER BY r.report_id";
+
+pub const HEART_SAMPLE_REINDEX: &str = "SELECT h.user_id,h.platform,h.source_id,h.record_id,h.raw_id,h.payload_json,o.raw_path FROM health_records h JOIN health_originals o ON o.user_id=h.user_id AND o.raw_id=h.raw_id WHERE h.record_type='heart_rate' AND h.deleted=0 AND json_extract(h.payload_json,'$.payload.quantity_count')>1 AND json_type(h.payload_json,'$.payload.quantity_samples') IS NULL";
+pub const UPDATE_HEART_SAMPLE_PROJECTION: &str = "UPDATE health_records SET payload_json=? WHERE user_id=? AND platform=? AND source_id=? AND record_id=? AND raw_id=? AND payload_json=?";

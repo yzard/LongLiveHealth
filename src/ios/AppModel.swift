@@ -421,7 +421,9 @@ final class AppModel {
         defer { keepHealthScreenAwake = false; healthSyncTask = nil; lease.end() }
         do {
             try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
-            try archive.save(Date().addingTimeInterval(900), name: "health-next-automatic-sync.json")
+            let next = Date().addingTimeInterval(900)
+            try archive.save(next, name: "health-next-automatic-sync.json")
+            deferAutomaticHealthSync(until: next, identity: identity)
             try clearReadCache()
         } catch {
             guard session?.token == identity else { return }
@@ -435,7 +437,11 @@ final class AppModel {
                 return
             }
             if case APIError.status(401, _) = error { try? expireLocalSession() }
-            if automatic { health.status = "Automatic sync paused; will retry on the next opportunity. " + error.localizedDescription; return }
+            if automatic {
+                health.status = "Automatic sync paused; will retry. " + error.localizedDescription
+                deferAutomaticHealthSync(until: Date().addingTimeInterval(60), identity: identity)
+                return
+            }
             errorMessage = "Apple Health sync paused. Saved batches are retained; tap Sync Now to resume. " + error.localizedDescription
         }
     }

@@ -564,3 +564,102 @@ async fn current_raw_record_matches_revision_even_when_receipt_clock_moves_backw
     assert_eq!(result["records"][0]["record"]["version"], 2);
     assert_eq!(result["records"][0]["record"]["payload"]["value"], 200);
 }
+
+#[tokio::test]
+async fn apple_source_rename_does_not_block_immutable_samples() {
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "rename").await;
+    let connection = state
+        .database
+        .create_connection(
+            &user.user_id,
+            ConnectionRequest {
+                platform: "apple_health".into(),
+                installation_id: uuid::Uuid::new_v4().to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let mut sample = record();
+    sample.payload["source_name"] = json!("Previous watch name");
+    sample.payload["raw_archive"] =
+        json!({"format":"nskeyedarchiver-secure-v1","encoding":"base64","data":"AA=="});
+    state
+        .database
+        .sync_health(
+            &user.user_id,
+            batch(&connection.connection_id, vec![sample.clone()]),
+        )
+        .await
+        .unwrap();
+    sample.payload["source_name"] = json!("Current watch name");
+    state
+        .database
+        .sync_health(
+            &user.user_id,
+            batch(&connection.connection_id, vec![sample.clone()]),
+        )
+        .await
+        .unwrap();
+    state
+        .database
+        .sync_health(
+            &user.user_id,
+            batch(&connection.connection_id, vec![sample.clone()]),
+        )
+        .await
+        .unwrap();
+    sample.payload["source_name"] = json!("Another name");
+    sample.payload["value"] = json!(101);
+    assert!(
+        state
+            .database
+            .sync_health(
+                &user.user_id,
+                batch(&connection.connection_id, vec![sample])
+            )
+            .await
+            .is_err()
+    );
+}
+
+#[test]
+fn energy_totals_split_midnight_keep_sources_separate_and_reject_wrong_units() {
+    use longlivehealth::health::{StoredHealthRecord, aggregate_records};
+    for kind in ["active_energy", "basal_energy"] {
+        let row = |source: &str, unit: &str| StoredHealthRecord {
+            platform: "apple_health".into(),
+            source_id: source.into(),
+            record_id: source.into(),
+            record_type: kind.into(),
+            start_at: 82800,
+            end_at: 90000,
+            version: 1,
+            payload_json: json!({"payload":{"value":200,"unit":unit}}).to_string(),
+        };
+        let result = aggregate_records(
+            vec![
+                row("watch", "kcal"),
+                row("phone", "kcal"),
+                row("invalid", "count"),
+            ],
+            kind,
+            chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
+            chrono::NaiveDate::from_ymd_opt(1970, 1, 2).unwrap(),
+            chrono_tz::UTC,
+        )
+        .unwrap();
+        let days = result["days"].as_array().unwrap();
+        let valid: Vec<_> = days.iter().filter(|d| d["value"].is_number()).collect();
+        assert_eq!(valid.len(), 4);
+        for day in valid {
+            assert_eq!(day["value"], 100.0);
+            assert_eq!(day["unit"], "kcal");
+        }
+        assert!(
+            days.iter()
+                .filter(|d| d["source"] == "apple_health:invalid")
+                .all(|d| d["value"].is_null())
+        );
+    }
+}

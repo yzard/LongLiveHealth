@@ -52,6 +52,7 @@ struct ErrorDetail {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        let storage_failure = storage_failure(&self);
         let (status, code) = match &self {
             Self::Invalid(_) => (StatusCode::BAD_REQUEST, "invalid_request"),
             Self::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
@@ -66,8 +67,11 @@ impl IntoResponse for AppError {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal_error")
             }
         };
-        // Internal errors are deliberately not formatted: driver details can contain private values.
-        let message = if status.is_server_error() {
+        let code = storage_failure.map_or(code, |(code, _)| code);
+        // Describe known storage causes, without exposing paths, SQL or private data.
+        let message = if let Some((_, message)) = storage_failure {
+            message.to_owned()
+        } else if status.is_server_error() {
             "Internal operation failed".to_owned()
         } else {
             self.to_string()
@@ -79,5 +83,35 @@ impl IntoResponse for AppError {
             }),
         )
             .into_response()
+    }
+}
+
+fn storage_failure(error: &AppError) -> Option<(&'static str, &'static str)> {
+    let denied = (
+        "storage_permission_denied",
+        "Server storage access denied: the service user does not have permission to read or write a required file or directory. Check its access permissions.",
+    );
+    let read_only = (
+        "storage_read_only",
+        "Server storage is read-only: the service cannot save data. Check the data volume and database write permissions.",
+    );
+    match error {
+        AppError::Io(error) | AppError::Database(sqlx::Error::Io(error)) => match error.kind() {
+            std::io::ErrorKind::PermissionDenied => Some(denied),
+            std::io::ErrorKind::ReadOnlyFilesystem => Some(read_only),
+            _ => None,
+        },
+        AppError::Database(sqlx::Error::Database(error)) => {
+            match error
+                .code()
+                .and_then(|code| code.parse::<i32>().ok())
+                .map(|code| code & 0xff)
+            {
+                Some(3) => Some(denied),    // SQLITE_PERM
+                Some(8) => Some(read_only), // SQLITE_READONLY and its extended codes
+                _ => None,
+            }
+        }
+        _ => None,
     }
 }

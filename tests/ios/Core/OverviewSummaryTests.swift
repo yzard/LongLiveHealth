@@ -31,3 +31,22 @@ import Testing
     #expect(yesterday.allSatisfy { $0.targetDays == nil && $0.days == 1 })
     #expect(OverviewSummary.startDate(endDate: "2024-03-02", days: 7) == "2024-02-25")
 }
+
+@Test func overviewUsesServerIntervalTotalInsteadOfSelectingOneDailySource() throws {
+    let metric = try JSONDecoder().decode(JSONValue.self, from: Data(#"""
+    {"record_type":"steps","history":[
+      {"date":"2026-10-19","combined":{"value":4157,"unit":"count"},"alternatives":[{"source":"phone","value":76,"unit":"count"},{"source":"watch","value":2157,"unit":"count"},{"source":"band","value":2000,"unit":"count"}]},
+      {"date":"2026-10-20","combined":{"value":3500,"unit":"count"},"alternatives":[{"source":"phone","value":500,"unit":"count"},{"source":"band","value":3000,"unit":"count"}]}
+    ]}
+    """#.utf8))
+    let names = ["phone": "iPhone", "watch": "Zhuo's Apple Watch", "band": "Google Fitbit"]
+    let week = try #require(OverviewSummary.comparison(metric: metric, endDate: "2026-10-20", days: 7, names: names, sleepTargetMinutes: nil))
+    #expect(week.average == 3828.5)
+    #expect(week.days == 2)
+    let yesterday = try #require(OverviewSummary.comparison(metric: metric, endDate: "2026-10-20", days: 1, names: names, sleepTargetMinutes: nil))
+    #expect(yesterday.average == 3500)
+    #expect(!OverviewSummary.value(2157, kind: "steps", unit: "count").contains("count"))
+    #expect(OverviewSummary.devicePriority(name: "华为手表") < OverviewSummary.devicePriority(name: "iPhone"))
+    #expect(OverviewSummary.devicePriority(name: "Polar chest strap") < OverviewSummary.devicePriority(name: "Unknown"))
+    #expect(OverviewSummary.devicePriority(name: "Huawei phone") == 3)
+}
