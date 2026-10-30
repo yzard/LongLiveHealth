@@ -139,11 +139,16 @@ CREATE TABLE health_originals (
     source_id TEXT NOT NULL,
     record_id TEXT NOT NULL,
     raw_id TEXT NOT NULL,
-    raw_path TEXT NOT NULL UNIQUE,
+    raw_path TEXT NOT NULL,
+    raw_offset INTEGER,
+    raw_length INTEGER,
     received_at INTEGER NOT NULL,
+    CHECK ((raw_offset IS NULL AND raw_length IS NULL) OR (raw_offset IS NOT NULL AND raw_length IS NOT NULL AND raw_offset >= 0 AND raw_length > 0)),
     PRIMARY KEY (user_id, raw_id),
     FOREIGN KEY (user_id, platform, source_id, record_id) REFERENCES health_records (user_id, platform, source_id, record_id) ON DELETE CASCADE
 );
+CREATE UNIQUE INDEX health_originals_frame ON health_originals (raw_path, raw_offset) WHERE raw_offset IS NOT NULL;
+CREATE UNIQUE INDEX health_originals_file ON health_originals (raw_path) WHERE raw_offset IS NULL;
 CREATE INDEX health_originals_identity ON health_originals (user_id, platform, record_id, source_id);
 CREATE TABLE sync_batches (
     user_id TEXT NOT NULL,

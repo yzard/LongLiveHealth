@@ -45,7 +45,19 @@ pub enum Command {
         #[arg(long)]
         username: String,
     },
+    AuditBrowse {
+        #[arg(long)]
+        username: String,
+        #[arg(long)]
+        date: String,
+        #[arg(long)]
+        timezone: String,
+        #[arg(long)]
+        catalog_only: bool,
+    },
     IndexHeartSamples,
+    IndexRecoveryHrv,
+    IndexAppleQuantities,
     CheckConfig,
     ProbeProviders,
 }
@@ -138,6 +150,32 @@ pub async fn run(cli: Cli) -> Result<(), AppError> {
     let database = Database::open(&config.data_dir).await?;
     let reset_password = matches!(&cli.command, Command::ResetPassword { .. });
     match cli.command {
+        Command::AuditBrowse {
+            username,
+            date,
+            timezone,
+            catalog_only,
+        } => {
+            let user = database
+                .credentials(&normalize_username(&username)?)
+                .await?
+                .ok_or(AppError::NotFound)?;
+            if catalog_only {
+                let catalog = crate::metric_history::browse(&database, &user.user_id).await?;
+                println!("{}", serde_json::to_string(&catalog)?);
+            } else {
+                crate::browse_audit::run(&database, &user.user_id, date, timezone).await?;
+            }
+        }
+        Command::IndexAppleQuantities => {
+            println!("{}", database.index_apple_quantities().await?);
+        }
+        Command::IndexRecoveryHrv => {
+            println!(
+                "Indexed {} Recovery HRV records",
+                database.index_recovery_hrv().await?
+            );
+        }
         Command::IndexHeartSamples => {
             println!(
                 "Indexed {} heart records",

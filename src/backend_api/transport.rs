@@ -1,5 +1,5 @@
 //! Bounded Health ingress and large JSON serialization off the network runtime.
-use crate::{app::AppState, error::AppError, health::SyncRequest};
+use crate::{app::AppState, error::AppError};
 use axum::{
     body::{Body, Bytes},
     extract::{FromRequest, Request},
@@ -43,11 +43,7 @@ impl FromRequest<AppState> for HealthSyncBody {
         let batch = state
             .database
             .cpu
-            .run(move || {
-                let request: SyncRequest = serde_json::from_slice(&bytes)
-                    .map_err(|_| AppError::Invalid("Invalid health JSON"))?;
-                crate::health_batch::prepare(request)
-            })
+            .run(move || crate::health_batch::prepare_http(&bytes))
             .await?;
         Ok(Self {
             batch,

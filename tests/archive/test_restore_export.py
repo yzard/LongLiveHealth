@@ -39,7 +39,7 @@ def archive_fixture(path, broken=False):
     manifest = dict(
         format='longlivehealth-export',
         version=1,
-        database_schema_version=7,
+        database_schema_version=8,
         user_id=USER,
         created_at=0,
         data_revision=42,
@@ -69,7 +69,7 @@ class RestoreTests(unittest.TestCase):
             result = restore_export.restore(root / 'export.zip', root / 'restored', 'alice', 1048576)
             self.assertEqual(result['account_status'], 'disabled')
             connection = sqlite3.connect(root / 'restored/database.sqlite')
-            self.assertEqual(connection.execute('PRAGMA user_version').fetchone(), (7,))
+            self.assertEqual(connection.execute('PRAGMA user_version').fetchone(), (8,))
             self.assertEqual(
                 connection.execute('SELECT user_id, is_active, data_revision, password_hash FROM users').fetchone(),
                 (USER, 0, 42, ''),

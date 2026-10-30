@@ -6,6 +6,8 @@ The product is named **Long Live Health**. The GitHub repository is `yzard/LongL
 
 当前实现：Rust + SQLite `backend_api`、独立 Qwen3.8 + NInfer `backend_ocr` 和原生 iPhone 客户端。手机连接 API，API 归档照片并调用 OCR 获取结构化候选；分析使用单独配置的模型接口。
 
+Android 测试版已可安装：共用 Swift 核心、应用状态和页面源码，iOS 保留原生 SwiftUI 风格。Android 模拟器已验证主要流程、双栏布局和 Health Connect；Z Fold 8 真机验收待进行。[Android 安装与构建](docs/runbooks/android.md)。[跨平台范围与验证进度](docs/architecture/android-parity.md)。
+
 Web GUI 由 API 直接提供，并嵌入 API Docker 镜像。打开服务器根地址即可登录，浏览报告、原件、指标趋势与已同步的健康明细，运行服务器配置的血脂 AI 预设。报告导入、复核及健康平台读写由移动端完成。[网页使用与验证](docs/runbooks/webgui.md)。
 
 新增每日概览、共享偏好、事件线、领域日志与回顾、睡眠会话和条件 SRI、设备趋势、呼吸计时、GPX/TCX 导入及带摘要清单的 v4 导出。[实施状态](docs/implementation-whoop-bevel.md)列出各工作包仍缺的内容，[本次验证](docs/validation/wellness-2026-10-06.md)记录证据。完整 WHOOP/Bevel 功能并集尚未实现。

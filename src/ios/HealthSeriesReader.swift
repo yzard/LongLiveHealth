@@ -10,7 +10,6 @@ private nonisolated final class HealthSeriesOperation: @unchecked Sendable {
     private var query: HKQuery?
     private var continuation: CheckedContinuation<[JSONValue], any Error>?
     private var rows: [JSONValue] = []
-    private var byteCount = 0
     private var finished = false
 
     init(store: HKHealthStore) { self.store = store }
@@ -24,14 +23,8 @@ private nonisolated final class HealthSeriesOperation: @unchecked Sendable {
     func receive(_ values: [JSONValue], done: Bool, error: (any Error)?) {
         lock.lock()
         guard !finished else { lock.unlock(); return }
-        var failure = error
-        if failure == nil {
-            do {
-                byteCount += try JSONEncoder().encode(values).count
-                if byteCount > 24 * 1024 * 1024 { failure = APIError.status(413, "Health series exceeds the archive limit") }
-                else { rows.append(contentsOf: values) }
-            } catch { failure = error }
-        }
+        let failure = error
+        if failure == nil { rows.append(contentsOf: values) }
         guard done || failure != nil else { lock.unlock(); return }
         finished = true
         let continuation = self.continuation; self.continuation = nil

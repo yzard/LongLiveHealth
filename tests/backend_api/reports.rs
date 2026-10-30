@@ -254,3 +254,280 @@ async fn confirmed_units_share_scale_and_unknown_values_report_specific_reasons(
             .collect()
     );
 }
+
+#[tokio::test]
+async fn ocr_identity_autofills_and_relocates_without_overwriting_user_edits() {
+    use serde_json::json;
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "autoname").await;
+    let report = archive(&state, "autoname").await;
+    state
+        .database
+        .autofill_report_identity(
+            &user.user_id,
+            &report,
+            Some("Annual laboratory report".into()),
+            Some("Function Health".into()),
+        )
+        .await
+        .unwrap();
+    let first = state.database.report(&user.user_id, &report).await.unwrap();
+    assert_eq!(first["context"]["source_name"], "Function Health");
+    assert_eq!(first["context"]["report_title"], "Annual laboratory report");
+    let source_dir = state
+        .config
+        .data_dir
+        .join("raw")
+        .join(&user.user_id)
+        .join("function_health");
+    assert!(source_dir.exists());
+    state
+        .database
+        .review(
+            &user.user_id,
+            ReviewRequest {
+                report_id: report.clone(),
+                expected_revision: first["report"]["revision"].as_i64().unwrap(),
+                context: Some(
+                    serde_json::from_value(
+                        json!({"source_name":"My Clinic","report_title":"My report"}),
+                    )
+                    .unwrap(),
+                ),
+                observations: vec![],
+            },
+        )
+        .await
+        .unwrap();
+    state
+        .database
+        .autofill_report_identity(
+            &user.user_id,
+            &report,
+            Some("Retry title".into()),
+            Some("Other Clinic".into()),
+        )
+        .await
+        .unwrap();
+    let after = state.database.report(&user.user_id, &report).await.unwrap();
+    assert_eq!(after["context"]["source_name"], "My Clinic");
+    assert_eq!(after["context"]["report_title"], "My report");
+    assert!(
+        state
+            .database
+            .autofill_report_identity("different-user", &report, Some("Other".into()), None)
+            .await
+            .is_err()
+    );
+}
+
+async fn observation_counts(root: &std::path::Path) -> (i64, i64) {
+    use sqlx::{Connection, SqliteConnection, sqlite::SqliteConnectOptions};
+    let mut official = SqliteConnection::connect_with(
+        &SqliteConnectOptions::new().filename(root.join("database.sqlite")),
+    )
+    .await
+    .unwrap();
+    let mut drafts = SqliteConnection::connect_with(
+        &SqliteConnectOptions::new().filename(root.join("draft.sqlite")),
+    )
+    .await
+    .unwrap();
+    (
+        sqlx::query_scalar("SELECT COUNT(*) FROM observations")
+            .fetch_one(&mut official)
+            .await
+            .unwrap(),
+        sqlx::query_scalar("SELECT COUNT(*) FROM observations")
+            .fetch_one(&mut drafts)
+            .await
+            .unwrap(),
+    )
+}
+
+#[tokio::test]
+async fn draft_results_are_physically_separate_until_confirmed_and_can_be_rejected() {
+    let (directory, state) = fixture().await;
+    let user = add_user(&state, "draft-owner").await;
+    let other = add_user(&state, "other-owner").await;
+    let report = archive(&state, "draft-owner").await;
+    let mut document = state
+        .database
+        .review(
+            &user.user_id,
+            ReviewRequest {
+                report_id: report.clone(),
+                expected_revision: 1,
+                context: None,
+                observations: vec![ReviewItem {
+                    observation_id: None,
+                    expected_revision: None,
+                    status: "pending".into(),
+                    payload: observation_payload(),
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(observation_counts(directory.path()).await, (0, 1));
+    assert!(
+        state
+            .database
+            .confirmed(&user.user_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        state
+            .database
+            .observations(&other.user_id, &report)
+            .await
+            .is_err()
+    );
+    let id = document["observations"][0]["observation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    for (status, counts) in [
+        ("confirmed", (1, 0)),
+        ("rejected", (0, 1)),
+        ("confirmed", (1, 0)),
+    ] {
+        let revision = document["observations"][0]["revision"].as_i64().unwrap();
+        let request = |expected| ReviewRequest {
+            report_id: report.clone(),
+            expected_revision: document["report"]["revision"].as_i64().unwrap(),
+            context: None,
+            observations: vec![ReviewItem {
+                observation_id: Some(id.clone()),
+                expected_revision: Some(expected),
+                status: status.into(),
+                payload: observation_payload(),
+            }],
+        };
+        let before = observation_counts(directory.path()).await;
+        assert!(
+            state
+                .database
+                .review(&user.user_id, request(revision + 10))
+                .await
+                .is_err()
+        );
+        assert_eq!(observation_counts(directory.path()).await, before);
+        document = state
+            .database
+            .review(&user.user_id, request(revision))
+            .await
+            .unwrap();
+        assert_eq!(observation_counts(directory.path()).await, counts);
+        assert_eq!(
+            state.database.confirmed(&user.user_id).await.unwrap().len(),
+            usize::from(status == "confirmed")
+        );
+    }
+}
+
+#[tokio::test]
+async fn deleting_report_removes_official_and_draft_results() {
+    let (directory, state) = fixture().await;
+    let user = add_user(&state, "delete-owner").await;
+    let other = add_user(&state, "delete-other").await;
+    let report = archive(&state, "delete-owner").await;
+    let document = state
+        .database
+        .review(
+            &user.user_id,
+            ReviewRequest {
+                report_id: report.clone(),
+                expected_revision: 1,
+                context: None,
+                observations: ["pending", "confirmed"]
+                    .into_iter()
+                    .map(|status| ReviewItem {
+                        observation_id: None,
+                        expected_revision: None,
+                        status: status.into(),
+                        payload: observation_payload(),
+                    })
+                    .collect(),
+            },
+        )
+        .await
+        .unwrap();
+    let revision = document["report"]["revision"].as_i64().unwrap();
+    assert_eq!(observation_counts(directory.path()).await, (1, 1));
+    assert!(
+        state
+            .database
+            .delete_report(&other.user_id, &report, revision)
+            .await
+            .is_err()
+    );
+    assert!(
+        state
+            .database
+            .delete_report(&user.user_id, &report, revision + 1)
+            .await
+            .is_err()
+    );
+    assert_eq!(observation_counts(directory.path()).await, (1, 1));
+    state
+        .database
+        .delete_report(&user.user_id, &report, revision)
+        .await
+        .unwrap();
+    assert_eq!(observation_counts(directory.path()).await, (0, 0));
+    assert!(
+        state
+            .database
+            .confirmed(&user.user_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        state
+            .database
+            .observations(&user.user_id, &report)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn startup_relocates_old_pending_rows_and_recovers_an_interrupted_draft_cleanup() {
+    use sqlx::{Connection, SqliteConnection, sqlite::SqliteConnectOptions};
+    let (directory, state) = fixture().await;
+    let user = add_user(&state, "migrate-owner").await;
+    let report = archive(&state, "migrate-owner").await;
+    let id = confirm(&state, &user.user_id, &report).await;
+    state.database.close().await;
+    let mut connection = SqliteConnection::connect_with(
+        &SqliteConnectOptions::new().filename(directory.path().join("database.sqlite")),
+    )
+    .await
+    .unwrap();
+    sqlx::query("ATTACH DATABASE ? AS draft")
+        .bind(directory.path().join("draft.sqlite").to_str().unwrap())
+        .execute(&mut connection)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO draft.observations SELECT observation_id,user_id,report_id,current_revision,'pending',payload_json,updated_at,candidate_key FROM main.observations").execute(&mut connection).await.unwrap();
+    sqlx::query("INSERT INTO main.observations SELECT 'old-pending',user_id,report_id,1,'pending',payload_json,updated_at,NULL FROM main.observations WHERE observation_id=?").bind(id).execute(&mut connection).await.unwrap();
+    connection.close().await.unwrap();
+    let database = longlivehealth::database::Database::open(directory.path())
+        .await
+        .unwrap();
+    assert_eq!(observation_counts(directory.path()).await, (1, 1));
+    assert_eq!(
+        database
+            .observations(&user.user_id, &report)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(database.confirmed(&user.user_id).await.unwrap().len(), 1);
+    database.close().await;
+}

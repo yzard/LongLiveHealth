@@ -33,6 +33,8 @@ def image_url():
 
 def page():
     return {
+        'report_title': 'Comprehensive laboratory report',
+        'source_name': 'Function Health',
         'observations': [
             {
                 'raw_name': 'Glucose',
@@ -74,6 +76,8 @@ class DocumentTests(unittest.TestCase):
         body = json.dumps(reply)
         result = parse_response(body, 'qwen3.8', 1)
         self.assertEqual(result.raw_response_body, body)
+        self.assertEqual(result.source_name, 'Function Health')
+        self.assertEqual(result.report_title, 'Comprehensive laboratory report')
         self.assertEqual(result.observations[0].raw_result, '<5')
         for invalid in ['length', 'wrong_page', 'guessed_metric', 'invalid_json']:
             changed = json.loads(body)

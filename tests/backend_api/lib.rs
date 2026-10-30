@@ -14,6 +14,7 @@ mod execution;
 mod files;
 mod health;
 mod health_batch;
+mod health_connect;
 mod jobs;
 mod laboratory;
 mod lifecycle;
@@ -201,3 +202,9 @@ pub async fn upload(
 }
 
 mod wellness;
+
+mod client_download;
+
+mod recovery_hrv;
+
+mod apple_health;

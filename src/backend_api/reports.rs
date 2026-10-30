@@ -34,6 +34,11 @@ pub struct ObservationPayload {
 
 impl ObservationPayload {
     pub fn validate(&self, pages: i64) -> Result<(), AppError> {
+        if crate::laboratory::is_administrative_name(&self.raw_name) {
+            return Err(AppError::Invalid(
+                "Administrative report fields are not health measurements",
+            ));
+        }
         if self.raw_name.trim().is_empty()
             || self.raw_name.len() > 256
             || self.raw_result.trim().is_empty()
@@ -89,6 +94,7 @@ impl ObservationPayload {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReportContext {
+    pub report_title: Option<String>,
     pub source_name: Option<String>,
     pub fasting: Option<bool>,
     pub recent_exercise: Option<String>,
@@ -116,6 +122,7 @@ pub struct Observation {
     pub status: String,
     pub payload: ObservationPayload,
     pub interpretation: crate::laboratory::Interpretation,
+    pub resolved_metric_id: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -130,12 +137,14 @@ impl StoredObservation {
     fn decode(self) -> Result<Observation, AppError> {
         let payload: ObservationPayload = serde_json::from_str(&self.payload_json)?;
         let interpretation = crate::laboratory::interpret(&payload);
+        let resolved_metric_id = crate::laboratory::resolved_metric(&payload).map(str::to_owned);
         Ok(Observation {
             observation_id: self.observation_id,
             report_id: self.report_id,
             revision: self.revision,
             status: self.status,
             payload,
+            resolved_metric_id,
             interpretation,
         })
     }
@@ -241,8 +250,32 @@ impl Database {
             .into_iter().map(|row| json!({"run_id":row.get::<String,_>("run_id"),"page":row.get::<i64,_>("page_number"),"created_at":row.get::<i64,_>("created_at"),"text_status":row.get::<Option<String>,_>("text_status"),"error_code":row.get::<Option<String>,_>("error_code")})).collect::<Vec<_>>();
         let duplicates = sqlx::query(queries::DUPLICATE_FILES).bind(user_id).bind(user_id).bind(report_id).bind(report_id).fetch_all(&mut *transaction).await?.into_iter().map(|row|json!({"report_id":row.get::<String,_>("file_id"),"original_name":row.get::<String,_>("original_name"),"reason":"identical_file_bytes"})).collect::<Vec<_>>();
         transaction.commit().await?;
+        let evidence = sqlx::query(queries::EXTRACTION_VALIDATION_CONTENT)
+            .bind(user_id)
+            .bind(report_id)
+            .fetch_all(&self.pool)
+            .await?
+            .into_iter()
+            .map(|row| {
+                (
+                    row.get::<i64, _>("page_number"),
+                    row.get::<Option<String>, _>("content"),
+                )
+            })
+            .collect::<Vec<_>>();
+        let validation_issues = self
+            .cpu
+            .run(move || {
+                Ok(evidence
+                    .into_iter()
+                    .flat_map(|(page, content)| {
+                        crate::ocr::validation_issues(content.as_deref().unwrap_or(""), page)
+                    })
+                    .collect::<Vec<_>>())
+            })
+            .await?;
         Ok(
-            json!({"duplicate_candidates":duplicates,"report":report,"context":context,"observations":observations,"relation":relation,"pages":pages,"extraction_outputs":outputs,"extraction_inputs":inputs}),
+            json!({"validation_issues":validation_issues,"duplicate_candidates":duplicates,"report":report,"context":context,"observations":observations,"relation":relation,"pages":pages,"extraction_outputs":outputs,"extraction_inputs":inputs}),
         )
     }
     pub async fn extraction_input(
@@ -278,6 +311,51 @@ impl Database {
             json!({"response_body":row.get::<String,_>("response_body"), "status_code":row.get::<i64,_>("status_code"), "content":row.get::<Option<String>,_>("content")}),
         )
     }
+    /// Fill only absent metadata. Review uses revision checks and relocates the original atomically.
+    pub async fn autofill_report_identity(
+        &self,
+        user_id: &str,
+        report_id: &str,
+        title: Option<String>,
+        source: Option<String>,
+    ) -> Result<(), AppError> {
+        if title.is_none() && source.is_none() {
+            return Ok(());
+        }
+        for attempt in 0..3 {
+            let report = self.report_summary(user_id, report_id).await?;
+            let mut context: ReportContext = serde_json::from_str(&report.context_json)?;
+            let mut changed = false;
+            if context.report_title.is_none() && title.is_some() {
+                context.report_title = title.clone();
+                changed = true;
+            }
+            if context.source_name.is_none() && source.is_some() {
+                context.source_name = source.clone();
+                changed = true;
+            }
+            if !changed {
+                return Ok(());
+            }
+            match self
+                .review(
+                    user_id,
+                    ReviewRequest {
+                        report_id: report_id.into(),
+                        expected_revision: report.revision,
+                        context: Some(context),
+                        observations: vec![],
+                    },
+                )
+                .await
+            {
+                Ok(_) => return Ok(()),
+                Err(AppError::Conflict(_)) if attempt < 2 => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        Err(AppError::Conflict("Report changed during automatic naming"))
+    }
     pub async fn review(&self, user_id: &str, request: ReviewRequest) -> Result<Value, AppError> {
         let report = self.report_summary(user_id, &request.report_id).await?;
         if request.observations.len() > 2000 {
@@ -311,6 +389,18 @@ impl Database {
         {
             return Err(AppError::Invalid(
                 "Use a clinic or laboratory name of 1-160 bytes; Apple Health is reserved",
+            ));
+        }
+        if request
+            .context
+            .as_ref()
+            .and_then(|c| c.report_title.as_ref())
+            .is_some_and(|title| {
+                title.trim().is_empty() || title.len() > 256 || title.chars().any(char::is_control)
+            })
+        {
+            return Err(AppError::Invalid(
+                "Report title must contain 1-256 bytes without control characters",
             ));
         }
         let context = request
@@ -397,12 +487,6 @@ impl Database {
                 if Some(current) != observation.expected_revision {
                     return Err(AppError::Conflict("Observation changed"));
                 }
-                sqlx::query(queries::UPDATE_OBSERVATION)
-                    .bind(current + 1)
-                    .bind(user_id)
-                    .bind(&id)
-                    .execute(&mut *transaction)
-                    .await?;
                 (id, current + 1)
             } else {
                 let id = uuid::Uuid::new_v4().to_string();
@@ -415,7 +499,12 @@ impl Database {
                     .await?;
                 (id, 1)
             };
-            sqlx::query(queries::SAVE_OBSERVATION)
+            let statement = if observation.status == "confirmed" {
+                queries::CONFIRM_OBSERVATION
+            } else {
+                queries::SAVE_OBSERVATION
+            };
+            sqlx::query(statement)
                 .bind(user_id)
                 .bind(id)
                 .bind(revision)
@@ -438,6 +527,7 @@ impl Database {
             .execute(&mut *transaction)
             .await?;
         transaction.commit().await?;
+        self.reconcile_report_drafts().await?;
         self.report(user_id, &request.report_id).await
     }
     pub async fn observation_history(
@@ -572,17 +662,21 @@ pub async fn trends(
         return Err(AppError::Invalid("Invalid time range"));
     }
     let mut points = Vec::new();
+    let mut records = Vec::new();
     let mut incomparable = 0;
     let mut excluded = Vec::new();
     for observation in database.confirmed(user_id).await? {
         if !observation
-            .payload
-            .metric_id
+            .resolved_metric_id
             .as_ref()
             .is_some_and(|id| request.metric_ids.contains(id))
         {
             continue;
         }
+        records.push(json!({"point_id":format!("report:{}", observation.observation_id),
+            "observation_id":observation.observation_id,"report_id":observation.report_id,
+            "sampled_at":observation.payload.sampled_at,"display_value":observation.payload.raw_result,
+            "unit":observation.payload.raw_unit,"status":observation.status,"original":observation.payload}));
         let Some(date) = observation.payload.sampled_at.as_deref() else {
             excluded.push(json!({"observation_id":observation.observation_id,"reason":"missing_collection_date"}));
             incomparable += 1;
@@ -598,12 +692,12 @@ pub async fn trends(
             continue;
         };
         points.push(json!({"observation_id":observation.observation_id,"report_id":observation.report_id,"revision":observation.revision,
-            "metric_id":observation.payload.metric_id,"sampled_at":date,"timestamp":timestamp,"date_precision":if date.len()==10{"day"}else{"second"},
+            "metric_id":observation.resolved_metric_id,"sampled_at":date,"timestamp":timestamp,"date_precision":if date.len()==10{"day"}else{"second"},
             "value":number,"unit":unit,"reference":observation.interpretation.reference,"original":observation.payload}));
     }
     points.sort_by_key(|point| point["timestamp"].as_i64());
     Ok(
-        json!({"points":points,"incomparable_count":incomparable,"excluded":excluded,"algorithm_version":"lab-trend-v1","conversion_version":crate::laboratory::CONVERSION_VERSION}),
+        json!({"records":records,"points":points,"incomparable_count":incomparable,"excluded":excluded,"algorithm_version":"lab-trend-v1","conversion_version":crate::laboratory::CONVERSION_VERSION}),
     )
 }
 
@@ -628,6 +722,14 @@ async fn decode_observations(
     cpu: &crate::execution::CpuExecutor,
     rows: Vec<StoredObservation>,
 ) -> Result<Vec<Observation>, AppError> {
-    cpu.run(move || rows.into_iter().map(StoredObservation::decode).collect())
-        .await
+    cpu.run(move || {
+        rows.into_iter()
+            .map(StoredObservation::decode)
+            .filter(|row| {
+                !row.as_ref()
+                    .is_ok_and(|o| crate::laboratory::is_administrative_name(&o.payload.raw_name))
+            })
+            .collect()
+    })
+    .await
 }

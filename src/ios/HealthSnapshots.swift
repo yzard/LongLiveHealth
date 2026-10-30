@@ -12,67 +12,42 @@ import Foundation
     }
 
     struct Value: Sendable { let id: String; let payload: JSONValue }
-    struct Checkpoint: Codable {
+    nonisolated struct Checkpoint: Codable, Sendable {
         let requests: [JSONValue]
         let records: [JSONValue]
     }
 
-    static func synchronize(store: HKHealthStore, client: APIClient, archive: LocalArchive, connectionID: String, installationID: UUID, includeSelectedRecords: Bool, progress: @MainActor (String, Int?) -> Void) async throws -> [String] {
-        var failed: [String] = []
+    static func kinds(includeSelectedRecords: Bool) -> [String] {
         var kinds = characteristics.map(\.rawValue) + ["activity_summary", "cda_document"]
         if #available(iOS 26.0, *), includeSelectedRecords { kinds.append("user_annotated_medications") }
-        for kind in kinds {
-            try Task.checkCancellation()
-            progress(kind, nil)
-            let pendingName = "pending-snapshot-\(kind).json"
-            let savedName = "snapshot-\(kind).json"
-            if let pending = try archive.load(Checkpoint.self, name: pendingName) {
-                for request in pending.requests {
-                    let response = try await client.post("health/sync", body: request)
-                    progress(kind, try HealthSyncProgress.totalRecords(in: response))
-                }
-                try archive.save(pending.records, name: savedName)
-                try archive.remove(name: pendingName)
-            }
-            let values: [Value]
-            do { values = try await read(kind, store: store) }
-            catch is CancellationError { throw CancellationError() }
-            catch {
-                try Task.checkCancellation()
-                if HealthBridge.isProtectedDataError(error) { throw error }
-                let requests = try HealthSyncBatch.requests(connectionID: connectionID, recordType: kind, coverageStatus: "error", records: [], maximumRecords: HealthSyncBatch.maximumRecords, maximumBytes: 40 * 1024 * 1024)
-                for request in requests {
-                    let response = try await client.post("health/sync", body: request)
-                    progress(kind, try HealthSyncProgress.totalRecords(in: response))
-                }
-                failed.append(kind); continue
-            }
-            let previous = try archive.load([JSONValue].self, name: savedName) ?? []
-            let now = Date().timeIntervalSince1970
-            var records: [JSONValue] = []
-            var changed: [JSONValue] = []
-            for value in values {
-                let old = previous.first { $0["record_id"].stringValue == value.id }
-                if let old, old["payload"] == value.payload { records.append(old); continue }
-                let record: JSONValue = .object(["record_id": .string(value.id), "source_id": .string("snapshot:\(installationID.uuidString)"),
-                    "record_type": .string(kind), "start_at": .number(floor(now)), "end_at": .number(floor(now)),
-                    "version": .number(max(floor(now * 1000), (old?["version"].numberValue ?? 0) + 1)), "deleted": .bool(false), "payload": value.payload])
-                records.append(record); changed.append(record)
-            }
-            // Missing/hidden snapshots do not imply deletions. Keep previous visible values for retries.
-            let visibleIDs = Set(records.map { $0["record_id"].stringValue })
-            records += previous.filter { !visibleIDs.contains($0["record_id"].stringValue) }
-            let requests = try HealthSyncBatch.requests(connectionID: connectionID, recordType: kind,
-                coverageStatus: values.isEmpty ? "no_visible_samples" : "observed", records: changed, maximumRecords: HealthSyncBatch.maximumRecords, maximumBytes: 40 * 1024 * 1024)
-            try archive.save(Checkpoint(requests: requests, records: records), name: pendingName)
-            for request in requests {
-                    let response = try await client.post("health/sync", body: request)
-                    progress(kind, try HealthSyncProgress.totalRecords(in: response))
-                }
-            try archive.save(records, name: savedName)
-            try archive.remove(name: pendingName)
+        return kinds
+    }
+
+    struct Changes {
+        let records: [JSONValue]
+        let status: String
+        let writes: [String: JSONValue]
+    }
+
+    static func changes(_ kind: String, store: HKHealthStore, archive: LocalArchive, installationID: UUID) async throws -> Changes {
+        let values = try await read(kind, store: store)
+        let savedName = "snapshot-\(kind).json"
+        let previous = try await archive.loadAsync([JSONValue].self, name: savedName) ?? []
+        let byID = Dictionary(previous.map { ($0["record_id"].stringValue, $0) }, uniquingKeysWith: { _, new in new })
+        let now = Date().timeIntervalSince1970
+        var records: [JSONValue] = []
+        var changed: [JSONValue] = []
+        for value in values {
+            let old = byID[value.id]
+            if let old, old["payload"] == value.payload { records.append(old); continue }
+            let record: JSONValue = .object(["record_id": .string(value.id), "source_id": .string("snapshot:\(installationID.uuidString)"),
+                "record_type": .string(kind), "start_at": .number(floor(now)), "end_at": .number(floor(now)),
+                "version": .number(max(floor(now * 1000), (old?["version"].numberValue ?? 0) + 1)), "deleted": .bool(false), "payload": value.payload])
+            records.append(record); changed.append(record)
         }
-        return failed
+        let visibleIDs = Set(records.map { $0["record_id"].stringValue })
+        records += previous.filter { !visibleIDs.contains($0["record_id"].stringValue) }
+        return Changes(records: changed, status: values.isEmpty ? "no_visible_samples" : "observed", writes: [savedName: .array(records)])
     }
 
     private static func read(_ kind: String, store: HKHealthStore) async throws -> [Value] {

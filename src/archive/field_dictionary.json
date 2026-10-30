@@ -212,7 +212,9 @@
         "record_id": "Source record identifier, scoped to user, platform and source_id.",
         "raw_path": "Archive-relative path to the exact stored JSON revision under raw/<user_id>/<provider>/.",
         "received_at": "Server receipt time as Unix seconds in UTC, separate from observation time.",
-        "raw_id": "Unique archive revision identifier for a received health record."
+        "raw_id": "Unique archive revision identifier for a received health record.",
+        "raw_offset": "Byte offset of the eight-byte little-endian JSON length prefix; null for a standalone original.",
+        "raw_length": "UTF-8 JSON byte length, excluding the prefix; null for a standalone original."
       }
     }
   },

@@ -1,0 +1,1991 @@
+[
+  {
+    "kind": "HKCategoryTypeIdentifierAbdominalCramps",
+    "identifier": "HKCategoryTypeIdentifierAbdominalCramps",
+    "family": "category",
+    "title": "Abdominal Cramps",
+    "unit": "",
+    "description": "Abdominal Cramps records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierAcne",
+    "identifier": "HKCategoryTypeIdentifierAcne",
+    "family": "category",
+    "title": "Acne",
+    "unit": "",
+    "description": "Acne records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierAppetiteChanges",
+    "identifier": "HKCategoryTypeIdentifierAppetiteChanges",
+    "family": "category",
+    "title": "Appetite Changes",
+    "unit": "",
+    "description": "Appetite Changes records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierAppleStandHour",
+    "identifier": "HKCategoryTypeIdentifierAppleStandHour",
+    "family": "category",
+    "title": "Apple Stand Hour",
+    "unit": "",
+    "description": "Apple Stand Hour records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierAppleWalkingSteadinessEvent",
+    "identifier": "HKCategoryTypeIdentifierAppleWalkingSteadinessEvent",
+    "family": "category",
+    "title": "Apple Walking Steadiness Event",
+    "unit": "",
+    "description": "Apple Walking Steadiness Event records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierAudioExposureEvent",
+    "identifier": "HKCategoryTypeIdentifierAudioExposureEvent",
+    "family": "category",
+    "title": "Audio Exposure Event",
+    "unit": "",
+    "description": "Audio Exposure Event records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierBladderIncontinence",
+    "identifier": "HKCategoryTypeIdentifierBladderIncontinence",
+    "family": "category",
+    "title": "Bladder Incontinence",
+    "unit": "",
+    "description": "Bladder Incontinence records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierBleedingAfterMenopause",
+    "identifier": "HKCategoryTypeIdentifierBleedingAfterMenopause",
+    "family": "category",
+    "title": "Bleeding After Menopause",
+    "unit": "",
+    "description": "Bleeding After Menopause records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierBleedingAfterPregnancy",
+    "identifier": "HKCategoryTypeIdentifierBleedingAfterPregnancy",
+    "family": "category",
+    "title": "Bleeding After Pregnancy",
+    "unit": "",
+    "description": "Records vaginal bleeding after pregnancy, including the recorded severity and duration.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierBleedingDuringPregnancy",
+    "identifier": "HKCategoryTypeIdentifierBleedingDuringPregnancy",
+    "family": "category",
+    "title": "Bleeding During Pregnancy",
+    "unit": "",
+    "description": "Records vaginal bleeding during pregnancy, including the recorded severity and duration.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierBloating",
+    "identifier": "HKCategoryTypeIdentifierBloating",
+    "family": "category",
+    "title": "Bloating",
+    "unit": "",
+    "description": "Bloating records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierBreastPain",
+    "identifier": "HKCategoryTypeIdentifierBreastPain",
+    "family": "category",
+    "title": "Breast Pain",
+    "unit": "",
+    "description": "Breast Pain records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierCervicalMucusQuality",
+    "identifier": "HKCategoryTypeIdentifierCervicalMucusQuality",
+    "family": "category",
+    "title": "Cervical Mucus Quality",
+    "unit": "",
+    "description": "Cervical Mucus Quality records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierChestTightnessOrPain",
+    "identifier": "HKCategoryTypeIdentifierChestTightnessOrPain",
+    "family": "category",
+    "title": "Chest Tightness Or Pain",
+    "unit": "",
+    "description": "Chest Tightness Or Pain records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierChills",
+    "identifier": "HKCategoryTypeIdentifierChills",
+    "family": "category",
+    "title": "Chills",
+    "unit": "",
+    "description": "Chills records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierConstipation",
+    "identifier": "HKCategoryTypeIdentifierConstipation",
+    "family": "category",
+    "title": "Constipation",
+    "unit": "",
+    "description": "Constipation records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierContraceptive",
+    "identifier": "HKCategoryTypeIdentifierContraceptive",
+    "family": "category",
+    "title": "Contraceptive",
+    "unit": "",
+    "description": "Contraceptive records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierCoughing",
+    "identifier": "HKCategoryTypeIdentifierCoughing",
+    "family": "category",
+    "title": "Coughing",
+    "unit": "",
+    "description": "Coughing records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierDiarrhea",
+    "identifier": "HKCategoryTypeIdentifierDiarrhea",
+    "family": "category",
+    "title": "Diarrhea",
+    "unit": "",
+    "description": "Diarrhea records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierDizziness",
+    "identifier": "HKCategoryTypeIdentifierDizziness",
+    "family": "category",
+    "title": "Dizziness",
+    "unit": "",
+    "description": "Dizziness records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierDrySkin",
+    "identifier": "HKCategoryTypeIdentifierDrySkin",
+    "family": "category",
+    "title": "Dry Skin",
+    "unit": "",
+    "description": "Dry Skin records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierEnvironmentalAudioExposureEvent",
+    "identifier": "HKCategoryTypeIdentifierEnvironmentalAudioExposureEvent",
+    "family": "category",
+    "title": "Environmental Audio Exposure Event",
+    "unit": "",
+    "description": "Environmental Audio Exposure Event records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierFainting",
+    "identifier": "HKCategoryTypeIdentifierFainting",
+    "family": "category",
+    "title": "Fainting",
+    "unit": "",
+    "description": "Fainting records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierFatigue",
+    "identifier": "HKCategoryTypeIdentifierFatigue",
+    "family": "category",
+    "title": "Fatigue",
+    "unit": "",
+    "description": "Fatigue records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierFever",
+    "identifier": "HKCategoryTypeIdentifierFever",
+    "family": "category",
+    "title": "Fever",
+    "unit": "",
+    "description": "Fever records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierGeneralizedBodyAche",
+    "identifier": "HKCategoryTypeIdentifierGeneralizedBodyAche",
+    "family": "category",
+    "title": "Generalized Body Ache",
+    "unit": "",
+    "description": "Generalized Body Ache records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierHairLoss",
+    "identifier": "HKCategoryTypeIdentifierHairLoss",
+    "family": "category",
+    "title": "Hair Loss",
+    "unit": "",
+    "description": "Hair Loss records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierHandwashingEvent",
+    "identifier": "HKCategoryTypeIdentifierHandwashingEvent",
+    "family": "category",
+    "title": "Handwashing Event",
+    "unit": "",
+    "description": "Handwashing Event records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierHeadache",
+    "identifier": "HKCategoryTypeIdentifierHeadache",
+    "family": "category",
+    "title": "Headache",
+    "unit": "",
+    "description": "Headache records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierHeadphoneAudioExposureEvent",
+    "identifier": "HKCategoryTypeIdentifierHeadphoneAudioExposureEvent",
+    "family": "category",
+    "title": "Headphone Audio Exposure Event",
+    "unit": "",
+    "description": "Headphone Audio Exposure Event records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierHeartburn",
+    "identifier": "HKCategoryTypeIdentifierHeartburn",
+    "family": "category",
+    "title": "Heartburn",
+    "unit": "",
+    "description": "Heartburn records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierHotFlashes",
+    "identifier": "HKCategoryTypeIdentifierHotFlashes",
+    "family": "category",
+    "title": "Hot Flashes",
+    "unit": "",
+    "description": "Hot Flashes records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierHypertensionEvent",
+    "identifier": "HKCategoryTypeIdentifierHypertensionEvent",
+    "family": "category",
+    "title": "Hypertension Event",
+    "unit": "",
+    "description": "Hypertension Event records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierInfrequentMenstrualCycles",
+    "identifier": "HKCategoryTypeIdentifierInfrequentMenstrualCycles",
+    "family": "category",
+    "title": "Infrequent Menstrual Cycles",
+    "unit": "",
+    "description": "Infrequent Menstrual Cycles records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierIntermenstrualBleeding",
+    "identifier": "HKCategoryTypeIdentifierIntermenstrualBleeding",
+    "family": "category",
+    "title": "Intermenstrual Bleeding",
+    "unit": "",
+    "description": "Intermenstrual Bleeding records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierIrregularMenstrualCycles",
+    "identifier": "HKCategoryTypeIdentifierIrregularMenstrualCycles",
+    "family": "category",
+    "title": "Irregular Menstrual Cycles",
+    "unit": "",
+    "description": "Irregular Menstrual Cycles records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierLactation",
+    "identifier": "HKCategoryTypeIdentifierLactation",
+    "family": "category",
+    "title": "Lactation",
+    "unit": "",
+    "description": "Lactation records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierLossOfSmell",
+    "identifier": "HKCategoryTypeIdentifierLossOfSmell",
+    "family": "category",
+    "title": "Loss Of Smell",
+    "unit": "",
+    "description": "Loss Of Smell records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierLossOfTaste",
+    "identifier": "HKCategoryTypeIdentifierLossOfTaste",
+    "family": "category",
+    "title": "Loss Of Taste",
+    "unit": "",
+    "description": "Loss Of Taste records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierLowCardioFitnessEvent",
+    "identifier": "HKCategoryTypeIdentifierLowCardioFitnessEvent",
+    "family": "category",
+    "title": "Low Cardio Fitness Event",
+    "unit": "",
+    "description": "Low Cardio Fitness Event records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierLowerBackPain",
+    "identifier": "HKCategoryTypeIdentifierLowerBackPain",
+    "family": "category",
+    "title": "Lower Back Pain",
+    "unit": "",
+    "description": "Lower Back Pain records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierMemoryLapse",
+    "identifier": "HKCategoryTypeIdentifierMemoryLapse",
+    "family": "category",
+    "title": "Memory Lapse",
+    "unit": "",
+    "description": "Memory Lapse records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierMenopausalState",
+    "identifier": "HKCategoryTypeIdentifierMenopausalState",
+    "family": "category",
+    "title": "Menopausal State",
+    "unit": "",
+    "description": "Menopausal State records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierMenstrualFlow",
+    "identifier": "HKCategoryTypeIdentifierMenstrualFlow",
+    "family": "category",
+    "title": "Menstrual Flow",
+    "unit": "",
+    "description": "Menstrual Flow records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierMoodChanges",
+    "identifier": "HKCategoryTypeIdentifierMoodChanges",
+    "family": "category",
+    "title": "Mood Changes",
+    "unit": "",
+    "description": "Mood Changes records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierNausea",
+    "identifier": "HKCategoryTypeIdentifierNausea",
+    "family": "category",
+    "title": "Nausea",
+    "unit": "",
+    "description": "Nausea records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierNightSweats",
+    "identifier": "HKCategoryTypeIdentifierNightSweats",
+    "family": "category",
+    "title": "Night Sweats",
+    "unit": "",
+    "description": "Night Sweats records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierOvulationTestResult",
+    "identifier": "HKCategoryTypeIdentifierOvulationTestResult",
+    "family": "category",
+    "title": "Ovulation Test Result",
+    "unit": "",
+    "description": "Ovulation Test Result records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierPelvicPain",
+    "identifier": "HKCategoryTypeIdentifierPelvicPain",
+    "family": "category",
+    "title": "Pelvic Pain",
+    "unit": "",
+    "description": "Pelvic Pain records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierPersistentIntermenstrualBleeding",
+    "identifier": "HKCategoryTypeIdentifierPersistentIntermenstrualBleeding",
+    "family": "category",
+    "title": "Persistent Intermenstrual Bleeding",
+    "unit": "",
+    "description": "Persistent Intermenstrual Bleeding records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierPregnancy",
+    "identifier": "HKCategoryTypeIdentifierPregnancy",
+    "family": "category",
+    "title": "Pregnancy",
+    "unit": "",
+    "description": "Pregnancy records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierPregnancyTestResult",
+    "identifier": "HKCategoryTypeIdentifierPregnancyTestResult",
+    "family": "category",
+    "title": "Pregnancy Test Result",
+    "unit": "",
+    "description": "Pregnancy Test Result records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierProgesteroneTestResult",
+    "identifier": "HKCategoryTypeIdentifierProgesteroneTestResult",
+    "family": "category",
+    "title": "Progesterone Test Result",
+    "unit": "",
+    "description": "Progesterone Test Result records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierProlongedMenstrualPeriods",
+    "identifier": "HKCategoryTypeIdentifierProlongedMenstrualPeriods",
+    "family": "category",
+    "title": "Prolonged Menstrual Periods",
+    "unit": "",
+    "description": "Prolonged Menstrual Periods records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierRapidPoundingOrFlutteringHeartbeat",
+    "identifier": "HKCategoryTypeIdentifierRapidPoundingOrFlutteringHeartbeat",
+    "family": "category",
+    "title": "Rapid Pounding Or Fluttering Heartbeat",
+    "unit": "",
+    "description": "Rapid Pounding Or Fluttering Heartbeat records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierRunnyNose",
+    "identifier": "HKCategoryTypeIdentifierRunnyNose",
+    "family": "category",
+    "title": "Runny Nose",
+    "unit": "",
+    "description": "Runny Nose records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierSexualActivity",
+    "identifier": "HKCategoryTypeIdentifierSexualActivity",
+    "family": "category",
+    "title": "Sexual Activity",
+    "unit": "",
+    "description": "Sexual Activity records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierShortnessOfBreath",
+    "identifier": "HKCategoryTypeIdentifierShortnessOfBreath",
+    "family": "category",
+    "title": "Shortness Of Breath",
+    "unit": "",
+    "description": "Shortness Of Breath records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierSinusCongestion",
+    "identifier": "HKCategoryTypeIdentifierSinusCongestion",
+    "family": "category",
+    "title": "Sinus Congestion",
+    "unit": "",
+    "description": "Sinus Congestion records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierSkippedHeartbeat",
+    "identifier": "HKCategoryTypeIdentifierSkippedHeartbeat",
+    "family": "category",
+    "title": "Skipped Heartbeat",
+    "unit": "",
+    "description": "Skipped Heartbeat records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierSleepApneaEvent",
+    "identifier": "HKCategoryTypeIdentifierSleepApneaEvent",
+    "family": "category",
+    "title": "Sleep Apnea Events",
+    "unit": "",
+    "description": "Records detected sleep apnea events, which concern interruptions in breathing during sleep. An event is not a continuous measurement or a diagnosis.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierSleepChanges",
+    "identifier": "HKCategoryTypeIdentifierSleepChanges",
+    "family": "category",
+    "title": "Sleep Changes",
+    "unit": "",
+    "description": "Sleep Changes records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierSoreThroat",
+    "identifier": "HKCategoryTypeIdentifierSoreThroat",
+    "family": "category",
+    "title": "Sore Throat",
+    "unit": "",
+    "description": "Sore Throat records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierToothbrushingEvent",
+    "identifier": "HKCategoryTypeIdentifierToothbrushingEvent",
+    "family": "category",
+    "title": "Toothbrushing Event",
+    "unit": "",
+    "description": "Toothbrushing Event records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierVaginalDryness",
+    "identifier": "HKCategoryTypeIdentifierVaginalDryness",
+    "family": "category",
+    "title": "Vaginal Dryness",
+    "unit": "",
+    "description": "Vaginal Dryness records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierVomiting",
+    "identifier": "HKCategoryTypeIdentifierVomiting",
+    "family": "category",
+    "title": "Vomiting",
+    "unit": "",
+    "description": "Vomiting records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCategoryTypeIdentifierWheezing",
+    "identifier": "HKCategoryTypeIdentifierWheezing",
+    "family": "category",
+    "title": "Wheezing",
+    "unit": "",
+    "description": "Wheezing records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "HKCharacteristicTypeIdentifierActivityMoveMode",
+    "identifier": "HKCharacteristicTypeIdentifierActivityMoveMode",
+    "family": "characteristic",
+    "title": "Activity Move Mode",
+    "unit": "",
+    "description": "Activity Move Mode is personal health information recorded in Apple Health. History timestamps indicate when this profile information was archived.",
+    "browse": true
+  },
+  {
+    "kind": "HKCharacteristicTypeIdentifierBiologicalSex",
+    "identifier": "HKCharacteristicTypeIdentifierBiologicalSex",
+    "family": "characteristic",
+    "title": "Biological Sex",
+    "unit": "",
+    "description": "Biological Sex is personal health information recorded in Apple Health. History timestamps indicate when this profile information was archived.",
+    "browse": true
+  },
+  {
+    "kind": "HKCharacteristicTypeIdentifierBloodType",
+    "identifier": "HKCharacteristicTypeIdentifierBloodType",
+    "family": "characteristic",
+    "title": "Blood Type",
+    "unit": "",
+    "description": "Blood Type is personal health information recorded in Apple Health. History timestamps indicate when this profile information was archived.",
+    "browse": true
+  },
+  {
+    "kind": "HKCharacteristicTypeIdentifierDateOfBirth",
+    "identifier": "HKCharacteristicTypeIdentifierDateOfBirth",
+    "family": "characteristic",
+    "title": "Date Of Birth",
+    "unit": "",
+    "description": "Date Of Birth is personal health information recorded in Apple Health. History timestamps indicate when this profile information was archived.",
+    "browse": true
+  },
+  {
+    "kind": "HKCharacteristicTypeIdentifierFitzpatrickSkinType",
+    "identifier": "HKCharacteristicTypeIdentifierFitzpatrickSkinType",
+    "family": "characteristic",
+    "title": "Fitzpatrick Skin Type",
+    "unit": "",
+    "description": "Fitzpatrick Skin Type is personal health information recorded in Apple Health. History timestamps indicate when this profile information was archived.",
+    "browse": true
+  },
+  {
+    "kind": "HKCharacteristicTypeIdentifierWheelchairUse",
+    "identifier": "HKCharacteristicTypeIdentifierWheelchairUse",
+    "family": "characteristic",
+    "title": "Wheelchair Use",
+    "unit": "",
+    "description": "Wheelchair Use is personal health information recorded in Apple Health. History timestamps indicate when this profile information was archived.",
+    "browse": true
+  },
+  {
+    "kind": "HKClinicalTypeIdentifierAllergyRecord",
+    "identifier": "HKClinicalTypeIdentifierAllergyRecord",
+    "family": "clinical",
+    "title": "Allergy Record",
+    "unit": "",
+    "description": "Allergy Record preserves the health information supplied by your care provider. The recorded date and source identify the clinical context; individual laboratory measurements are also organized in Lab Results.",
+    "browse": true
+  },
+  {
+    "kind": "HKClinicalTypeIdentifierClinicalNoteRecord",
+    "identifier": "HKClinicalTypeIdentifierClinicalNoteRecord",
+    "family": "clinical",
+    "title": "Clinical Note Record",
+    "unit": "",
+    "description": "Clinical Note Record preserves the health information supplied by your care provider. The recorded date and source identify the clinical context; individual laboratory measurements are also organized in Lab Results.",
+    "browse": true
+  },
+  {
+    "kind": "HKClinicalTypeIdentifierConditionRecord",
+    "identifier": "HKClinicalTypeIdentifierConditionRecord",
+    "family": "clinical",
+    "title": "Condition Record",
+    "unit": "",
+    "description": "Condition Record preserves the health information supplied by your care provider. The recorded date and source identify the clinical context; individual laboratory measurements are also organized in Lab Results.",
+    "browse": true
+  },
+  {
+    "kind": "HKClinicalTypeIdentifierCoverageRecord",
+    "identifier": "HKClinicalTypeIdentifierCoverageRecord",
+    "family": "clinical",
+    "title": "Coverage Record",
+    "unit": "",
+    "description": "Coverage Record preserves the health information supplied by your care provider. The recorded date and source identify the clinical context; individual laboratory measurements are also organized in Lab Results.",
+    "browse": false
+  },
+  {
+    "kind": "HKClinicalTypeIdentifierImmunizationRecord",
+    "identifier": "HKClinicalTypeIdentifierImmunizationRecord",
+    "family": "clinical",
+    "title": "Immunization Record",
+    "unit": "",
+    "description": "Immunization Record preserves the health information supplied by your care provider. The recorded date and source identify the clinical context; individual laboratory measurements are also organized in Lab Results.",
+    "browse": true
+  },
+  {
+    "kind": "HKClinicalTypeIdentifierLabResultRecord",
+    "identifier": "HKClinicalTypeIdentifierLabResultRecord",
+    "family": "clinical",
+    "title": "Lab Result Record",
+    "unit": "",
+    "description": "Lab Result Record preserves the health information supplied by your care provider. The recorded date and source identify the clinical context; individual laboratory measurements are also organized in Lab Results.",
+    "browse": true
+  },
+  {
+    "kind": "HKClinicalTypeIdentifierMedicationRecord",
+    "identifier": "HKClinicalTypeIdentifierMedicationRecord",
+    "family": "clinical",
+    "title": "Medication Record",
+    "unit": "",
+    "description": "Medication Record preserves the health information supplied by your care provider. The recorded date and source identify the clinical context; individual laboratory measurements are also organized in Lab Results.",
+    "browse": true
+  },
+  {
+    "kind": "HKClinicalTypeIdentifierProcedureRecord",
+    "identifier": "HKClinicalTypeIdentifierProcedureRecord",
+    "family": "clinical",
+    "title": "Procedure Record",
+    "unit": "",
+    "description": "Procedure Record preserves the health information supplied by your care provider. The recorded date and source identify the clinical context; individual laboratory measurements are also organized in Lab Results.",
+    "browse": true
+  },
+  {
+    "kind": "HKClinicalTypeIdentifierVitalSignRecord",
+    "identifier": "HKClinicalTypeIdentifierVitalSignRecord",
+    "family": "clinical",
+    "title": "Vital Sign Record",
+    "unit": "",
+    "description": "Vital Sign Record preserves the health information supplied by your care provider. The recorded date and source identify the clinical context; individual laboratory measurements are also organized in Lab Results.",
+    "browse": true
+  },
+  {
+    "kind": "HKCorrelationTypeIdentifierBloodPressure",
+    "identifier": "HKCorrelationTypeIdentifierBloodPressure",
+    "family": "correlation",
+    "title": "Blood Pressure",
+    "unit": "",
+    "description": "Blood Pressure groups related health measurements recorded together. Open a history entry to inspect its linked measurements and their original source.",
+    "browse": true
+  },
+  {
+    "kind": "HKCorrelationTypeIdentifierFood",
+    "identifier": "HKCorrelationTypeIdentifierFood",
+    "family": "correlation",
+    "title": "Food",
+    "unit": "",
+    "description": "Food groups related health measurements recorded together. Open a history entry to inspect its linked measurements and their original source.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierAppleMoveTime",
+    "identifier": "HKQuantityTypeIdentifierAppleMoveTime",
+    "family": "quantity",
+    "title": "Apple Move Time",
+    "unit": "min",
+    "description": "Apple Move Time is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in min.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierAppleSleepingBreathingDisturbances",
+    "identifier": "HKQuantityTypeIdentifierAppleSleepingBreathingDisturbances",
+    "family": "quantity",
+    "title": "Sleeping Breathing Disturbances",
+    "unit": "count",
+    "description": "Breathing disturbances describe interruptions to normal breathing detected during sleep. Changes can help you review patterns in overnight breathing. Values are shown in count.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierAppleSleepingWristTemperature",
+    "identifier": "HKQuantityTypeIdentifierAppleSleepingWristTemperature",
+    "family": "quantity",
+    "title": "Sleeping Wrist Temperature",
+    "unit": "degC",
+    "description": "Sleeping wrist temperature measures temperature at the wrist during sleep. Changes can reflect sleep conditions, menstrual cycles or illness; wrist temperature differs from core body temperature. Values are shown in degC.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierAppleWalkingSteadiness",
+    "identifier": "HKQuantityTypeIdentifierAppleWalkingSteadiness",
+    "family": "quantity",
+    "title": "Walking Steadiness",
+    "unit": "%",
+    "description": "Walking steadiness estimates balance and stability while walking. It combines mobility measurements to describe how consistently you walk. Values are shown in %.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierAtrialFibrillationBurden",
+    "identifier": "HKQuantityTypeIdentifierAtrialFibrillationBurden",
+    "family": "quantity",
+    "title": "Atrial Fibrillation Burden",
+    "unit": "%",
+    "description": "Atrial Fibrillation Burden is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in %.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierBasalBodyTemperature",
+    "identifier": "HKQuantityTypeIdentifierBasalBodyTemperature",
+    "family": "quantity",
+    "title": "Basal Body Temperature",
+    "unit": "degC",
+    "description": "Basal Body Temperature is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in degC.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierBloodAlcoholContent",
+    "identifier": "HKQuantityTypeIdentifierBloodAlcoholContent",
+    "family": "quantity",
+    "title": "Blood Alcohol Content",
+    "unit": "%",
+    "description": "Blood Alcohol Content is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in %.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierBodyMassIndex",
+    "identifier": "HKQuantityTypeIdentifierBodyMassIndex",
+    "family": "quantity",
+    "title": "Body Mass Index (BMI)",
+    "unit": "count",
+    "description": "BMI is body mass in kilograms divided by height in meters squared. It describes weight relative to height; it does not distinguish muscle from fat. Values are shown in count.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierCrossCountrySkiingSpeed",
+    "identifier": "HKQuantityTypeIdentifierCrossCountrySkiingSpeed",
+    "family": "quantity",
+    "title": "Cross Country Skiing Speed",
+    "unit": "m/s",
+    "description": "Cross Country Skiing Speed measures distance traveled per unit of time during the named activity. It describes mobility or exercise pace and can vary with terrain and conditions. Values are shown in m/s.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierCyclingCadence",
+    "identifier": "HKQuantityTypeIdentifierCyclingCadence",
+    "family": "quantity",
+    "title": "Cycling Cadence",
+    "unit": "count/min",
+    "description": "Cycling Cadence is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in count/min.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierCyclingFunctionalThresholdPower",
+    "identifier": "HKQuantityTypeIdentifierCyclingFunctionalThresholdPower",
+    "family": "quantity",
+    "title": "Cycling Functional Threshold Power",
+    "unit": "W",
+    "description": "Cycling Functional Threshold Power is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in W.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierCyclingPower",
+    "identifier": "HKQuantityTypeIdentifierCyclingPower",
+    "family": "quantity",
+    "title": "Cycling Power",
+    "unit": "W",
+    "description": "Cycling Power is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in W.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierCyclingSpeed",
+    "identifier": "HKQuantityTypeIdentifierCyclingSpeed",
+    "family": "quantity",
+    "title": "Cycling Speed",
+    "unit": "m/s",
+    "description": "Cycling Speed measures distance traveled per unit of time during the named activity. It describes mobility or exercise pace and can vary with terrain and conditions. Values are shown in m/s.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryBiotin",
+    "identifier": "HKQuantityTypeIdentifierDietaryBiotin",
+    "family": "quantity",
+    "title": "Dietary Biotin",
+    "unit": "g",
+    "description": "Dietary Biotin records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryCaffeine",
+    "identifier": "HKQuantityTypeIdentifierDietaryCaffeine",
+    "family": "quantity",
+    "title": "Dietary Caffeine",
+    "unit": "g",
+    "description": "Dietary Caffeine records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryCalcium",
+    "identifier": "HKQuantityTypeIdentifierDietaryCalcium",
+    "family": "quantity",
+    "title": "Dietary Calcium",
+    "unit": "g",
+    "description": "Dietary Calcium records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryCarbohydrates",
+    "identifier": "HKQuantityTypeIdentifierDietaryCarbohydrates",
+    "family": "quantity",
+    "title": "Dietary Carbohydrates",
+    "unit": "g",
+    "description": "Dietary Carbohydrates records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryChloride",
+    "identifier": "HKQuantityTypeIdentifierDietaryChloride",
+    "family": "quantity",
+    "title": "Dietary Chloride",
+    "unit": "g",
+    "description": "Dietary Chloride records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryCholesterol",
+    "identifier": "HKQuantityTypeIdentifierDietaryCholesterol",
+    "family": "quantity",
+    "title": "Dietary Cholesterol",
+    "unit": "g",
+    "description": "Dietary Cholesterol records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryChromium",
+    "identifier": "HKQuantityTypeIdentifierDietaryChromium",
+    "family": "quantity",
+    "title": "Dietary Chromium",
+    "unit": "g",
+    "description": "Dietary Chromium records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryCopper",
+    "identifier": "HKQuantityTypeIdentifierDietaryCopper",
+    "family": "quantity",
+    "title": "Dietary Copper",
+    "unit": "g",
+    "description": "Dietary Copper records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryEnergyConsumed",
+    "identifier": "HKQuantityTypeIdentifierDietaryEnergyConsumed",
+    "family": "quantity",
+    "title": "Dietary Energy Consumed",
+    "unit": "kcal",
+    "description": "Dietary Energy Consumed records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in kcal.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryFatMonounsaturated",
+    "identifier": "HKQuantityTypeIdentifierDietaryFatMonounsaturated",
+    "family": "quantity",
+    "title": "Dietary Fat Monounsaturated",
+    "unit": "g",
+    "description": "Dietary Fat Monounsaturated records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryFatPolyunsaturated",
+    "identifier": "HKQuantityTypeIdentifierDietaryFatPolyunsaturated",
+    "family": "quantity",
+    "title": "Dietary Fat Polyunsaturated",
+    "unit": "g",
+    "description": "Dietary Fat Polyunsaturated records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryFatSaturated",
+    "identifier": "HKQuantityTypeIdentifierDietaryFatSaturated",
+    "family": "quantity",
+    "title": "Dietary Fat Saturated",
+    "unit": "g",
+    "description": "Dietary Fat Saturated records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryFatTotal",
+    "identifier": "HKQuantityTypeIdentifierDietaryFatTotal",
+    "family": "quantity",
+    "title": "Dietary Fat Total",
+    "unit": "g",
+    "description": "Dietary Fat Total records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryFiber",
+    "identifier": "HKQuantityTypeIdentifierDietaryFiber",
+    "family": "quantity",
+    "title": "Dietary Fiber",
+    "unit": "g",
+    "description": "Dietary Fiber records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryFolate",
+    "identifier": "HKQuantityTypeIdentifierDietaryFolate",
+    "family": "quantity",
+    "title": "Dietary Folate",
+    "unit": "g",
+    "description": "Dietary Folate records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryIodine",
+    "identifier": "HKQuantityTypeIdentifierDietaryIodine",
+    "family": "quantity",
+    "title": "Dietary Iodine",
+    "unit": "g",
+    "description": "Dietary Iodine records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryIron",
+    "identifier": "HKQuantityTypeIdentifierDietaryIron",
+    "family": "quantity",
+    "title": "Dietary Iron",
+    "unit": "g",
+    "description": "Dietary Iron records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryMagnesium",
+    "identifier": "HKQuantityTypeIdentifierDietaryMagnesium",
+    "family": "quantity",
+    "title": "Dietary Magnesium",
+    "unit": "g",
+    "description": "Dietary Magnesium records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryManganese",
+    "identifier": "HKQuantityTypeIdentifierDietaryManganese",
+    "family": "quantity",
+    "title": "Dietary Manganese",
+    "unit": "g",
+    "description": "Dietary Manganese records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryMolybdenum",
+    "identifier": "HKQuantityTypeIdentifierDietaryMolybdenum",
+    "family": "quantity",
+    "title": "Dietary Molybdenum",
+    "unit": "g",
+    "description": "Dietary Molybdenum records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryNiacin",
+    "identifier": "HKQuantityTypeIdentifierDietaryNiacin",
+    "family": "quantity",
+    "title": "Dietary Niacin",
+    "unit": "g",
+    "description": "Dietary Niacin records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryPantothenicAcid",
+    "identifier": "HKQuantityTypeIdentifierDietaryPantothenicAcid",
+    "family": "quantity",
+    "title": "Dietary Pantothenic Acid",
+    "unit": "g",
+    "description": "Dietary Pantothenic Acid records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryPhosphorus",
+    "identifier": "HKQuantityTypeIdentifierDietaryPhosphorus",
+    "family": "quantity",
+    "title": "Dietary Phosphorus",
+    "unit": "g",
+    "description": "Dietary Phosphorus records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryPotassium",
+    "identifier": "HKQuantityTypeIdentifierDietaryPotassium",
+    "family": "quantity",
+    "title": "Dietary Potassium",
+    "unit": "g",
+    "description": "Dietary Potassium records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryProtein",
+    "identifier": "HKQuantityTypeIdentifierDietaryProtein",
+    "family": "quantity",
+    "title": "Dietary Protein",
+    "unit": "g",
+    "description": "Dietary Protein records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryRiboflavin",
+    "identifier": "HKQuantityTypeIdentifierDietaryRiboflavin",
+    "family": "quantity",
+    "title": "Dietary Riboflavin",
+    "unit": "g",
+    "description": "Dietary Riboflavin records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietarySelenium",
+    "identifier": "HKQuantityTypeIdentifierDietarySelenium",
+    "family": "quantity",
+    "title": "Dietary Selenium",
+    "unit": "g",
+    "description": "Dietary Selenium records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietarySodium",
+    "identifier": "HKQuantityTypeIdentifierDietarySodium",
+    "family": "quantity",
+    "title": "Dietary Sodium",
+    "unit": "g",
+    "description": "Dietary Sodium records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietarySugar",
+    "identifier": "HKQuantityTypeIdentifierDietarySugar",
+    "family": "quantity",
+    "title": "Dietary Sugar",
+    "unit": "g",
+    "description": "Dietary Sugar records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryThiamin",
+    "identifier": "HKQuantityTypeIdentifierDietaryThiamin",
+    "family": "quantity",
+    "title": "Dietary Thiamin",
+    "unit": "g",
+    "description": "Dietary Thiamin records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryVitaminA",
+    "identifier": "HKQuantityTypeIdentifierDietaryVitaminA",
+    "family": "quantity",
+    "title": "Dietary Vitamin A",
+    "unit": "g",
+    "description": "Dietary Vitamin A records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryVitaminB12",
+    "identifier": "HKQuantityTypeIdentifierDietaryVitaminB12",
+    "family": "quantity",
+    "title": "Dietary Vitamin B12",
+    "unit": "g",
+    "description": "Dietary Vitamin B12 records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryVitaminB6",
+    "identifier": "HKQuantityTypeIdentifierDietaryVitaminB6",
+    "family": "quantity",
+    "title": "Dietary Vitamin B6",
+    "unit": "g",
+    "description": "Dietary Vitamin B6 records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryVitaminC",
+    "identifier": "HKQuantityTypeIdentifierDietaryVitaminC",
+    "family": "quantity",
+    "title": "Dietary Vitamin C",
+    "unit": "g",
+    "description": "Dietary Vitamin C records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryVitaminD",
+    "identifier": "HKQuantityTypeIdentifierDietaryVitaminD",
+    "family": "quantity",
+    "title": "Dietary Vitamin D",
+    "unit": "g",
+    "description": "Dietary Vitamin D records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryVitaminE",
+    "identifier": "HKQuantityTypeIdentifierDietaryVitaminE",
+    "family": "quantity",
+    "title": "Dietary Vitamin E",
+    "unit": "g",
+    "description": "Dietary Vitamin E records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryVitaminK",
+    "identifier": "HKQuantityTypeIdentifierDietaryVitaminK",
+    "family": "quantity",
+    "title": "Dietary Vitamin K",
+    "unit": "g",
+    "description": "Dietary Vitamin K records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryWater",
+    "identifier": "HKQuantityTypeIdentifierDietaryWater",
+    "family": "quantity",
+    "title": "Dietary Water",
+    "unit": "mL",
+    "description": "Dietary Water records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in mL.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDietaryZinc",
+    "identifier": "HKQuantityTypeIdentifierDietaryZinc",
+    "family": "quantity",
+    "title": "Dietary Zinc",
+    "unit": "g",
+    "description": "Dietary Zinc records intake from food, drinks or supplements. It describes dietary intake, not the concentration measured in a blood test. Each value belongs to the recorded intake interval. Values are shown in g.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDistanceCrossCountrySkiing",
+    "identifier": "HKQuantityTypeIdentifierDistanceCrossCountrySkiing",
+    "family": "quantity",
+    "title": "Distance Cross Country Skiing",
+    "unit": "m",
+    "description": "Distance Cross Country Skiing measures the distance covered during the recorded activity interval. It describes the volume of that activity. Values are shown in m.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDistanceDownhillSnowSports",
+    "identifier": "HKQuantityTypeIdentifierDistanceDownhillSnowSports",
+    "family": "quantity",
+    "title": "Distance Downhill Snow Sports",
+    "unit": "m",
+    "description": "Distance Downhill Snow Sports measures the distance covered during the recorded activity interval. It describes the volume of that activity. Values are shown in m.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDistancePaddleSports",
+    "identifier": "HKQuantityTypeIdentifierDistancePaddleSports",
+    "family": "quantity",
+    "title": "Distance Paddle Sports",
+    "unit": "m",
+    "description": "Distance Paddle Sports measures the distance covered during the recorded activity interval. It describes the volume of that activity. Values are shown in m.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDistanceRowing",
+    "identifier": "HKQuantityTypeIdentifierDistanceRowing",
+    "family": "quantity",
+    "title": "Distance Rowing",
+    "unit": "m",
+    "description": "Distance Rowing measures the distance covered during the recorded activity interval. It describes the volume of that activity. Values are shown in m.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDistanceSkatingSports",
+    "identifier": "HKQuantityTypeIdentifierDistanceSkatingSports",
+    "family": "quantity",
+    "title": "Distance Skating Sports",
+    "unit": "m",
+    "description": "Distance Skating Sports measures the distance covered during the recorded activity interval. It describes the volume of that activity. Values are shown in m.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDistanceSwimming",
+    "identifier": "HKQuantityTypeIdentifierDistanceSwimming",
+    "family": "quantity",
+    "title": "Distance Swimming",
+    "unit": "m",
+    "description": "Distance Swimming measures the distance covered during the recorded activity interval. It describes the volume of that activity. Values are shown in m.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierDistanceWheelchair",
+    "identifier": "HKQuantityTypeIdentifierDistanceWheelchair",
+    "family": "quantity",
+    "title": "Distance Wheelchair",
+    "unit": "m",
+    "description": "Distance Wheelchair measures the distance covered during the recorded activity interval. It describes the volume of that activity. Values are shown in m.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierElectrodermalActivity",
+    "identifier": "HKQuantityTypeIdentifierElectrodermalActivity",
+    "family": "quantity",
+    "title": "Electrodermal Activity",
+    "unit": "S",
+    "description": "Electrodermal Activity is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in S.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierEnvironmentalAudioExposure",
+    "identifier": "HKQuantityTypeIdentifierEnvironmentalAudioExposure",
+    "family": "quantity",
+    "title": "Environmental Audio Exposure",
+    "unit": "dBASPL",
+    "description": "Environmental sound exposure measures sound levels around you. Both level and duration influence the potential effect of noise on hearing. Values are shown in dBASPL.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierEnvironmentalSoundReduction",
+    "identifier": "HKQuantityTypeIdentifierEnvironmentalSoundReduction",
+    "family": "quantity",
+    "title": "Environmental Sound Reduction",
+    "unit": "dBASPL",
+    "description": "Environmental sound reduction measures how much a hearing-protection device reduces surrounding sound. It helps describe the reduction in sound exposure. Values are shown in dBASPL.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierEstimatedWorkoutEffortScore",
+    "identifier": "HKQuantityTypeIdentifierEstimatedWorkoutEffortScore",
+    "family": "quantity",
+    "title": "Estimated Workout Effort Score",
+    "unit": "appleEffortScore",
+    "description": "Estimated workout effort is a device estimate of how demanding a workout was. It is distinct from a rating entered by the wearer. Values are shown in appleEffortScore.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierForcedExpiratoryVolume1",
+    "identifier": "HKQuantityTypeIdentifierForcedExpiratoryVolume1",
+    "family": "quantity",
+    "title": "Forced Expiratory Volume1",
+    "unit": "L",
+    "description": "Forced Expiratory Volume1 is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in L.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierForcedVitalCapacity",
+    "identifier": "HKQuantityTypeIdentifierForcedVitalCapacity",
+    "family": "quantity",
+    "title": "Forced Vital Capacity",
+    "unit": "L",
+    "description": "Forced Vital Capacity is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in L.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierHeadphoneAudioExposure",
+    "identifier": "HKQuantityTypeIdentifierHeadphoneAudioExposure",
+    "family": "quantity",
+    "title": "Headphone Audio Exposure",
+    "unit": "dBASPL",
+    "description": "Headphone audio exposure measures sound levels delivered through headphones. Both volume and listening duration influence hearing exposure. Values are shown in dBASPL.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierHeartRateRecoveryOneMinute",
+    "identifier": "HKQuantityTypeIdentifierHeartRateRecoveryOneMinute",
+    "family": "quantity",
+    "title": "Cardio Recovery",
+    "unit": "count/min",
+    "description": "Cardio Recovery measures the drop in heart rate one minute after exercise. It reflects how quickly the cardiovascular system returns toward rest after activity. Values are shown in count/min.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierHeartRateVariabilityRMSSD",
+    "identifier": "HKQuantityTypeIdentifierHeartRateVariabilityRMSSD",
+    "family": "quantity",
+    "title": "Recovery HRV",
+    "unit": "ms",
+    "description": "Recovery HRV is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in ms.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierInhalerUsage",
+    "identifier": "HKQuantityTypeIdentifierInhalerUsage",
+    "family": "quantity",
+    "title": "Inhaler Usage",
+    "unit": "count",
+    "description": "Inhaler Usage is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in count.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierInsulinDelivery",
+    "identifier": "HKQuantityTypeIdentifierInsulinDelivery",
+    "family": "quantity",
+    "title": "Insulin Delivery",
+    "unit": "IU",
+    "description": "Insulin Delivery is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in IU.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierLeanBodyMass",
+    "identifier": "HKQuantityTypeIdentifierLeanBodyMass",
+    "family": "quantity",
+    "title": "Lean Body Mass",
+    "unit": "kg",
+    "description": "Lean Body Mass is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in kg.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierNikeFuel",
+    "identifier": "HKQuantityTypeIdentifierNikeFuel",
+    "family": "quantity",
+    "title": "Nike Fuel",
+    "unit": "count",
+    "description": "Nike Fuel is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in count.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierNumberOfAlcoholicBeverages",
+    "identifier": "HKQuantityTypeIdentifierNumberOfAlcoholicBeverages",
+    "family": "quantity",
+    "title": "Number Of Alcoholic Beverages",
+    "unit": "count",
+    "description": "Number Of Alcoholic Beverages is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in count.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierNumberOfTimesFallen",
+    "identifier": "HKQuantityTypeIdentifierNumberOfTimesFallen",
+    "family": "quantity",
+    "title": "Number Of Times Fallen",
+    "unit": "count",
+    "description": "Number Of Times Fallen is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in count.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierPaddleSportsSpeed",
+    "identifier": "HKQuantityTypeIdentifierPaddleSportsSpeed",
+    "family": "quantity",
+    "title": "Paddle Sports Speed",
+    "unit": "m/s",
+    "description": "Paddle Sports Speed measures distance traveled per unit of time during the named activity. It describes mobility or exercise pace and can vary with terrain and conditions. Values are shown in m/s.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierPeakExpiratoryFlowRate",
+    "identifier": "HKQuantityTypeIdentifierPeakExpiratoryFlowRate",
+    "family": "quantity",
+    "title": "Peak Expiratory Flow Rate",
+    "unit": "L/min",
+    "description": "Peak Expiratory Flow Rate is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in L/min.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierPeripheralPerfusionIndex",
+    "identifier": "HKQuantityTypeIdentifierPeripheralPerfusionIndex",
+    "family": "quantity",
+    "title": "Peripheral Perfusion Index",
+    "unit": "%",
+    "description": "Peripheral Perfusion Index is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in %.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierPhysicalEffort",
+    "identifier": "HKQuantityTypeIdentifierPhysicalEffort",
+    "family": "quantity",
+    "title": "Physical Effort",
+    "unit": "kcal/(kg*hr)",
+    "description": "Physical effort estimates energy use per kilogram of body weight per hour. It describes the intensity of activity relative to body size. Values are shown in kcal/(kg*hr).",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierPushCount",
+    "identifier": "HKQuantityTypeIdentifierPushCount",
+    "family": "quantity",
+    "title": "Push Count",
+    "unit": "count",
+    "description": "Push Count is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in count.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierRowingSpeed",
+    "identifier": "HKQuantityTypeIdentifierRowingSpeed",
+    "family": "quantity",
+    "title": "Rowing Speed",
+    "unit": "m/s",
+    "description": "Rowing Speed measures distance traveled per unit of time during the named activity. It describes mobility or exercise pace and can vary with terrain and conditions. Values are shown in m/s.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierRunningGroundContactTime",
+    "identifier": "HKQuantityTypeIdentifierRunningGroundContactTime",
+    "family": "quantity",
+    "title": "Running Ground Contact Time",
+    "unit": "ms",
+    "description": "Ground contact time measures how long a foot remains on the ground during a running step. Pace and running technique influence this timing. Values are shown in ms.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierRunningPower",
+    "identifier": "HKQuantityTypeIdentifierRunningPower",
+    "family": "quantity",
+    "title": "Running Power",
+    "unit": "W",
+    "description": "Running power estimates the rate of work while running. Pace, slope and running conditions influence the effort required. Values are shown in W.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierRunningSpeed",
+    "identifier": "HKQuantityTypeIdentifierRunningSpeed",
+    "family": "quantity",
+    "title": "Running Speed",
+    "unit": "m/s",
+    "description": "Running Speed measures distance traveled per unit of time during the named activity. It describes mobility or exercise pace and can vary with terrain and conditions. Values are shown in m/s.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierRunningStrideLength",
+    "identifier": "HKQuantityTypeIdentifierRunningStrideLength",
+    "family": "quantity",
+    "title": "Running Stride Length",
+    "unit": "m",
+    "description": "Running stride length measures the distance covered per running step. Together with cadence, it determines running speed. Values are shown in m.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierRunningVerticalOscillation",
+    "identifier": "HKQuantityTypeIdentifierRunningVerticalOscillation",
+    "family": "quantity",
+    "title": "Running Vertical Oscillation",
+    "unit": "cm",
+    "description": "Vertical oscillation measures the up-and-down movement of the body while running. It describes a component of running motion. Values are shown in cm.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierSixMinuteWalkTestDistance",
+    "identifier": "HKQuantityTypeIdentifierSixMinuteWalkTestDistance",
+    "family": "quantity",
+    "title": "Six Minute Walk Test Distance",
+    "unit": "m",
+    "description": "Six-minute walk distance describes how far you can walk in six minutes. It provides a measure of functional walking capacity. Values are shown in m.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierStairAscentSpeed",
+    "identifier": "HKQuantityTypeIdentifierStairAscentSpeed",
+    "family": "quantity",
+    "title": "Stair Ascent Speed",
+    "unit": "m/s",
+    "description": "Stair Ascent Speed measures distance traveled per unit of time during the named activity. It describes mobility or exercise pace and can vary with terrain and conditions. Values are shown in m/s.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierStairDescentSpeed",
+    "identifier": "HKQuantityTypeIdentifierStairDescentSpeed",
+    "family": "quantity",
+    "title": "Stair Descent Speed",
+    "unit": "m/s",
+    "description": "Stair Descent Speed measures distance traveled per unit of time during the named activity. It describes mobility or exercise pace and can vary with terrain and conditions. Values are shown in m/s.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierSwimmingStrokeCount",
+    "identifier": "HKQuantityTypeIdentifierSwimmingStrokeCount",
+    "family": "quantity",
+    "title": "Swimming Stroke Count",
+    "unit": "count",
+    "description": "Swimming Stroke Count is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in count.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierTimeInDaylight",
+    "identifier": "HKQuantityTypeIdentifierTimeInDaylight",
+    "family": "quantity",
+    "title": "Time In Daylight",
+    "unit": "min",
+    "description": "Time in daylight measures time exposed to outdoor light. Daylight exposure is related to the timing of the sleep-wake cycle. Values are shown in min.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierUVExposure",
+    "identifier": "HKQuantityTypeIdentifierUVExposure",
+    "family": "quantity",
+    "title": "UV Exposure",
+    "unit": "count",
+    "description": "UV Exposure is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in count.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierUnderwaterDepth",
+    "identifier": "HKQuantityTypeIdentifierUnderwaterDepth",
+    "family": "quantity",
+    "title": "Underwater Depth",
+    "unit": "m",
+    "description": "Underwater Depth is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in m.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierWaistCircumference",
+    "identifier": "HKQuantityTypeIdentifierWaistCircumference",
+    "family": "quantity",
+    "title": "Waist Circumference",
+    "unit": "m",
+    "description": "Waist Circumference is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in m.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierWalkingAsymmetryPercentage",
+    "identifier": "HKQuantityTypeIdentifierWalkingAsymmetryPercentage",
+    "family": "quantity",
+    "title": "Walking Asymmetry Percentage",
+    "unit": "%",
+    "description": "Walking asymmetry is the percentage of walking with unequal timing between the two feet. It describes differences between the left and right steps. Values are shown in %.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierWalkingDoubleSupportPercentage",
+    "identifier": "HKQuantityTypeIdentifierWalkingDoubleSupportPercentage",
+    "family": "quantity",
+    "title": "Walking Double Support Percentage",
+    "unit": "%",
+    "description": "Double support is the percentage of a walking cycle with both feet on the ground. It describes gait stability and changes with walking speed. Values are shown in %.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierWalkingStepLength",
+    "identifier": "HKQuantityTypeIdentifierWalkingStepLength",
+    "family": "quantity",
+    "title": "Walking Step Length",
+    "unit": "m",
+    "description": "Walking step length is the distance between successive foot contacts. It contributes to walking speed and can reflect changes in mobility. Values are shown in m.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierWaterTemperature",
+    "identifier": "HKQuantityTypeIdentifierWaterTemperature",
+    "family": "quantity",
+    "title": "Water Temperature",
+    "unit": "degC",
+    "description": "Water Temperature is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in degC.",
+    "browse": true
+  },
+  {
+    "kind": "HKQuantityTypeIdentifierWorkoutEffortScore",
+    "identifier": "HKQuantityTypeIdentifierWorkoutEffortScore",
+    "family": "quantity",
+    "title": "Workout Effort Score",
+    "unit": "appleEffortScore",
+    "description": "Workout effort is the recorded rating of how demanding a workout felt. It helps compare perceived exertion across workouts. Values are shown in appleEffortScore.",
+    "browse": true
+  },
+  {
+    "kind": "active_energy",
+    "identifier": "HKQuantityTypeIdentifierActiveEnergyBurned",
+    "family": "quantity",
+    "title": "Active Energy Burned",
+    "unit": "kcal",
+    "description": "Active Energy Burned is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in kcal.",
+    "browse": true
+  },
+  {
+    "kind": "activity_summary",
+    "identifier": "activity_summary",
+    "family": "record",
+    "title": "Activity Rings",
+    "unit": "",
+    "description": "Activity Rings preserves the health information recorded by the source. Open a history entry to review its time, source and available details.",
+    "browse": true
+  },
+  {
+    "kind": "audiogram",
+    "identifier": "audiogram",
+    "family": "record",
+    "title": "Audiograms",
+    "unit": "",
+    "description": "Audiograms preserves the health information recorded by the source. Open a history entry to review its time, source and available details.",
+    "browse": true
+  },
+  {
+    "kind": "basal_energy",
+    "identifier": "HKQuantityTypeIdentifierBasalEnergyBurned",
+    "family": "quantity",
+    "title": "Basal Energy Burned",
+    "unit": "kcal",
+    "description": "Basal Energy Burned is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in kcal.",
+    "browse": true
+  },
+  {
+    "kind": "blood_glucose",
+    "identifier": "HKQuantityTypeIdentifierBloodGlucose",
+    "family": "quantity",
+    "title": "Blood Glucose",
+    "unit": "mg/dL",
+    "description": "Blood Glucose is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in mg/dL.",
+    "browse": true
+  },
+  {
+    "kind": "blood_pressure_diastolic",
+    "identifier": "HKQuantityTypeIdentifierBloodPressureDiastolic",
+    "family": "quantity",
+    "title": "Diastolic Blood Pressure",
+    "unit": "mmHg",
+    "description": "Diastolic blood pressure is the pressure in the arteries between heartbeats. It describes pressure while the heart relaxes. Values are shown in mmHg.",
+    "browse": true
+  },
+  {
+    "kind": "blood_pressure_systolic",
+    "identifier": "HKQuantityTypeIdentifierBloodPressureSystolic",
+    "family": "quantity",
+    "title": "Systolic Blood Pressure",
+    "unit": "mmHg",
+    "description": "Systolic blood pressure is the pressure in the arteries when the heart contracts. It describes part of the load on the heart and blood vessels. Values are shown in mmHg.",
+    "browse": true
+  },
+  {
+    "kind": "body_fat",
+    "identifier": "HKQuantityTypeIdentifierBodyFatPercentage",
+    "family": "quantity",
+    "title": "Body Fat Percentage",
+    "unit": "%",
+    "description": "Body Fat Percentage is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in %.",
+    "browse": true
+  },
+  {
+    "kind": "body_mass",
+    "identifier": "HKQuantityTypeIdentifierBodyMass",
+    "family": "quantity",
+    "title": "Body Mass",
+    "unit": "kg",
+    "description": "Body Mass is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in kg.",
+    "browse": true
+  },
+  {
+    "kind": "body_temperature",
+    "identifier": "HKQuantityTypeIdentifierBodyTemperature",
+    "family": "quantity",
+    "title": "Body Temperature",
+    "unit": "degC",
+    "description": "Body Temperature is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in degC.",
+    "browse": true
+  },
+  {
+    "kind": "cda_document",
+    "identifier": "cda_document",
+    "family": "record",
+    "title": "Clinical Documents",
+    "unit": "",
+    "description": "Clinical Documents preserves the health information recorded by the source. Open a history entry to review its time, source and available details.",
+    "browse": true
+  },
+  {
+    "kind": "cycling_distance",
+    "identifier": "HKQuantityTypeIdentifierDistanceCycling",
+    "family": "quantity",
+    "title": "Distance Cycling",
+    "unit": "m",
+    "description": "Distance Cycling measures the distance covered during the recorded activity interval. It describes the volume of that activity. Values are shown in m.",
+    "browse": true
+  },
+  {
+    "kind": "electrocardiogram",
+    "identifier": "electrocardiogram",
+    "family": "record",
+    "title": "ECG",
+    "unit": "",
+    "description": "ECG preserves the health information recorded by the source. Open a history entry to review its time, source and available details.",
+    "browse": true
+  },
+  {
+    "kind": "exercise_time",
+    "identifier": "HKQuantityTypeIdentifierAppleExerciseTime",
+    "family": "quantity",
+    "title": "Apple Exercise Time",
+    "unit": "min",
+    "description": "Apple Exercise Time is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in min.",
+    "browse": true
+  },
+  {
+    "kind": "flights_climbed",
+    "identifier": "HKQuantityTypeIdentifierFlightsClimbed",
+    "family": "quantity",
+    "title": "Flights Climbed",
+    "unit": "count",
+    "description": "Flights Climbed is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in count.",
+    "browse": true
+  },
+  {
+    "kind": "heart_rate",
+    "identifier": "HKQuantityTypeIdentifierHeartRate",
+    "family": "quantity",
+    "title": "Heart Rate",
+    "unit": "count/min",
+    "description": "Heart Rate is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in count/min.",
+    "browse": true
+  },
+  {
+    "kind": "heartbeat_series",
+    "identifier": "heartbeat_series",
+    "family": "record",
+    "title": "Beat-to-beat Measurements",
+    "unit": "",
+    "description": "Beat-to-beat Measurements preserves the health information recorded by the source. Open a history entry to review its time, source and available details.",
+    "browse": true
+  },
+  {
+    "kind": "height",
+    "identifier": "HKQuantityTypeIdentifierHeight",
+    "family": "quantity",
+    "title": "Height",
+    "unit": "m",
+    "description": "Height is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in m.",
+    "browse": true
+  },
+  {
+    "kind": "high_heart_rate_event",
+    "identifier": "HKCategoryTypeIdentifierHighHeartRateEvent",
+    "family": "category",
+    "title": "High Heart Rate Event",
+    "unit": "",
+    "description": "High Heart Rate Event records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "hrv_sdnn",
+    "identifier": "HKQuantityTypeIdentifierHeartRateVariabilitySDNN",
+    "family": "quantity",
+    "title": "Heart Rate Variability SDNN",
+    "unit": "ms",
+    "description": "Heart Rate Variability SDNN is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in ms.",
+    "browse": true
+  },
+  {
+    "kind": "irregular_heart_rhythm_event",
+    "identifier": "HKCategoryTypeIdentifierIrregularHeartRhythmEvent",
+    "family": "category",
+    "title": "Irregular Heart Rhythm Event",
+    "unit": "",
+    "description": "Irregular Heart Rhythm Event records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "low_heart_rate_event",
+    "identifier": "HKCategoryTypeIdentifierLowHeartRateEvent",
+    "family": "category",
+    "title": "Low Heart Rate Event",
+    "unit": "",
+    "description": "Low Heart Rate Event records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "medication_dose_event",
+    "identifier": "medication_dose_event",
+    "family": "record",
+    "title": "Medication Doses",
+    "unit": "",
+    "description": "Medication Doses preserves the health information recorded by the source. Open a history entry to review its time, source and available details.",
+    "browse": true
+  },
+  {
+    "kind": "mindful_session",
+    "identifier": "HKCategoryTypeIdentifierMindfulSession",
+    "family": "category",
+    "title": "Mindful Session",
+    "unit": "",
+    "description": "Mindful Session records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "oxygen_saturation",
+    "identifier": "HKQuantityTypeIdentifierOxygenSaturation",
+    "family": "quantity",
+    "title": "Oxygen Saturation",
+    "unit": "%",
+    "description": "Oxygen Saturation is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in %.",
+    "browse": true
+  },
+  {
+    "kind": "respiratory_rate",
+    "identifier": "HKQuantityTypeIdentifierRespiratoryRate",
+    "family": "quantity",
+    "title": "Respiratory Rate",
+    "unit": "count/min",
+    "description": "Respiratory Rate is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in count/min.",
+    "browse": true
+  },
+  {
+    "kind": "resting_heart_rate",
+    "identifier": "HKQuantityTypeIdentifierRestingHeartRate",
+    "family": "quantity",
+    "title": "Resting Heart Rate",
+    "unit": "count/min",
+    "description": "Resting Heart Rate is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in count/min.",
+    "browse": true
+  },
+  {
+    "kind": "sleep",
+    "identifier": "HKCategoryTypeIdentifierSleepAnalysis",
+    "family": "category",
+    "title": "Sleep Analysis",
+    "unit": "",
+    "description": "Sleep Analysis records a health event or a source-assigned category, rather than a continuous measurement. Review its date, duration and recorded status in the history.",
+    "browse": true
+  },
+  {
+    "kind": "stand_time",
+    "identifier": "HKQuantityTypeIdentifierAppleStandTime",
+    "family": "quantity",
+    "title": "Apple Stand Time",
+    "unit": "min",
+    "description": "Apple Stand Time is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in min.",
+    "browse": true
+  },
+  {
+    "kind": "state_of_mind",
+    "identifier": "state_of_mind",
+    "family": "record",
+    "title": "State of Mind",
+    "unit": "",
+    "description": "State of Mind preserves the health information recorded by the source. Open a history entry to review its time, source and available details.",
+    "browse": true
+  },
+  {
+    "kind": "steps",
+    "identifier": "HKQuantityTypeIdentifierStepCount",
+    "family": "quantity",
+    "title": "Step Count",
+    "unit": "count",
+    "description": "Step Count is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in count.",
+    "browse": true
+  },
+  {
+    "kind": "user_annotated_medications",
+    "identifier": "user_annotated_medications",
+    "family": "record",
+    "title": "Medications",
+    "unit": "",
+    "description": "Medications preserves the health information recorded by the source. Open a history entry to review its time, source and available details.",
+    "browse": true
+  },
+  {
+    "kind": "vision_prescription",
+    "identifier": "vision_prescription",
+    "family": "record",
+    "title": "Vision Prescriptions",
+    "unit": "",
+    "description": "Vision Prescriptions preserves the health information recorded by the source. Open a history entry to review its time, source and available details.",
+    "browse": true
+  },
+  {
+    "kind": "vo2_max",
+    "identifier": "HKQuantityTypeIdentifierVO2Max",
+    "family": "quantity",
+    "title": "VO2 Max",
+    "unit": "ml/kg*min",
+    "description": "VO2 Max is the corresponding measurement recorded by the source in Apple Health. Compare measurements made under similar conditions and review their timestamps and source labels. Values are shown in ml/kg*min.",
+    "browse": true
+  },
+  {
+    "kind": "walking_distance",
+    "identifier": "HKQuantityTypeIdentifierDistanceWalkingRunning",
+    "family": "quantity",
+    "title": "Distance Walking Running",
+    "unit": "m",
+    "description": "Distance Walking Running measures the distance covered during the recorded activity interval. It describes the volume of that activity. Values are shown in m.",
+    "browse": true
+  },
+  {
+    "kind": "walking_heart_rate",
+    "identifier": "HKQuantityTypeIdentifierWalkingHeartRateAverage",
+    "family": "quantity",
+    "title": "Walking Heart Rate",
+    "unit": "count/min",
+    "description": "Walking heart rate is the average heart rate measured during walking. Pace, terrain and fitness affect the workload on the cardiovascular system. Values are shown in count/min.",
+    "browse": true
+  },
+  {
+    "kind": "walking_speed",
+    "identifier": "HKQuantityTypeIdentifierWalkingSpeed",
+    "family": "quantity",
+    "title": "Walking Speed",
+    "unit": "m/s",
+    "description": "Walking Speed measures distance traveled per unit of time during the named activity. It describes mobility or exercise pace and can vary with terrain and conditions. Values are shown in m/s.",
+    "browse": true
+  },
+  {
+    "kind": "workout",
+    "identifier": "workout",
+    "family": "record",
+    "title": "Workouts",
+    "unit": "",
+    "description": "Workouts preserves the health information recorded by the source. Open a history entry to review its time, source and available details.",
+    "browse": true
+  },
+  {
+    "kind": "workout_route",
+    "identifier": "workout_route",
+    "family": "record",
+    "title": "Workout Routes",
+    "unit": "",
+    "description": "Workout Routes preserves the health information recorded by the source. Open a history entry to review its time, source and available details.",
+    "browse": true
+  }
+]

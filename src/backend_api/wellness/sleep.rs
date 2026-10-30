@@ -53,6 +53,7 @@ pub fn summarize(
     end: i64,
     timezone: chrono_tz::Tz,
 ) -> Result<Value, AppError> {
+    let records = crate::health_connect::sleep_intervals(records)?;
     let mut sources: BTreeMap<String, Vec<(StoredHealthRecord, i64)>> = BTreeMap::new();
     for record in records {
         if chrono::DateTime::from_timestamp(record.start_at, 0).is_none()
@@ -66,7 +67,7 @@ pub fn summarize(
         let raw: Value = serde_json::from_str(&record.payload_json)?;
         let Some(category) = raw["payload"]["category"]
             .as_i64()
-            .filter(|c| (0..=5).contains(c))
+            .filter(|c| (-1..=5).contains(c))
         else {
             continue;
         };
@@ -149,11 +150,13 @@ impl Database {
         request: SleepRequest,
     ) -> Result<Value, AppError> {
         if request.end_at <= request.start_at
-            || i128::from(request.end_at) - i128::from(request.start_at) > 90 * 86400
+            || i128::from(request.end_at) - i128::from(request.start_at) > 367 * 86400
             || chrono::DateTime::from_timestamp(request.start_at, 0).is_none()
             || chrono::DateTime::from_timestamp(request.end_at, 0).is_none()
         {
-            return Err(AppError::Invalid("Select a sleep range of at most 90 days"));
+            return Err(AppError::Invalid(
+                "Select a sleep range of at most 367 days",
+            ));
         }
         let timezone = request
             .timezone

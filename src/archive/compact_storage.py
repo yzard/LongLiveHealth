@@ -30,7 +30,7 @@ def compact_locked(root, database):
     source = sqlite3.connect(f'file:{database}?mode=rw', uri=True)
     source.execute(queries.COPY_CACHE)
     source.row_factory = sqlite3.Row
-    check_export.require(source.execute('PRAGMA user_version').fetchone()[0] == 7, 'Only current schema 7 can be compacted')
+    check_export.require(source.execute('PRAGMA user_version').fetchone()[0] == 8, 'Only current schema 8 can be compacted')
     check_export.require(source.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()[0] == 0, 'Database checkpoint is busy')
     canonical = sqlite3.connect(':memory:')
     canonical.executescript(SCHEMA.read_text())

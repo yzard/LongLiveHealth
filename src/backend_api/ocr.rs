@@ -8,6 +8,8 @@ use std::time::Duration;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExtractionResponse {
+    pub report_title: Option<String>,
+    pub source_name: Option<String>,
     pub model: String,
     pub engine: String,
     pub prompt_version: String,
@@ -67,4 +69,52 @@ pub async fn probe(config: &OcrConfig) -> Result<(), AppError> {
         return Err(AppError::ProviderUnavailable);
     }
     Ok(())
+}
+
+/// Validate the model's original rows, including rows rejected by typed decoding.
+/// Never substitute a report date or manufacture a missing result.
+pub fn validation_issues(content: &str, page: i64) -> Vec<serde_json::Value> {
+    let text = content.trim();
+    let text = text
+        .strip_prefix("```json")
+        .or_else(|| text.strip_prefix("```"))
+        .and_then(|text| text.trim().strip_suffix("```"))
+        .unwrap_or(text)
+        .trim();
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Vec::new();
+    };
+    let Some(items) = value["observations"].as_array() else {
+        return Vec::new();
+    };
+    let mut issues = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        let name = item["raw_name"].as_str().unwrap_or("").trim();
+        if crate::laboratory::is_administrative_name(name) {
+            continue;
+        }
+        for (field, key) in [
+            ("name", "raw_name"),
+            ("collection_date", "sampled_at"),
+            ("value", "raw_result"),
+        ] {
+            let text = item[key]
+                .as_str()
+                .map(str::trim)
+                .filter(|text| !text.is_empty());
+            let reason = match text {
+                None => Some("missing"),
+                Some(date)
+                    if field == "collection_date" && crate::reports::parse_time(date).is_err() =>
+                {
+                    Some("invalid_date")
+                }
+                _ => None,
+            };
+            if let Some(reason) = reason {
+                issues.push(json!({"page":page,"item_index":index+1,"item_name":name,"field":field,"reason":reason}));
+            }
+        }
+    }
+    issues
 }

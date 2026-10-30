@@ -32,7 +32,7 @@ pub async fn mock() -> (String, tokio::task::JoinHandle<()>) {
                     observation.metric_id = None;
                     observation.source.page = request["page"].as_i64().unwrap();
                     let page = json!({"observations":[observation],"warnings":[]});
-                    axum::Json(json!({"model":"qwen3.8-27b-ninfer-nvfp4","engine":"ninfer","prompt_version":"laboratory-page-v2","content":page.to_string(),"raw_response_body":"complete native output","observations":page["observations"],"warnings":[]}))
+                    axum::Json(json!({"model":"qwen3.8-27b-ninfer-nvfp4","engine":"ninfer","prompt_version":"laboratory-page-v3","report_title":"Comprehensive laboratory report","source_name":"Function Health","content":page.to_string(),"raw_response_body":"complete native output","observations":page["observations"],"warnings":[]}))
                 })),
         )
         .await

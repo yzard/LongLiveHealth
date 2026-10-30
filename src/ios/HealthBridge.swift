@@ -76,95 +76,130 @@ final class HealthBridge {
         do {
             if requestAccess {
                 try await store.requestAuthorization(toShare: [], read: Self.bulkReadTypes(supportsClinical: store.supportsHealthRecords()))
-                try archive.save(true, name: "health-enabled.json")
+                try await archive.saveAsync(true, name: "health-enabled.json")
             }
             if requestSelectedAccess {
                 for type in Self.selectedReadTypes {
                     try await store.requestPerObjectReadAuthorization(for: type, predicate: nil)
                 }
             }
-            let installation = try archive.load(UUID.self, name: "installation.json") ?? UUID()
-            try archive.save(installation, name: "installation.json")
+            let installation = try await archive.loadAsync(UUID.self, name: "installation.json") ?? UUID()
+            try await archive.saveAsync(installation, name: "installation.json")
             let connection = try await client.post("health/connect", body: .object(["platform": .string("apple_health"), "installation_id": .string(installation.uuidString)]))
             let connectionID = connection["connection_id"].stringValue
             guard !connectionID.isEmpty else { throw APIError.invalidResponse }
             totalRecords = try HealthSyncProgress.totalRecords(in: await client.post("health/coverage", body: .object([:])))
-            var failedTypes: [String] = []
+            var readFailures: [String: String] = [:]
+            let selectedDefinitions = definitions.filter {
+                requestSelectedAccess || (!$0.type.requiresPerObjectAuthorization() && $0.kind != "medication_dose_event")
+            }
+            let snapshotKinds = HealthSnapshots.kinds(includeSelectedRecords: requestSelectedAccess)
+            let pendingBlockName = "pending-health-block.json"
+            if let pending = try await archive.loadAsync(HealthSyncBlock.self, name: pendingBlockName) {
+                try await send(pending.request, client: client)
+                try await pending.commit(to: archive)
+                try archive.remove(name: pendingBlockName)
+            }
+            // Drain checkpoints written by the previously installed app before making mixed blocks.
             for definition in definitions {
-                // These records are read only after the user explicitly selects them.
-                if !requestSelectedAccess, definition.type.requiresPerObjectAuthorization() || definition.kind == "medication_dose_event" { continue }
-                if definition.type is HKClinicalType, !store.supportsHealthRecords() {
-                    _ = try await client.post("health/sync", body: .object(["connection_id": .string(connectionID), "batch_id": .string(UUID().uuidString), "record_type": .string(definition.kind), "coverage_status": .string("unsupported"), "records": .array([])]))
-                    continue
-                }
-                try Task.checkCancellation()
-                status = HealthSyncProgress.status(recordType: definition.kind, total: totalRecords)
-                activity = HealthSyncActivity()
-                let pendingName = "pending-\(definition.kind).json"
-                let anchorName = "anchor-\(definition.kind).json"
-                if let pending = try archive.load(SyncCheckpoint.self, name: pendingName) {
-                    for request in pending.requests {
-                        try Task.checkCancellation()
-                        try await send(request, client: client)
-                        status = HealthSyncProgress.status(recordType: definition.kind, total: totalRecords)
-                    }
-                    try archive.save(pending.nextAnchor, name: anchorName)
-                    try archive.remove(name: pendingName)
-                }
-                let encoded = try archive.load(Data.self, name: anchorName)
-                let anchor = try encoded.flatMap { try NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: $0) }
-                // Read failures remain type-specific; upload failures pause the entire sync.
-                var readFailure: (any Error)?
-                let read: @MainActor @Sendable (HKQueryAnchor?) async throws -> Page? = { [self] cursor in
-                    do {
-                        try Task.checkCancellation()
-                        activity?.readingSince = Date()
-                        defer { activity?.readingSince = nil }
-                        let page = try await query(definition, anchor: cursor)
-                        return page
-                    } catch is CancellationError { throw CancellationError() }
-                    catch {
-                        try Task.checkCancellation()
-                        if Self.isProtectedDataError(error) { throw error }
-                        readFailure = error
-                        return nil
-                    }
-                }
-                let first = try await read(anchor)
-                try await HealthSyncPipeline.run(first: first, next: { page in
-                    guard page.count == HealthSyncBatch.maximumRecords else { return nil }
-                    let cursor = try NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: page.anchor)
-                    return try await read(cursor)
-                }, consume: { [self] page in
-                    let requests = try HealthSyncBatch.requests(connectionID: connectionID, recordType: definition.kind,
-                        coverageStatus: page.count == 0 ? "no_visible_samples" : "observed", records: page.records, maximumRecords: HealthSyncBatch.maximumRecords, maximumBytes: 40 * 1024 * 1024)
-                    // Only the uploading page is durable; prefetched data can be read again.
-                    // Never advance the committed anchor before every split request succeeds.
-                    try archive.save(SyncCheckpoint(requests: requests, nextAnchor: page.anchor), name: pendingName)
-                    for request in requests {
-                        try Task.checkCancellation()
-                        try await send(request, client: client)
-                        status = HealthSyncProgress.status(recordType: definition.kind, total: totalRecords)
-                    }
-                    try archive.save(page.anchor, name: anchorName)
-                    try archive.remove(name: pendingName)
-                })
-                if readFailure != nil {
-                    _ = try await client.post("health/sync", body: .object(["connection_id": .string(connectionID), "batch_id": .string(UUID().uuidString), "record_type": .string(definition.kind), "coverage_status": .string("error"), "records": .array([])]))
-                    failedTypes.append(definition.kind)
+                let name = "pending-\(definition.kind).json"
+                if let pending = try await archive.loadAsync(SyncCheckpoint.self, name: name) {
+                    for request in pending.requests { try await send(request, client: client) }
+                    try await archive.saveAsync(pending.nextAnchor, name: "anchor-\(definition.kind).json")
+                    try archive.remove(name: name)
                 }
             }
+            for kind in HealthSnapshots.kinds(includeSelectedRecords: true) {
+                let name = "pending-snapshot-\(kind).json"
+                if let pending = try await archive.loadAsync(HealthSnapshots.Checkpoint.self, name: name) {
+                    for request in pending.requests { try await send(request, client: client) }
+                    try await archive.saveAsync(pending.records, name: "snapshot-\(kind).json")
+                    try archive.remove(name: name)
+                }
+            }
+            var builder = HealthSyncBatch(connectionID: connectionID)
+            var ready: [HealthSyncBlock] = []
+            var definitionIndex = 0
+            var snapshotIndex = 0
+            var cursor: HKQueryAnchor?
+            var cursorLoaded = false
+            activity = HealthSyncActivity()
+            let nextBlock: @MainActor @Sendable () async throws -> HealthSyncBlock? = { [self] in
+                while ready.isEmpty {
+                    try Task.checkCancellation()
+                    if definitionIndex < selectedDefinitions.count {
+                        let definition = selectedDefinitions[definitionIndex]
+                        let kind = definition.kind
+                        status = HealthSyncProgress.status(recordType: kind, total: totalRecords)
+                        if definition.type is HKClinicalType, !store.supportsHealthRecords() {
+                            ready += try await builder.append(recordType: kind, status: "unsupported", records: [], writes: [:])
+                            definitionIndex += 1; continue
+                        }
+                        let anchorName = "anchor-\(kind).json"
+                        if !cursorLoaded {
+                            let encoded = try await archive.loadAsync(Data.self, name: anchorName)
+                            cursor = try encoded.flatMap { try NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: $0) }
+                            cursorLoaded = true
+                        }
+                        let page: Page
+                        let limit = Self.queryLimit(kind: kind)
+                        do {
+                            activity?.readingSince = Date()
+                            defer { activity?.readingSince = nil }
+                            page = try await query(definition, anchor: cursor, limit: limit)
+                        } catch {
+                            try Task.checkCancellation()
+                            if Self.isProtectedDataError(error) { throw error }
+                            let reason = Self.readFailureDescription(error)
+                            readFailures[kind] = reason
+                            try await archive.saveAsync(readFailures, name: "health-read-failures.json")
+                            ready += try await builder.append(recordType: kind, status: "error", records: [], writes: [:])
+                            definitionIndex += 1; cursor = nil; cursorLoaded = false
+                            continue
+                        }
+                        cursor = try NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: page.anchor)
+                        ready += try await builder.append(recordType: kind, status: page.count == 0 ? "no_visible_samples" : "observed",
+                            records: page.records, writes: [anchorName: .string(page.anchor.base64EncodedString())])
+                        if page.count < limit { definitionIndex += 1; cursor = nil; cursorLoaded = false }
+                    } else if snapshotIndex < snapshotKinds.count {
+                        let kind = snapshotKinds[snapshotIndex]
+                        status = HealthSyncProgress.status(recordType: kind, total: totalRecords)
+                        do {
+                            activity?.readingSince = Date()
+                            defer { activity?.readingSince = nil }
+                            let changes = try await HealthSnapshots.changes(kind, store: store, archive: archive, installationID: installation)
+                            ready += try await builder.append(recordType: kind, status: changes.status, records: changes.records, writes: changes.writes)
+                        } catch {
+                            try Task.checkCancellation()
+                            if Self.isProtectedDataError(error) { throw error }
+                            let reason = Self.readFailureDescription(error)
+                            readFailures[kind] = reason
+                            try await archive.saveAsync(readFailures, name: "health-read-failures.json")
+                            ready += try await builder.append(recordType: kind, status: "error", records: [], writes: [:])
+                        }
+                        snapshotIndex += 1
+                    } else {
+                        return builder.finish()
+                    }
+                }
+                return ready.removeFirst()
+            }
+            let first = try await nextBlock()
+            try await HealthSyncPipeline.run(first: first, prefetch: { block in
+                !block.request["records"].arrayValue.contains { $0["payload"]["series"] != .null }
+            }, next: { _ in try await nextBlock() }, consume: { [self] block in
+                try await archive.saveAsync(block, name: pendingBlockName)
+                try await send(block.request, client: client)
+                try await block.commit(to: archive)
+                try archive.remove(name: pendingBlockName)
+            })
             activity = nil
-            status = "Syncing activity summaries and other Health records"
-            failedTypes += try await HealthSnapshots.synchronize(store: store, client: client, archive: archive, connectionID: connectionID, installationID: installation, includeSelectedRecords: requestSelectedAccess) { kind, total in
-                if let total { totalRecords = total }
-                status = HealthSyncProgress.status(recordType: kind, total: totalRecords)
-            }
             status = "Loading sync coverage"
             let summary = try await client.post("health/coverage", body: .object([:]))
             coverage = summary["coverage"].arrayValue
             totalRecords = try HealthSyncProgress.totalRecords(in: summary)
-            status = failedTypes.isEmpty ? "Sync complete · \(totalRecords?.formatted() ?? ""). Read permission remains private to Health." : "Some types could not be read: \(failedTypes.map(HealthSyncProgress.name).joined(separator: ", ")). Retry when available."
+            try await archive.saveAsync(readFailures, name: "health-read-failures.json")
+            status = readFailures.isEmpty ? "Sync complete · \(totalRecords?.formatted() ?? ""). Read permission remains private to Health." : "Some types could not be read: \(readFailures.sorted { $0.key < $1.key }.map { "\(HealthSyncProgress.name($0.key)): \($0.value)" }.joined(separator: "; ")). Tap Sync Now to retry."
         } catch {
             status = "Sync paused; saved batches retained. Tap Sync Now to resume."
             throw error
@@ -178,21 +213,27 @@ final class HealthBridge {
         activity?.confirmSending()
     }
 
+    nonisolated static func queryLimit(kind: String) -> Int {
+        ["workout_route", "electrocardiogram", "heartbeat_series"].contains(kind) ? 1 : 1_000
+    }
+
+    nonisolated static func readFailureDescription(_ error: Error) -> String {
+        let value = error as NSError
+        return "\(error.localizedDescription) [\(value.domain):\(value.code)]"
+    }
+
     nonisolated static func isProtectedDataError(_ error: Error) -> Bool {
         let value = error as NSError
         return value.domain == HKErrorDomain && value.code == HKError.Code.errorDatabaseInaccessible.rawValue
     }
 
-    private func query(_ definition: Definition, anchor: HKQueryAnchor?) async throws -> Page {
-        let descriptor = HKAnchoredObjectQueryDescriptor(predicates: [.sample(type: definition.type, predicate: nil)], anchor: anchor, limit: HealthSyncBatch.maximumRecords)
+    private func query(_ definition: Definition, anchor: HKQueryAnchor?, limit: Int) async throws -> Page {
+        let descriptor = HKAnchoredObjectQueryDescriptor(predicates: [.sample(type: definition.type, predicate: nil)], anchor: anchor, limit: limit)
         let result = try await descriptor.result(for: store)
         var records: [JSONValue] = []
         for sample in result.addedSamples {
             try Task.checkCancellation()
-            var record = try Self.encode(sample, kind: definition.kind, unit: definition.unit)
-            if let series = try await HealthSeriesReader.read(sample, store: store) { record["payload"]["series"] = .array(series) }
-            guard try JSONEncoder().encode(record["payload"]).count <= 32 * 1024 * 1024 else { throw APIError.status(413, "A Health record exceeds the archive limit") }
-            records.append(record)
+            records.append(try await Self.prepareRecord(sample, kind: definition.kind, unit: definition.unit, store: store))
         }
         records += result.deletedObjects.map { deletion in
             .object(["record_id": .string(deletion.uuid.uuidString), "source_id": .string("*"), "record_type": .string(definition.kind),
@@ -200,6 +241,13 @@ final class HealthBridge {
         }
         let anchor = try NSKeyedArchiver.archivedData(withRootObject: result.newAnchor, requiringSecureCoding: true)
         return Page(records: records, anchor: anchor, count: result.addedSamples.count + result.deletedObjects.count)
+    }
+
+    @concurrent private static func prepareRecord(_ sample: HKSample, kind: String, unit: String?, store: HKHealthStore) async throws -> JSONValue {
+        try Task.checkCancellation()
+        var record = try encode(sample, kind: kind, unit: unit)
+        if let series = try await HealthSeriesReader.read(sample, store: store) { record["payload"]["series"] = .array(series) }
+        return record
     }
 
     nonisolated static func encode(_ sample: HKSample, kind: String, unit: String?) throws -> JSONValue {

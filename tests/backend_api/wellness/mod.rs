@@ -2918,3 +2918,262 @@ fn daily_chart_units_do_not_depend_on_today_or_source_selection() {
         }
     }
 }
+
+#[tokio::test]
+async fn every_daily_kind_survives_sql_projection_into_chart_ranges() {
+    use longlivehealth::health::{ConnectionRequest, HealthRecordInput, SyncRequest};
+    let (_directory, state) = crate::fixture().await;
+    let user = crate::add_user(&state, "daily-query-matrix").await;
+    let connection = state
+        .database
+        .create_connection(
+            &user.user_id,
+            ConnectionRequest {
+                platform: "apple_health".into(),
+                installation_id: uuid::Uuid::new_v4().to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    for kind in longlivehealth::wellness::KINDS {
+        let unit = longlivehealth::health::daily_unit(kind).unwrap();
+        state
+            .database
+            .sync_health(
+                &user.user_id,
+                SyncRequest {
+                    connection_id: connection.connection_id.clone(),
+                    batch_id: uuid::Uuid::new_v4().to_string(),
+                    record_type: (*kind).into(),
+                    coverage_status: "observed".into(),
+                    records: vec![HealthRecordInput {
+                        record_id: (*kind).into(),
+                        source_id: "watch".into(),
+                        record_type: (*kind).into(),
+                        start_at: 3600,
+                        end_at: 7200,
+                        version: 1,
+                        deleted: false,
+                        payload: json!({"value":100,"unit":unit,"category":3}),
+                    }],
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let result = state
+        .database
+        .compute_wellness_day(
+            &user.user_id,
+            DayRequest {
+                date: "1970-01-02".into(),
+                timezone: "UTC".into(),
+                source_priority: BTreeMap::new(),
+            },
+        )
+        .await
+        .unwrap();
+    for metric in result["metrics"].as_array().unwrap() {
+        assert!(
+            !metric["chart_ranges"]["D"].as_array().unwrap().is_empty(),
+            "{}",
+            metric["record_type"]
+        );
+        assert!(metric["chart_ranges"]["D"][0]["min"].as_f64().unwrap() > 0.0);
+    }
+}
+
+#[tokio::test]
+async fn full_sleep_history_keeps_old_devices_and_excludes_in_bed_only_samples() {
+    use longlivehealth::health::{ConnectionRequest, HealthRecordInput, SyncRequest};
+    let (_directory, state) = crate::fixture().await;
+    let user = crate::add_user(&state, "full-sleep").await;
+    let other = crate::add_user(&state, "other-sleep").await;
+    let connection = state
+        .database
+        .create_connection(
+            &user.user_id,
+            ConnectionRequest {
+                platform: "apple_health".into(),
+                installation_id: uuid::Uuid::new_v4().to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let mut records = Vec::new();
+    for (id, date, category) in [
+        ("old-watch", "2020-01-01", 1),
+        ("new-watch", "2026-10-21", 3),
+        ("in-bed", "2019-01-01", 0),
+    ] {
+        let at = longlivehealth::reports::parse_time(date).unwrap();
+        records.push(HealthRecordInput {
+            record_id: id.into(),
+            source_id: id.into(),
+            record_type: "sleep".into(),
+            start_at: at,
+            end_at: at + 3600,
+            version: 1,
+            deleted: false,
+            payload: json!({"category":category}),
+        });
+    }
+    state
+        .database
+        .sync_health(
+            &user.user_id,
+            SyncRequest {
+                connection_id: connection.connection_id,
+                batch_id: uuid::Uuid::new_v4().to_string(),
+                record_type: "sleep".into(),
+                coverage_status: "observed".into(),
+                records,
+            },
+        )
+        .await
+        .unwrap();
+    let request = || longlivehealth::wellness::history::HistoryRequest {
+        dates: None,
+        record_type: "sleep".into(),
+        timezone: "UTC".into(),
+    };
+    let result = state
+        .database
+        .daily_history(&user.user_id, request())
+        .await
+        .unwrap();
+    assert_eq!(result["chart_ranges"]["D"].as_array().unwrap().len(), 2);
+    let mut selected = request();
+    selected.dates = Some(["2020-01-01".into(), "2020-12-31".into()]);
+    let old = state
+        .database
+        .daily_history(&user.user_id, selected)
+        .await
+        .unwrap();
+    assert_eq!(old["chart_ranges"]["D"].as_array().unwrap().len(), 1);
+    assert_eq!(old["first_record_at"], result["first_record_at"]);
+
+    assert!(
+        result["history"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["date"] == "2020-01-01" && d["alternatives"][0]["value"] == 3600.0)
+    );
+    assert!(
+        state
+            .database
+            .daily_history(&other.user_id, request())
+            .await
+            .unwrap()["chart_ranges"]["D"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn period_measurements_stream_all_samples_and_paginate_history() {
+    use longlivehealth::wellness::measurement_chart::{HistoryRequest, Request};
+    let (_directory, state) = crate::fixture().await;
+    let user = crate::add_user(&state, "period-history").await;
+    let other = crate::add_user(&state, "other-history").await;
+    let pool = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}",
+        state.config.data_dir.join("database.sqlite").display()
+    ))
+    .await
+    .unwrap();
+    let start = 1577836800i64;
+    let count = 200001i64;
+    sqlx::query("WITH RECURSIVE samples(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM samples WHERE i+1<?) INSERT INTO health_records(user_id,platform,source_id,record_id,record_type,start_at,end_at,version,deleted,payload_json) SELECT ?, 'apple_health','watch', CAST(i AS TEXT),'heart_rate',?+i,?+i,1,0,json_object('payload',json_object('value',60+i%100,'unit','count/min')) FROM samples")
+        .bind(count).bind(&user.user_id).bind(start).bind(start).execute(&pool).await.unwrap();
+    for period in ["H", "D", "W", "M", "6M", "Y"] {
+        let result = state
+            .database
+            .measurement_chart(
+                &user.user_id,
+                Request {
+                    record_type: "heart_rate".into(),
+                    timezone: "America/New_York".into(),
+                    period: period.into(),
+                    start_at: start,
+                    end_at: start + count,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["samples_read"], count);
+        assert_eq!(result["valid_samples"], count);
+        assert_eq!(result["complete"], true);
+        assert_eq!(
+            result["chart_ranges"][period]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["count"].as_i64().unwrap())
+                .sum::<i64>(),
+            count
+        );
+    }
+    let mut offset = 0;
+    let mut revision = None;
+    let mut ids = std::collections::BTreeSet::new();
+    loop {
+        let result = state
+            .database
+            .measurement_history(
+                &user.user_id,
+                HistoryRequest {
+                    record_type: "heart_rate".into(),
+                    start_at: start,
+                    end_at: start + 1001,
+                    offset,
+                    expected_revision: revision,
+                },
+            )
+            .await
+            .unwrap();
+        revision = result["data_revision"].as_i64();
+        for p in result["points"].as_array().unwrap() {
+            assert!(ids.insert(p["record_id"].as_str().unwrap().to_string()));
+        }
+        match result["next_offset"].as_u64() {
+            Some(n) => offset = n as u32,
+            None => break,
+        }
+    }
+    assert_eq!(ids.len(), 1001);
+    let isolated = state
+        .database
+        .measurement_history(
+            &other.user_id,
+            HistoryRequest {
+                record_type: "heart_rate".into(),
+                start_at: start,
+                end_at: start + 1001,
+                offset: 0,
+                expected_revision: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(isolated["points"].as_array().unwrap().is_empty());
+    assert!(
+        state
+            .database
+            .measurement_history(
+                &user.user_id,
+                HistoryRequest {
+                    record_type: "heart_rate".into(),
+                    start_at: start,
+                    end_at: start + 1001,
+                    offset: 0,
+                    expected_revision: Some(-1)
+                }
+            )
+            .await
+            .is_err()
+    );
+    pool.close().await;
+}

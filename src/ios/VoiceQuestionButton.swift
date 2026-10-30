@@ -13,7 +13,7 @@ struct VoiceQuestionButton: View {
                 if capture.recording { capture.transcribe() } else { Task { await capture.start() } }
             }.disabled(capture.processing)
             if capture.processing { ProgressView("Transcribing on this device") }
-            Text("Up to 60 seconds. Review the text before submitting. Audio is temporary and is not uploaded.").font(.caption)
+            InfoHelp(title: "Voice input", message: "Up to 60 seconds. Review the text before submitting. Audio is temporary and is not uploaded.")
             if let failure = capture.failure { Text(failure).font(.caption).foregroundStyle(.secondary) }
         }.onChange(of: capture.transcript) { _, value in if !value.isEmpty { question = value } }
             .onChange(of: scenePhase) { _, phase in if phase == .background { capture.cancel() } }

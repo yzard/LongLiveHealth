@@ -15,6 +15,8 @@ use tokio_util::sync::CancellationToken;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ExtractedPage {
+    report_title: Option<String>,
+    source_name: Option<String>,
     observations: Vec<ObservationPayload>,
     warnings: Vec<String>,
 }
@@ -102,6 +104,9 @@ pub async fn extract_next(state: &AppState) -> Result<bool, AppError> {
         result = extract(state, &job) => result,
         renewal_result = renewal => { renewal_result?; return Err(AppError::Internal); }
     };
+    if let Err(error) = &result {
+        tracing::warn!(job_id=%job.job_id,code=%error,"document extraction failed");
+    }
     let code = result.as_ref().err().map(|_| "extraction_failed");
     state.database.finish_job(&job, now()?, code).await?;
     Ok(true)
@@ -113,10 +118,6 @@ async fn extract(state: &AppState, job: &ClaimedJob) -> Result<(), AppError> {
         .report_summary(&job.user_id, &job.file_id)
         .await?;
     let file = state.database.file(&job.user_id, &job.file_id).await?;
-    let source = state
-        .config
-        .data_dir
-        .join(file.processing_path.as_ref().unwrap_or(&file.relative_path));
     let scratch = state.database.temporary_files.reserve(
         state
             .config
@@ -125,10 +126,23 @@ async fn extract(state: &AppState, job: &ClaimedJob) -> Result<(), AppError> {
             .join(&job.user_id)
             .join(format!("{}-{}", job.job_id, uuid::Uuid::new_v4())),
     )?;
+    let source = scratch.path().join("processing-original");
     {
         let _guard = state.file_mutation.lock().await;
-        state.database.file(&job.user_id, &job.file_id).await?;
+        let current = state.database.file(&job.user_id, &job.file_id).await?;
         tokio::fs::create_dir_all(scratch.path()).await?;
+        // Pin the inode for the whole task. Naming or user edits may relocate the
+        // archive and cleanup may unlink its old path while subsequent pages render.
+        tokio::fs::hard_link(
+            state.config.data_dir.join(
+                current
+                    .processing_path
+                    .as_ref()
+                    .unwrap_or(&current.relative_path),
+            ),
+            &source,
+        )
+        .await?;
     }
     let run_id = uuid::Uuid::new_v4().to_string();
     let mut failed = false;
@@ -197,15 +211,24 @@ async fn extract(state: &AppState, job: &ClaimedJob) -> Result<(), AppError> {
             evidence.text_layer.as_ref(),
         )
         .await;
+        let mut identity = (None, None);
         let (candidates, content, model, status) = match page_output {
             Ok((page_output, content, model)) => {
+                identity = (page_output.report_title, page_output.source_name);
                 let mut valid = Vec::new();
-                let mut page_failed = evidence.error_code.is_some();
+                let incomplete = !crate::ocr::validation_issues(&content, page).is_empty();
+                let mut page_failed = evidence.error_code.is_some() || incomplete;
+                failed |= incomplete;
                 if page_output.observations.len() > 2000 {
                     return Err(AppError::TooLarge);
                 }
                 for mut observation in page_output.observations {
+                    if crate::laboratory::is_administrative_name(&observation.raw_name) {
+                        continue;
+                    }
                     observation.source.page = page;
+                    // Model-supplied IDs are not trusted. The shared deterministic catalog
+                    // derives resolved_metric_id while retaining the printed payload.
                     observation.metric_id = None;
                     if observation.validate(file.page_count).is_err() {
                         page_failed = true;
@@ -319,6 +342,10 @@ async fn extract(state: &AppState, job: &ClaimedJob) -> Result<(), AppError> {
             .execute(&mut *transaction)
             .await?;
         transaction.commit().await?;
+        state
+            .database
+            .autofill_report_identity(&job.user_id, &job.file_id, identity.0, identity.1)
+            .await?;
     }
     if failed {
         return Err(AppError::Invalid(
@@ -378,6 +405,8 @@ async fn extract_page(
     let result = output?;
     Ok((
         ExtractedPage {
+            report_title: result.report_title,
+            source_name: result.source_name,
             observations: result.observations,
             warnings: result.warnings,
         },

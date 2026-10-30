@@ -18,6 +18,14 @@ use serde_json::json;
 pub fn router(upload_limit: usize) -> Router<AppState> {
     Router::new()
         .route(
+            "/longlivehealth.apk",
+            get(crate::client_download::android_package),
+        )
+        .route(
+            "/downloads/longlivehealth.apk",
+            get(crate::client_download::android_package),
+        )
+        .route(
             "/api/v1/user/password/change",
             post(crate::accounts::change_password),
         )
@@ -55,7 +63,7 @@ pub fn router(upload_limit: usize) -> Router<AppState> {
         .route("/api/v1/health/connect", post(connect_health))
         .route(
             "/api/v1/health/sync",
-            post(sync_health).layer(DefaultBodyLimit::max(40 * 1024 * 1024)),
+            post(sync_health).layer(DefaultBodyLimit::disable()),
         )
         .route("/api/v1/health/coverage", post(health_coverage))
         .route("/api/v1/health/list", post(list_health))
@@ -102,6 +110,9 @@ pub fn router(upload_limit: usize) -> Router<AppState> {
         )
         .route("/api/v1/wellness/clinical-age", post(wellness_clinical_age))
         .route("/api/v1/wellness/day", post(wellness_day))
+        .route("/api/v1/wellness/history", post(wellness_history))
+        .route("/api/v1/wellness/chart", post(measurement_chart))
+        .route("/api/v1/wellness/measurements", post(measurement_history))
         .route("/api/v1/wellness/series", post(wellness_series))
         .route("/api/v1/wellness/hrv", post(wellness_hrv))
         .route("/api/v1/wellness/library", post(wellness_library))
@@ -174,9 +185,18 @@ async fn list_reports(
     current: CurrentUser,
     Json(request): Json<ListRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    Ok(Json(
-        json!({"reports":state.database.reports(&current.user.user_id,&request).await?}),
-    ))
+    let mut reports = Vec::new();
+    for report in state
+        .database
+        .reports(&current.user.user_id, &request)
+        .await?
+    {
+        let context: serde_json::Value = serde_json::from_str(&report.context_json)?;
+        let mut value = serde_json::to_value(&report)?;
+        value["context"] = context;
+        reports.push(value);
+    }
+    Ok(Json(json!({"reports":reports})))
 }
 async fn get_report(
     State(state): State<AppState>,
@@ -499,9 +519,8 @@ async fn sync_health(
     current: CurrentUser,
     body: crate::transport::HealthSyncBody,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    // Health publishes unique immutable paths. SQLite rechecks ownership and
-    // tombstones atomically; leased staging files survive cleanup. Do not hold
-    // the report/export file mutex while staging an entire Health batch.
+    // SQLite serializes category appends with the original indexes and tombstones.
+    // Exports read only their committed prefix; no report-wide file mutex is needed.
     state
         .database
         .require_device_connection(&current.user.user_id, &body.batch.connection_id)
@@ -530,17 +549,16 @@ async fn download_raw_health(
     current: CurrentUser,
     Path(raw_id): Path<String>,
 ) -> Result<Response, AppError> {
-    let relative = state
+    let bytes = state
         .database
-        .health_raw_path(&current.user.user_id, &raw_id)
+        .health_raw_bytes(&current.user.user_id, &raw_id)
         .await?;
-    let file = tokio::fs::File::open(state.config.data_dir.join(relative)).await?;
     Ok((
         [
             (header::CONTENT_TYPE, "application/json"),
             (header::CONTENT_DISPOSITION, "attachment"),
         ],
-        Body::from_stream(tokio_util::io::ReaderStream::new(file)),
+        Body::from(bytes),
     )
         .into_response())
 }
@@ -724,6 +742,42 @@ async fn get_extraction_input(
     .await
 }
 
+async fn measurement_chart(
+    State(state): State<AppState>,
+    current: CurrentUser,
+    Json(request): Json<crate::wellness::measurement_chart::Request>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    Ok(Json(
+        state
+            .database
+            .measurement_chart(&current.user.user_id, request)
+            .await?,
+    ))
+}
+async fn measurement_history(
+    State(state): State<AppState>,
+    current: CurrentUser,
+    Json(request): Json<crate::wellness::measurement_chart::HistoryRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    Ok(Json(
+        state
+            .database
+            .measurement_history(&current.user.user_id, request)
+            .await?,
+    ))
+}
+async fn wellness_history(
+    State(state): State<AppState>,
+    current: CurrentUser,
+    Json(request): Json<crate::wellness::history::HistoryRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    Ok(Json(
+        state
+            .database
+            .daily_history(&current.user.user_id, request)
+            .await?,
+    ))
+}
 async fn wellness_day(
     State(state): State<AppState>,
     current: CurrentUser,

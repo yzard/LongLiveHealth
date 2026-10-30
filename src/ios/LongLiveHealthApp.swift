@@ -30,7 +30,9 @@ struct RootView: View {
     @Bindable var model: AppModel
     var body: some View {
         Group {
-            if model.session == nil { LoginView(model: model) }
+            if model.session == nil { LoginScreen(isBusy: model.isBusy, onLogin: { server, username, password in
+                await model.login(server: server, username: username, password: password)
+            }) }
             else if model.mustChangePassword { NavigationStack { PasswordChangeView(model: model, required: true) } }
             else {
                 TabView(selection: $model.selectedTab) {
@@ -59,33 +61,5 @@ struct RootView: View {
         .alert("Could not complete the action", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK") { model.errorMessage = nil }
         } message: { Text(model.errorMessage ?? "") }
-    }
-}
-
-private struct LoginView: View {
-    var model: AppModel
-    @State private var server = UserDefaults.standard.string(forKey: "lastServer") ?? ""
-    @State private var username = ""
-    @State private var password = ""
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Image(systemName: "heart.text.clipboard").font(.system(size: 44)).foregroundStyle(.teal)
-                    Text("Your health. Your history.").font(.title2.bold())
-                    Text("Connect to your own Long Live Health server.").foregroundStyle(.secondary)
-                }
-                Section("Server") { TextField("http://192.168.1.20:8080", text: $server).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled() }
-                Section("Account") {
-                    TextField("Username", text: $username).textContentType(.username).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    SecureField("Password", text: $password).textContentType(.password)
-                }
-                Button {
-                    Task { await model.login(server: server, username: username, password: password); password = "" }
-                } label: { if model.isBusy { ProgressView() } else { Text("Sign in") } }
-                .disabled(model.isBusy || server.isEmpty || username.isEmpty || password.isEmpty)
-                Section { Text("Accounts are created by your server administrator. Reports and AI processing use the services configured on that server.").font(.footnote).foregroundStyle(.secondary) }
-            }.navigationTitle("Long Live Health")
-        }
     }
 }

@@ -4,10 +4,38 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 use std::str::FromStr;
 
-pub const CONVERSION_VERSION: &str = "lab-units-v5";
+pub const CONVERSION_VERSION: &str = "lab-units-v6";
 pub const CANONICAL_UNITS: &[&str] = &[
-    "mg/dL", "mg/L", "g/L", "g/dL", "mmol/L", "µmol/L", "ng/mL", "µg/L", "µg/mL", "ng/L", "%",
-    "mmol/mol", "fL", "U/L", "10^9/L",
+    "mg/dL",
+    "mg/L",
+    "g/L",
+    "g/dL",
+    "mmol/L",
+    "µmol/L",
+    "ng/mL",
+    "µg/L",
+    "µg/mL",
+    "ng/L",
+    "%",
+    "mmol/mol",
+    "fL",
+    "U/L",
+    "10^9/L",
+    "10^12/L",
+    "cells/µL",
+    "pg",
+    "pg/mL",
+    "ng/dL",
+    "µg/dL",
+    "nmol/L",
+    "mIU/L",
+    "mIU/mL",
+    "IU/mL",
+    "U/mL",
+    "Angstrom",
+    "% by wt",
+    "1",
+    "mL/min/1.73m2",
 ];
 
 #[derive(Serialize)]
@@ -32,13 +60,18 @@ pub fn metrics() -> Vec<MetricDefinition> {
         ("ferritin", "Ferritin", "ng/mL"),
         ("albumin", "Albumin", "g/dL"),
         ("crp", "C-reactive protein", "mg/dL"),
-        ("lymphocyte_percent", "Lymphocytes", "%"),
+        ("lymphocyte_percent", "Lymphocytes %", "%"),
         ("mcv", "Mean corpuscular volume", "fL"),
         ("rdw", "Red cell distribution width (CV)", "%"),
         ("alp", "Alkaline phosphatase", "U/L"),
         ("wbc", "White blood cell count", "10^9/L"),
     ]
     .into_iter()
+    .chain(
+        crate::laboratory_names::EXTRA
+            .iter()
+            .map(|&(id, name, unit, _)| (id, name, unit)),
+    )
     .map(|(metric_id, name, standard_unit)| MetricDefinition {
         metric_id,
         name,
@@ -51,6 +84,103 @@ pub fn metrics() -> Vec<MetricDefinition> {
         conversion_version: CONVERSION_VERSION,
     })
     .collect()
+}
+
+/// Explicit user mappings take precedence. Inference never modifies printed payloads.
+/// Administrative fields are archive context, never patient measurements.
+/// Exact field names avoid dropping real tests such as an antibody screen or specimen creatinine.
+pub fn is_administrative_name(name: &str) -> bool {
+    matches!(
+        crate::laboratory_names::key(name).as_str(),
+        "specimenexpirationdate"
+            | "specimenexpirationdateofblood"
+            | "specimenexpirydate"
+            | "specimenexpires"
+            | "expirationdate"
+            | "expirydate"
+            | "statusinformation"
+            | "bloodbankcomment"
+            | "reportstatus"
+            | "orderstatus"
+            | "specimenstatus"
+            | "processingstatus"
+            | "resultstatus"
+            | "patientname"
+            | "patientid"
+            | "medicalrecordnumber"
+            | "mrn"
+            | "dateofbirth"
+            | "accessionnumber"
+            | "accessionid"
+            | "specimenid"
+            | "specimennumber"
+            | "reportdate"
+            | "reportingdate"
+            | "collectiondate"
+            | "collectiontime"
+            | "specimencollectiondate"
+            | "specimenreceiveddate"
+            | "receiveddate"
+            | "orderingprovider"
+            | "orderingphysician"
+            | "laboratoryaddress"
+    )
+}
+
+pub fn resolved_metric(payload: &ObservationPayload) -> Option<&str> {
+    if is_administrative_name(&payload.raw_name) {
+        return None;
+    }
+    payload
+        .metric_id
+        .as_deref()
+        .or_else(|| infer_metric(&payload.raw_name, payload.raw_unit.as_deref()))
+}
+
+pub fn infer_metric(name: &str, raw_unit: Option<&str>) -> Option<&'static str> {
+    type Candidates = Vec<(&'static str, &'static str)>;
+    static INDEX: std::sync::LazyLock<std::collections::BTreeMap<String, Candidates>> =
+        std::sync::LazyLock::new(|| {
+            let mut index = std::collections::BTreeMap::<String, Candidates>::new();
+            for metric in metrics() {
+                let mut names = vec![metric.name];
+                for (_, aliases) in crate::laboratory_names::EXISTING_ALIASES
+                    .iter()
+                    .filter(|(id, _)| *id == metric.metric_id)
+                {
+                    names.extend_from_slice(aliases);
+                }
+                for (_, _, _, aliases) in crate::laboratory_names::EXTRA
+                    .iter()
+                    .filter(|(id, _, _, _)| *id == metric.metric_id)
+                {
+                    names.extend_from_slice(aliases);
+                }
+                for name in names {
+                    let candidates = index.entry(crate::laboratory_names::key(name)).or_default();
+                    if !candidates.contains(&(metric.metric_id, metric.standard_unit)) {
+                        candidates.push((metric.metric_id, metric.standard_unit));
+                    }
+                }
+            }
+            index
+        });
+    let candidates: Vec<_> = INDEX
+        .get(&crate::laboratory_names::key(name))?
+        .iter()
+        .filter(|(id, standard)| {
+            raw_unit
+                .filter(|unit| !unit.trim().is_empty())
+                .is_none_or(|raw| {
+                    canonical_unit(raw).is_some_and(|unit| conversion(id, standard, unit).is_some())
+                })
+        })
+        .collect();
+    if candidates.len() == 1 {
+        Some(candidates[0].0)
+    } else {
+        None
+    }
 }
 
 pub fn canonical_unit(raw: &str) -> Option<&'static str> {
@@ -67,6 +197,16 @@ pub fn canonical_unit(raw: &str) -> Option<&'static str> {
         .collect();
     // Closed spelling aliases. Do not globally lowercase SI prefixes (M is not m).
     match compact.as_str() {
+        "1" | "ratio" => Some("1"),
+        "%bywt" => Some("% by wt"),
+        "Angstrom" | "angstrom" | "Å" => Some("Angstrom"),
+        "nmol/L" | "nmol/l" => Some("nmol/L"),
+        "mcg/dL" | "ug/dL" | "ug/dl" | "ug/dL(calc)" | "mcg/dL(calc)" => Some("µg/dL"),
+        "mcg/L" => Some("µg/L"),
+        "cells/uL" | "cell/uL" | "#/uL" => Some("cells/µL"),
+        "mIU/mL" | "mIU/ml" => Some("mIU/mL"),
+        "IU/mL" | "IU/ml" => Some("IU/mL"),
+        "U/mL" | "U/ml" => Some("U/mL"),
         "mg/dL" | "mg/dl" | "MG/DL" => Some("mg/dL"),
         "mg/L" | "mg/l" | "MG/L" => Some("mg/L"),
         "g/L" | "g/l" | "G/L" => Some("g/L"),
@@ -83,17 +223,15 @@ pub fn canonical_unit(raw: &str) -> Option<&'static str> {
         "mIU/L" | "mIU/l" | "uIU/mL" | "uIU/ml" => Some("mIU/L"),
         "mL/min/1.73m2" | "ml/min/1.73m2" | "mL/min/{1.73_m2}" => Some("mL/min/1.73m2"),
         "s" | "sec" | "second(s)" => Some("s"),
-        "10^12/L" | "10*12/L" | "10¹²/L" | "10^6/uL" | "10*6/uL" | "x10(6)/uL" | "M/uL" => {
-            Some("10^12/L")
-        }
-        "%" | "%NGSP" | "NGSP%" => Some("%"),
+        "10^12/L" | "10*12/L" | "10¹²/L" | "10^6/uL" | "10*6/uL" | "x10(6)/uL" | "M/uL"
+        | "Million/uL" => Some("10^12/L"),
+        "%" | "%(calc)" | "%NGSP" | "NGSP%" => Some("%"),
         "mmol/mol" | "MMOL/MOL" => Some("mmol/mol"),
         "fL" | "fl" => Some("fL"),
         "U/L" | "IU/L" => Some("U/L"),
         "10^9/L" | "10⁹/L" | "10^3/uL" | "10³/uL" | "10*9/L" | "10*3/uL" | "K/uL" | "x10(3)/uL"
-        | "x10^3/uL" | "×10^3/uL" | "×10³/uL" | "x10^9/L" | "x10(9)/L" | "×10^9/L" | "×10⁹/L" => {
-            Some("10^9/L")
-        }
+        | "x10^3/uL" | "×10^3/uL" | "×10³/uL" | "x10^9/L" | "x10(9)/L" | "×10^9/L" | "×10⁹/L"
+        | "Thousand/uL" => Some("10^9/L"),
         _ => None,
     }
 }
@@ -114,6 +252,11 @@ fn conversion(metric: &str, standard: &str, unit: &str) -> Option<Conversion> {
         source: "https://www.nist.gov/pml/owm/metric-si-prefixes",
     };
     if standard == unit {
+        return Some(rule);
+    }
+    if standard == "10^9/L" && unit == "cells/µL" {
+        rule.scale = Decimal::new(1, 3);
+        rule.rule = "cell-count-volume";
         return Some(rule);
     }
     if metric == "hba1c" {
@@ -338,7 +481,10 @@ fn derive(
     else {
         return Quantity::unavailable("unmapped_metric", raw_unit, origin);
     };
-    let Some(raw_unit) = raw_unit.filter(|unit| !unit.trim().is_empty()) else {
+    let Some(raw_unit) = raw_unit
+        .filter(|unit| !unit.trim().is_empty())
+        .or((metric.standard_unit == "1").then_some("1"))
+    else {
         return Quantity::unavailable("missing_unit", raw_unit, origin);
     };
     let Some(unit) = canonical_unit(raw_unit) else {
@@ -412,7 +558,7 @@ fn derive(
 
 pub fn interpret(payload: &ObservationPayload) -> Interpretation {
     let result = derive(
-        payload.metric_id.as_deref(),
+        resolved_metric(payload),
         &payload.raw_result,
         payload.raw_unit.as_deref(),
         "observation",
@@ -431,7 +577,7 @@ pub fn interpret(payload: &ObservationPayload) -> Interpretation {
             });
             if let Some((value, unit)) = explicit {
                 derive(
-                    payload.metric_id.as_deref(),
+                    resolved_metric(payload),
                     value,
                     Some(unit),
                     "reference_explicit",
@@ -439,7 +585,7 @@ pub fn interpret(payload: &ObservationPayload) -> Interpretation {
                 )
             } else {
                 derive(
-                    payload.metric_id.as_deref(),
+                    resolved_metric(payload),
                     raw,
                     payload.raw_unit.as_deref(),
                     "observation",

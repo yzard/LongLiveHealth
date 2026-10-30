@@ -10,6 +10,7 @@ if [[ ! "$IMAGE_TAG" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
     echo 'Invalid Docker tag' >&2
     exit 2
 fi
+python3 "$PROJECT_ROOT/tests/tools/test_apple_catalog.py"
 python3 "$PROJECT_ROOT/tests/development/playground.py"
 python3 -m unittest discover -s "$PROJECT_ROOT/tests/development" -p 'data_roots.py'
 python3 "$PROJECT_ROOT/tests/run_playground.py"
@@ -17,6 +18,7 @@ python3 "$PROJECT_ROOT/tests/build_ios.py"
 node --test "$PROJECT_ROOT/tests/frontend/"*.mjs
 node --check "$PROJECT_ROOT/src/frontend/app.mjs"
 node --check "$PROJECT_ROOT/src/frontend/presentation.mjs"
+"$PROJECT_ROOT/build_android.sh"
 cd "$PROJECT_ROOT/docker"
 docker build --file backend_api.Dockerfile --tag "longlivehealth-backend-api:$IMAGE_TAG" ..
 exec docker build --file backend_ocr.Dockerfile --tag "longlivehealth-backend-ocr:$IMAGE_TAG" ..

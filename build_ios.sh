@@ -20,8 +20,9 @@ cd "$PROJECT_ROOT"
 if [ "$(uname -s)" != Darwin ]; then
     if ! $CORE_ONLY; then echo 'Full iOS builds require macOS/Xcode. --core-only checks portable code without claiming an iOS build.' >&2; exit 1; fi
     exec docker run --rm --user "$(id -u):$(id -g)" -v "$PROJECT_ROOT:/workspace" -w /workspace swift:6.2 \
-        bash -c 'swiftc -frontend -parse src/ios/*.swift src/ios/Core/*.swift && swift test --scratch-path build/ios/core'
+        bash -c 'swiftc -frontend -parse src/ios/*.swift src/ios/Platform/*.swift src/shared/Core/*.swift src/shared/UI/*.swift src/shared/Application/*.swift && swift test --scratch-path build/ios/core'
 fi
+python3 tests/tools/test_apple_catalog.py
 swift test --scratch-path build/ios/core
 if $CORE_ONLY; then exit 0; fi
 command -v xcodegen >/dev/null || { echo 'Install XcodeGen before building iOS' >&2; exit 1; }

@@ -57,6 +57,7 @@ pub fn summarize_regularity(
     if i128::from(end) - i128::from(start) != 604800 || start % 60 != 0 {
         return Err(AppError::Invalid("SRI requires a seven-day minute grid"));
     }
+    let records = crate::health_connect::sleep_intervals(records)?;
     let mut groups: BTreeMap<String, Vec<StoredHealthRecord>> = BTreeMap::new();
     for record in records {
         if record.end_at < record.start_at {

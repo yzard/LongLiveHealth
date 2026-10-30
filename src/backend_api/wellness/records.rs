@@ -35,7 +35,9 @@ impl Database {
         user: &str,
         request: ListRequest,
     ) -> Result<Value, AppError> {
-        if !["ecg", "clinical", "blood_pressure"].contains(&request.kind.as_str()) {
+        if !["ecg", "clinical", "blood_pressure"].contains(&request.kind.as_str())
+            && !crate::apple_health::definition(&request.kind).is_some_and(|d| d.browse)
+        {
             return Err(AppError::Invalid(
                 "Select ECG, clinical records or blood pressure",
             ));
@@ -43,6 +45,7 @@ impl Database {
         let a = request.after;
         let rows = sqlx::query(queries::SPECIALTY_LIST)
             .bind(user)
+            .bind(&request.kind)
             .bind(&request.kind)
             .bind(&request.kind)
             .bind(&request.kind)
@@ -172,6 +175,6 @@ pub fn project_record(row: StoredHealthRecord, offset: usize) -> Result<Value, A
         json!({"state":"not_present","resource":null})
     };
     Ok(
-        json!({"platform":row.platform,"source_id":row.source_id,"record_type":row.record_type,"version":row.version,"start_at":row.start_at,"end_at":row.end_at,"filename":p["filename"],"laps":laps,"distance_m":p["distance_m"],"source_total_time_seconds":p["source_total_time_seconds"],"elapsed_seconds":p["elapsed_seconds"],"source_name":p["source_name"],"source_classification":p["ecg_classification"],"sampling_frequency_hz":p["sampling_frequency_hz"],"fhir":fhir,"related_sample_ids":p["related_sample_ids"],"sample_offset":offset,"sample_count":count,"samples":samples,"next_sample_offset":if offset.saturating_add(5000)<count {Some(offset+5000)}else{None},"notes":["Classification belongs to the source device. This application does not diagnose rhythm.","Samples retain source timestamps and volts. Missing values remain gaps.","Clinical resources are source records, not instructions. Original payloads remain in the full export.","Related records resolve only within this account and this exact source."]}),
+        json!({"details":crate::apple_health::details(&row.record_type,p),"platform":row.platform,"source_id":row.source_id,"record_type":row.record_type,"version":row.version,"start_at":row.start_at,"end_at":row.end_at,"filename":p["filename"],"laps":laps,"distance_m":p["distance_m"],"source_total_time_seconds":p["source_total_time_seconds"],"elapsed_seconds":p["elapsed_seconds"],"source_name":p["source_name"],"source_classification":p["ecg_classification"],"sampling_frequency_hz":p["sampling_frequency_hz"],"fhir":fhir,"related_sample_ids":p["related_sample_ids"],"sample_offset":offset,"sample_count":count,"samples":samples,"next_sample_offset":if offset.saturating_add(5000)<count {Some(offset+5000)}else{None},"notes":["Classification belongs to the source device. This application does not diagnose rhythm.","Samples retain source timestamps and volts. Missing values remain gaps.","Clinical resources are source records, not instructions. Original payloads remain in the full export.","Related records resolve only within this account and this exact source."]}),
     )
 }

@@ -6,9 +6,6 @@ use crate::{
 use sha2::{Digest, Sha256};
 use std::{collections::HashSet, io::Write};
 
-pub const MAX_BATCH_BYTES: usize = 40 * 1024 * 1024;
-pub const MAX_PAYLOAD_BYTES: usize = 32 * 1024 * 1024;
-
 pub(crate) struct PreparedRecord {
     pub record_id: String,
     pub source_id: String,
@@ -23,44 +20,117 @@ pub(crate) struct PreparedRecord {
 pub(crate) struct PreparedBatch {
     pub connection_id: String,
     pub batch_id: String,
-    pub record_type: String,
-    pub coverage_status: String,
+    pub coverage: Vec<Coverage>,
     pub records: Vec<PreparedRecord>,
     pub digest: String,
 }
-struct BoundedDigest {
-    bytes: usize,
-    limit: usize,
-    exceeded: bool,
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Coverage {
+    pub record_type: String,
+    pub status: String,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MixedSyncRequest {
+    pub connection_id: String,
+    pub batch_id: String,
+    pub coverage: Vec<Coverage>,
+    pub records: Vec<HealthRecordInput>,
+}
+// Existing installed apps and durable pending requests still use the single-type wire contract.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+pub(crate) enum IncomingSync {
+    Mixed(MixedSyncRequest),
+    Single(SyncRequest),
+}
+impl IncomingSync {
+    pub fn prepare(self) -> Result<PreparedBatch, AppError> {
+        match self {
+            Self::Single(request) => prepare(request),
+            Self::Mixed(request) => {
+                let mut digest = JsonDigest::new();
+                digest.encode(&request)?;
+                prepare_records(request, hex::encode(digest.hash.finalize()))
+            }
+        }
+    }
+}
+/// Apple medication dose revisions can be fractional (timestamp-like). Positive
+/// IEEE-754 bit patterns have the same ordering as their numeric values and fit
+/// in SQLite's signed integer. Keep that sortable key internal, and archive the
+/// original numeric version unchanged. Other record types keep their wire contract.
+pub(crate) fn prepare_http(bytes: &[u8]) -> Result<PreparedBatch, AppError> {
+    use serde_json::Value;
+    let mut wire: Value =
+        serde_json::from_slice(bytes).map_err(|_| AppError::Invalid("Invalid health JSON"))?;
+    let has_medication = wire["records"].as_array().is_some_and(|records| {
+        records
+            .iter()
+            .any(|record| record["record_type"] == "medication_dose_event")
+    });
+    if !has_medication {
+        return serde_json::from_slice::<IncomingSync>(bytes)
+            .map_err(|_| AppError::Invalid("Invalid health JSON"))?
+            .prepare();
+    }
+    let mut digest = JsonDigest::new();
+    digest.encode(&wire)?;
+    let original_digest = hex::encode(digest.hash.finalize());
+    let mut originals = Vec::new();
+    for (index, record) in wire["records"]
+        .as_array_mut()
+        .ok_or(AppError::Invalid("Invalid health records"))?
+        .iter_mut()
+        .enumerate()
+    {
+        if record["record_type"] != "medication_dose_event" {
+            continue;
+        }
+        let version = record["version"]
+            .as_f64()
+            .ok_or(AppError::Invalid("Invalid medication source version"))?;
+        if !version.is_finite() || version < 1.0 {
+            return Err(AppError::Invalid("Invalid medication source version"));
+        }
+        originals.push((index, serde_json::to_string(record)?));
+        record["version"] = Value::from(
+            i64::try_from(version.to_bits())
+                .map_err(|_| AppError::Invalid("Invalid medication source version"))?,
+        );
+    }
+    let mut prepared = serde_json::from_value::<IncomingSync>(wire)
+        .map_err(|_| AppError::Invalid("Invalid health JSON"))?
+        .prepare()?;
+    for (index, original) in originals {
+        let record = &mut prepared.records[index];
+        record.payload_json = if record.deleted {
+            "{}".into()
+        } else {
+            project_json(&original)?
+        };
+        record.raw_json = original;
+    }
+    prepared.digest = original_digest;
+    Ok(prepared)
+}
+
+struct JsonDigest {
     hash: Sha256,
 }
-impl BoundedDigest {
-    fn new(limit: usize) -> Self {
+impl JsonDigest {
+    fn new() -> Self {
         Self {
-            bytes: 0,
-            limit,
-            exceeded: false,
             hash: Sha256::new(),
         }
     }
     fn encode<T: serde::Serialize>(&mut self, value: &T) -> Result<(), AppError> {
-        if serde_json::to_writer(&mut *self, value).is_err() {
-            return Err(if self.exceeded {
-                AppError::TooLarge
-            } else {
-                AppError::Internal
-            });
-        }
-        Ok(())
+        serde_json::to_writer(self, value).map_err(|_| AppError::Internal)
     }
 }
-impl Write for BoundedDigest {
+impl Write for JsonDigest {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        if bytes.len() > self.limit.saturating_sub(self.bytes) {
-            self.exceeded = true;
-            return Err(std::io::Error::other("JSON limit exceeded"));
-        }
-        self.bytes += bytes.len();
         self.hash.update(bytes);
         Ok(bytes.len())
     }
@@ -69,20 +139,37 @@ impl Write for BoundedDigest {
     }
 }
 pub(crate) fn prepare(request: SyncRequest) -> Result<PreparedBatch, AppError> {
-    if uuid::Uuid::parse_str(&request.batch_id).is_err()
-        || request.records.len() > 1000
-        || request.record_type.is_empty()
-        || request.record_type.len() > 128
-        || !["observed", "no_visible_samples", "error", "unsupported"]
-            .contains(&request.coverage_status.as_str())
-    {
-        return Err(AppError::Invalid("Invalid sync batch"));
-    }
-    // Streaming serialization computes the existing canonical digest without a second
-    // full 40 MiB batch allocation. No raw field is normalized or removed from the digest.
-    let mut batch_digest = BoundedDigest::new(MAX_BATCH_BYTES);
+    let mut batch_digest = JsonDigest::new();
     batch_digest.encode(&request)?;
     let digest = hex::encode(batch_digest.hash.finalize());
+    prepare_records(
+        MixedSyncRequest {
+            connection_id: request.connection_id,
+            batch_id: request.batch_id,
+            coverage: vec![Coverage {
+                record_type: request.record_type,
+                status: request.coverage_status,
+            }],
+            records: request.records,
+        },
+        digest,
+    )
+}
+fn prepare_records(request: MixedSyncRequest, digest: String) -> Result<PreparedBatch, AppError> {
+    let mut types = HashSet::new();
+    if uuid::Uuid::parse_str(&request.batch_id).is_err() || request.coverage.is_empty() {
+        return Err(AppError::Invalid("Invalid sync batch"));
+    }
+    for coverage in &request.coverage {
+        if coverage.record_type.is_empty()
+            || coverage.record_type.len() > 128
+            || !types.insert(coverage.record_type.as_str())
+            || !["observed", "no_visible_samples", "error", "unsupported"]
+                .contains(&coverage.status.as_str())
+        {
+            return Err(AppError::Invalid("Invalid sync coverage"));
+        }
+    }
     let mut seen = HashSet::new();
     let mut records = Vec::with_capacity(request.records.len());
     for record in request.records {
@@ -91,7 +178,7 @@ pub(crate) fn prepare(request: SyncRequest) -> Result<PreparedBatch, AppError> {
             || record.source_id.is_empty()
             || record.source_id.len() > 512
             || (!record.deleted && record.source_id == "*")
-            || record.record_type != request.record_type
+            || !types.contains(record.record_type.as_str())
             || record.version < 1
             || record.end_at < record.start_at
             || !record.payload.is_object()
@@ -99,13 +186,12 @@ pub(crate) fn prepare(request: SyncRequest) -> Result<PreparedBatch, AppError> {
         {
             return Err(AppError::Invalid("Invalid health record"));
         }
-        BoundedDigest::new(MAX_PAYLOAD_BYTES).encode(&record.payload)?;
-        let raw_json = if record.deleted {
+        let raw_json = serde_json::to_string(&record)?;
+        let payload_json = if record.deleted {
             "{}".to_owned()
         } else {
-            serde_json::to_string(&record)?
+            project_json(&raw_json)?
         };
-        let payload_json = project_json(&raw_json)?;
         let HealthRecordInput {
             record_id,
             source_id,
@@ -131,8 +217,7 @@ pub(crate) fn prepare(request: SyncRequest) -> Result<PreparedBatch, AppError> {
     Ok(PreparedBatch {
         connection_id: request.connection_id,
         batch_id: request.batch_id,
-        record_type: request.record_type,
-        coverage_status: request.coverage_status,
+        coverage: request.coverage,
         records,
         digest,
     })
@@ -170,6 +255,17 @@ pub(crate) fn project_json(text: &str) -> Result<String, AppError> {
         && let Some(samples) = heart_samples(&payload)
     {
         payload["quantity_samples"] = serde_json::to_value(samples)?;
+    }
+    if apple
+        && let Some(fields) = crate::apple_health::projection(
+            record["record_type"].as_str().ok_or(AppError::Internal)?,
+            &payload,
+        )
+    {
+        payload
+            .as_object_mut()
+            .ok_or(AppError::Internal)?
+            .extend(fields.as_object().ok_or(AppError::Internal)?.clone());
     }
     if apple {
         let fields = payload.as_object_mut().ok_or(AppError::Internal)?;
@@ -253,6 +349,49 @@ pub(crate) fn only_source_name_changed(previous: &str, incoming: &str) -> Result
         }
     }
     same_content(previous, &project_json(&serde_json::to_string(&incoming)?)?)
+}
+
+/// Accept an adjacent floating-point representation only when the immutable
+/// HealthKit secure archive is byte-identical. Integers, strings, structure, and
+/// nonnumeric provenance still require exact equality.
+pub(crate) fn same_archived_sample(first: &[u8], second: &str) -> Result<bool, AppError> {
+    use serde_json::Value;
+    let a: Value = serde_json::from_slice(first)?;
+    let b: Value = serde_json::from_str(second)?;
+    if a["payload"]["raw_archive"]["format"] != "nskeyedarchiver-secure-v1"
+        || !a["payload"]["raw_archive"]["data"].is_string()
+        || a["payload"]["raw_archive"]["data"].as_str() == Some("")
+        || a["payload"]["raw_archive"] != b["payload"]["raw_archive"]
+    {
+        return Ok(false);
+    }
+    fn equivalent(a: &Value, b: &Value) -> bool {
+        if a == b {
+            return true;
+        }
+        match (a, b) {
+            (Value::Number(a), Value::Number(b)) if a.is_f64() && b.is_f64() => {
+                let (Some(x), Some(y)) = (a.as_f64(), b.as_f64()) else {
+                    return false;
+                };
+                x.is_finite()
+                    && y.is_finite()
+                    && (x == y
+                        || (x.is_sign_negative() == y.is_sign_negative()
+                            && x.to_bits().abs_diff(y.to_bits()) <= 1))
+            }
+            (Value::Array(a), Value::Array(b)) => {
+                a.len() == b.len() && a.iter().zip(b).all(|(x, y)| equivalent(x, y))
+            }
+            (Value::Object(a), Value::Object(b)) => {
+                a.len() == b.len()
+                    && a.iter()
+                        .all(|(k, v)| b.get(k).is_some_and(|other| equivalent(v, other)))
+            }
+            _ => false,
+        }
+    }
+    Ok(equivalent(&a, &b))
 }
 
 /// Small query projection only; opaque series archives stay in raw files.

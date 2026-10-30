@@ -15,3 +15,7 @@
 !src/archive/**
 **/target/
 **/__pycache__/
+
+!dist/
+!dist/android/
+!dist/android/longlivehealth.apk

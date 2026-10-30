@@ -39,28 +39,139 @@ private struct PDFPreview: UIViewRepresentable {
 }
 
 struct DocumentScanner: UIViewControllerRepresentable {
-    let completion: (Result<[Data], any Error>) -> Void
-    func makeCoordinator() -> Coordinator { Coordinator(completion: completion) }
+    let cancel: () -> Void
+    let completion: (Result<[UIImage], any Error>) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(cancel: cancel, completion: completion) }
     func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
         let controller = VNDocumentCameraViewController(); controller.delegate = context.coordinator; return controller
     }
     func updateUIViewController(_ controller: VNDocumentCameraViewController, context: Context) {}
     @MainActor final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
-        let completion: (Result<[Data], any Error>) -> Void
-        init(completion: @escaping (Result<[Data], any Error>) -> Void) { self.completion = completion }
-        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
-            do {
-                let images = try (0..<scan.pageCount).map { index in
-                    guard let bytes = scan.imageOfPage(at: index).pngData() else { throw APIError.invalidResponse }
-                    return bytes
-                }
-                controller.dismiss(animated: true); completion(.success(images))
-            } catch { controller.dismiss(animated: true); completion(.failure(error)) }
-
+        let cancel: () -> Void
+        let completion: (Result<[UIImage], any Error>) -> Void
+        init(cancel: @escaping () -> Void, completion: @escaping (Result<[UIImage], any Error>) -> Void) {
+            self.cancel = cancel
+            self.completion = completion
         }
-        func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) { controller.dismiss(animated: true) }
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
+            completion(.success((0..<scan.pageCount).map { scan.imageOfPage(at: $0) }))
+        }
+
+        func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) { cancel() }
         func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: any Error) {
-            controller.dismiss(animated: true); completion(.failure(error))
+            completion(.failure(error))
+        }
+    }
+}
+
+/// Keep camera pages in capture order and upload them as one report.
+enum CameraReportPDF {
+    static func make(pageCount: Int, imageAt: (Int) -> UIImage) throws -> Data {
+        guard pageCount > 0 else { throw APIError.invalidResponse }
+        let document = PDFDocument()
+        for index in 0..<pageCount {
+            guard let page = PDFPage(image: imageAt(index)) else { throw APIError.invalidResponse }
+            document.insert(page, at: index)
+        }
+        guard let bytes = document.dataRepresentation() else { throw APIError.invalidResponse }
+        return bytes
+    }
+}
+
+struct CameraReportPages {
+    var images: [UIImage]
+    var selected = 0
+
+    mutating func deleteSelected() {
+        guard images.indices.contains(selected) else { return }
+        images.remove(at: selected)
+        selected = min(selected, max(0, images.count - 1))
+    }
+
+    func pdf() throws -> Data {
+        try CameraReportPDF.make(pageCount: images.count) { images[$0] }
+    }
+}
+
+struct CameraReportCapture: View {
+    let cancel: () -> Void
+    let completion: (Result<Data, any Error>) -> Void
+    @State private var pages: CameraReportPages?
+
+    var body: some View {
+        if let pages {
+            CameraReportReview(pages: pages, cancel: cancel, completion: completion)
+        } else {
+            DocumentScanner(cancel: cancel) { result in
+                switch result {
+                case .success(let images): pages = CameraReportPages(images: images)
+                case .failure(let error): completion(.failure(error))
+                }
+            }
+        }
+    }
+}
+
+struct CameraReportReview: View {
+    @State var pages: CameraReportPages
+    let cancel: () -> Void
+    let completion: (Result<Data, any Error>) -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                if pages.images.isEmpty {
+                    ContentUnavailableView("No pages", systemImage: "doc", description: Text("All photos have been removed."))
+                } else {
+                    TabView(selection: $pages.selected) {
+                        ForEach(pages.images.indices, id: \.self) { index in
+                            Image(uiImage: pages.images[index])
+                                .resizable().scaledToFit().padding(.horizontal)
+                                .accessibilityLabel("Report page \(index + 1)")
+                                .tag(index)
+                        }
+                    }.tabViewStyle(.page(indexDisplayMode: .never))
+                    Text("Page \(pages.selected + 1) of \(pages.images.count)")
+                        .accessibilityIdentifier("camera-page-count")
+                    if pages.images.count > 1 {
+                        Slider(value: Binding(get: { Double(pages.selected) }, set: { pages.selected = Int($0) }),
+                               in: 0...Double(pages.images.count - 1), step: 1)
+                            .accessibilityLabel("Browse report pages")
+                            .accessibilityValue("Page \(pages.selected + 1) of \(pages.images.count)")
+                            .padding(.horizontal)
+                    }
+                    ScrollViewReader { proxy in
+                        ScrollView(.horizontal) {
+                            HStack(spacing: 12) {
+                                ForEach(pages.images.indices, id: \.self) { index in
+                                    Button { pages.selected = index } label: {
+                                        Image(uiImage: pages.images[index]).resizable().scaledToFit()
+                                            .frame(width: 52, height: 72).padding(4)
+                                            .background(pages.selected == index ? Color.accentColor.opacity(0.2) : Color.clear)
+                                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(pages.selected == index ? Color.accentColor : Color.clear, lineWidth: 2))
+                                    }.accessibilityLabel("Page \(index + 1)")
+                                        .accessibilityAddTraits(pages.selected == index ? .isSelected : [])
+                                        .id(index)
+                                }
+                            }.padding(.horizontal)
+                        }.onChange(of: pages.selected) { _, index in proxy.scrollTo(index, anchor: .center) }
+                    }
+                    Button("Delete Photo", systemImage: "trash", role: .destructive) { pages.deleteSelected() }
+                        .padding(.bottom)
+                }
+            }
+            .navigationTitle("Review Photos")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: cancel) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Import") {
+                        do { completion(.success(try pages.pdf())) }
+                        catch { completion(.failure(error)) }
+                    }.disabled(pages.images.isEmpty)
+                }
+            }
         }
     }
 }

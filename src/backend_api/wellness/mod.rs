@@ -9,11 +9,13 @@ pub mod fit;
 pub mod food;
 pub mod food_lookup;
 pub mod heart_rate;
+pub mod history;
 pub mod hrv;
 pub mod import;
 pub mod materialized;
 pub mod meal_glucose;
 pub mod meals;
+pub mod measurement_chart;
 pub mod planning;
 pub mod preferences;
 pub mod records;
@@ -40,7 +42,7 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const VERSION: &str = "wellness-day-v5";
+pub const VERSION: &str = "wellness-day-v6";
 pub const KINDS: &[&str] = &[
     "sleep",
     "workout",
@@ -156,7 +158,7 @@ impl Database {
         })).collect();
         let catalog = crate::sources::catalog(self, user, &sources).await?;
         Ok(
-            json!({"sources":sources,"catalog":catalog,"supported_daily_types":KINDS,"coverage_scope":"visible_records_not_read_permission"}),
+            json!({"browse_metrics":crate::apple_health::browse_catalog(&sources),"sources":sources,"catalog":catalog,"supported_daily_types":KINDS,"coverage_scope":"visible_records_not_read_permission"}),
         )
     }
 }

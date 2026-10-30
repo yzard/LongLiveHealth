@@ -75,7 +75,7 @@ import HealthKit
     defer { try? FileManager.default.removeItem(at: root) }
     try archive.save(true, name: "health-enabled.json")
     let bridge = HealthBridge()
-    let client = APIClient(server: URL(string: "http://localhost:18765")!, token: "synthetic-token")
+    let client = APIClient(server: URL(string: "http://localhost:18765")!, token: "synthetic-token", uploadTransport: BackgroundTransfer.transport)
     try await bridge.synchronize(client: client, archive: archive, requestAccess: false, requestSelectedAccess: false)
     #expect(!bridge.isSyncing)
     #expect(bridge.totalRecords == 29330)
@@ -98,15 +98,15 @@ import HealthKit
     let bridge = HealthBridge()
     let kind = try #require(bridge.definitions.first?.kind)
     let anchor = try NSKeyedArchiver.archivedData(withRootObject: HKQueryAnchor(fromValue: 0), requiringSecureCoding: true)
-    let requests = try HealthSyncBatch.requests(connectionID: "synthetic-connection", recordType: kind, coverageStatus: "no_visible_samples", records: [], maximumRecords: HealthSyncBatch.maximumRecords, maximumBytes: 40 * 1024 * 1024)
+    let requests: [JSONValue] = [.object(["connection_id": .string("synthetic-connection"), "batch_id": .string(UUID().uuidString), "record_type": .string(kind), "coverage_status": .string("no_visible_samples"), "records": .array([])])]
     try archive.save(SyncCheckpoint(requests: requests, nextAnchor: anchor), name: "pending-\(kind).json")
-    let rejected = APIClient(server: URL(string: "http://127.0.0.1:18765")!, token: "reject-sync")
+    let rejected = APIClient(server: URL(string: "http://127.0.0.1:18765")!, token: "reject-sync", uploadTransport: BackgroundTransfer.transport)
     do { try await bridge.synchronize(client: rejected, archive: archive, requestAccess: false, requestSelectedAccess: false); Issue.record("Rejected batch was accepted") }
     catch { #expect(bridge.status.contains("paused")) }
     #expect(!bridge.isSyncing)
     #expect(try archive.load(SyncCheckpoint.self, name: "pending-\(kind).json")?.requests == requests)
     #expect(try archive.load(Data.self, name: "anchor-\(kind).json") == nil)
-    let accepted = APIClient(server: URL(string: "http://127.0.0.1:18765")!, token: "synthetic-token")
+    let accepted = APIClient(server: URL(string: "http://127.0.0.1:18765")!, token: "synthetic-token", uploadTransport: BackgroundTransfer.transport)
     try await bridge.synchronize(client: accepted, archive: archive, requestAccess: false, requestSelectedAccess: false)
     #expect(try archive.load(SyncCheckpoint.self, name: "pending-\(kind).json") == nil)
     #expect(try archive.load(Data.self, name: "anchor-\(kind).json") != nil)
@@ -123,4 +123,46 @@ import HealthKit
     completion.finish()
     completion.finish()
     #expect(count == 1)
+}
+
+@MainActor @Test func mixedSyncFailureRetainsAllAnchorsUntilReplaySucceeds() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let archive = try LocalArchive(directory: root)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try archive.save(true, name: "health-enabled.json")
+    let bridge = HealthBridge()
+    let kinds = Array(bridge.definitions.prefix(2).map(\.kind))
+    let anchor = try NSKeyedArchiver.archivedData(withRootObject: HKQueryAnchor(fromValue: 0), requiringSecureCoding: true)
+    var builder = HealthSyncBatch(connectionID: "synthetic-connection")
+    for kind in kinds {
+        _ = try await builder.append(recordType: kind, status: "no_visible_samples", records: [], writes: ["anchor-\(kind).json": .string(anchor.base64EncodedString())])
+    }
+    let tail = builder.finish()
+    let block = try #require(tail)
+    try archive.save(block, name: "pending-health-block.json")
+    let rejected = APIClient(server: URL(string: "http://127.0.0.1:18765")!, token: "reject-sync", uploadTransport: BackgroundTransfer.transport)
+    do { try await bridge.synchronize(client: rejected, archive: archive, requestAccess: false, requestSelectedAccess: false); Issue.record("Rejected batch was accepted") }
+    catch { #expect(bridge.status.contains("paused")) }
+    #expect(try archive.load(HealthSyncBlock.self, name: "pending-health-block.json")?.request == block.request)
+    for kind in kinds { #expect(try archive.load(Data.self, name: "anchor-\(kind).json") == nil) }
+    let accepted = APIClient(server: URL(string: "http://127.0.0.1:18765")!, token: "synthetic-token", uploadTransport: BackgroundTransfer.transport)
+    try await bridge.synchronize(client: accepted, archive: archive, requestAccess: false, requestSelectedAccess: false)
+    #expect(try archive.load(HealthSyncBlock.self, name: "pending-health-block.json") == nil)
+    for kind in kinds { #expect(try archive.load(Data.self, name: "anchor-\(kind).json") != nil) }
+}
+
+@Test func healthReadFailureRetainsActionableReason() {
+    let error = NSError(domain: HKErrorDomain, code: HKError.Code.errorAuthorizationDenied.rawValue,
+                        userInfo: [NSLocalizedDescriptionKey: "Route access denied"])
+    let reason = HealthBridge.readFailureDescription(error)
+    #expect(reason.contains("Route access denied"))
+    #expect(reason.contains(HKErrorDomain))
+    #expect(reason.contains(String(error.code)))
+}
+
+@Test func largeSeriesAreReadOneSampleAtATime() {
+    for kind in ["workout_route", "electrocardiogram", "heartbeat_series"] {
+        #expect(HealthBridge.queryLimit(kind: kind) == 1)
+    }
+    #expect(HealthBridge.queryLimit(kind: "body_mass") == 1_000)
 }

@@ -39,8 +39,8 @@ pub(crate) fn groups(records: &[Value]) -> BTreeMap<String, Group> {
                 .map(|(i, c)| (c, format!("component:{i}"))),
         );
         for (candidate, suffix) in candidates {
-            // Panel headings without their own result are not duplicate measurements.
-            if suffix == "root" && resource["component"].is_array() && !has_value(candidate) {
+            // Workflow fields remain in the original FHIR archive, not in the metric index.
+            if !has_value(candidate) || administrative(candidate) {
                 continue;
             }
             let (metric, name) = identity(candidate, record, &suffix);
@@ -83,14 +83,28 @@ pub(crate) fn groups(records: &[Value]) -> BTreeMap<String, Group> {
             if valid_system && !unit.is_empty() {
                 entry["unit"] = json!(crate::laboratory::canonical_unit(unit).unwrap_or(unit));
             }
+            // A missing unit does not erase an exact hospital result. Keep it in
+            // a separate, explicitly unreported-unit series; never infer a unit.
+            let numeric = quantity["value"]
+                .as_number()
+                .map(ToString::to_string)
+                .or_else(|| {
+                    candidate["valueString"]
+                        .as_str()
+                        .map(str::trim)
+                        .map(str::to_owned)
+                })
+                .and_then(|text| rust_decimal::Decimal::from_str(&text).ok());
+            if unit.is_empty() && numeric.is_some() {
+                entry["unit"] = json!("Not reported");
+            }
             if final_result
                 && valid_system
                 && quantity["comparator"].is_null()
                 && timestamp.is_some()
-                && !unit.is_empty()
-                && let Some(value) = quantity["value"].as_number()
+                && let Some(value) = numeric
             {
-                let normalized = if metric.starts_with("clinical:") {
+                let normalized = if metric.starts_with("clinical:") || unit.is_empty() {
                     rust_decimal::Decimal::from_str(&value.to_string())
                         .ok()
                         .map(|value| {
@@ -117,6 +131,14 @@ pub(crate) fn groups(records: &[Value]) -> BTreeMap<String, Group> {
                     })
                     .filter(|_| {
                         metric != "hba1c" || crate::laboratory::canonical_unit(unit) == Some("%")
+                    })
+                    .or_else(|| {
+                        // Mapping a previously separate clinical item must not erase its
+                        // numeric history. Keep unconverted units in a separate series.
+                        (metric != "hba1c")
+                            .then(|| crate::laboratory::canonical_unit(unit))
+                            .flatten()
+                            .map(|unit| (value.normalize().to_string(), unit.to_owned()))
                     })
                 };
                 if let Some((value, unit)) = normalized {
@@ -203,6 +225,23 @@ pub(crate) fn groups(records: &[Value]) -> BTreeMap<String, Group> {
     groups
 }
 
+fn administrative(candidate: &Value) -> bool {
+    crate::laboratory::is_administrative_name(candidate["code"]["text"].as_str().unwrap_or(""))
+        || candidate["code"]["coding"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|coding| {
+                (matches!(
+                    coding["system"].as_str(),
+                    Some("http://loinc.org" | "https://loinc.org")
+                ) && matches!(coding["code"].as_str(), Some("45374-6" | "19066-0")))
+                    || crate::laboratory::is_administrative_name(
+                        coding["display"].as_str().unwrap_or(""),
+                    )
+            })
+}
+
 fn has_value(value: &Value) -> bool {
     value
         .as_object()
@@ -241,6 +280,30 @@ fn identity(candidate: &Value, record: &Value, suffix: &str) -> (String, String)
     {
         return (metric.into(), name);
     }
+    // Distinct assays must not appear as indistinguishable case variants.
+    // Prefer reviewed titles for codes whose source text omits the analyte/formula.
+    let name = if loinc.len() == 1 {
+        match loinc.iter().next().copied().unwrap_or("") {
+            "1989-3" => "25-hydroxyvitamin D3",
+            "62292-8" => "Total 25-hydroxyvitamin D (D2 + D3)",
+            "88293-6" => "eGFR (historical CKD-EPI, Black population adjustment)",
+            "88294-4" => "eGFR (historical CKD-EPI, non-Black population adjustment)",
+            "77147-7" => "eGFR (historical MDRD)",
+            "69405-9" => "eGFR (formula not specified)",
+            "3013-0" => "Thyroglobulin",
+            "2731-8" => "Intact parathyroid hormone",
+            "19123-9" => "Magnesium (serum or plasma)",
+            "2777-1" => "Phosphate",
+            "33037-3" => "Anion gap",
+            "3097-3" => "BUN / creatinine ratio",
+            "1968-7" => "Direct bilirubin",
+            "1971-1" => "Indirect bilirubin",
+            _ => &name,
+        }
+        .to_owned()
+    } else {
+        name
+    };
     let key = if !loinc.is_empty() {
         json!(["loinc", loinc])
     } else {

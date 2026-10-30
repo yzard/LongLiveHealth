@@ -114,6 +114,8 @@ fn unknown_ambiguous_overflow_and_unmapped_values_remain_explicit() {
     input.raw_unit = None;
     assert_eq!(interpret(&input).result.status, "missing_unit");
     input.metric_id = None;
+    assert_eq!(interpret(&input).result.status, "missing_unit");
+    input.raw_name = "Unknown biomarker".into();
     assert_eq!(interpret(&input).result.status, "unmapped_metric");
     input.metric_id = Some("apob".into());
     input.raw_unit = Some("mmol/L".into());
@@ -145,4 +147,114 @@ fn clinical_spelling_aliases_keep_prefix_magnitudes_distinct() {
     assert_ne!(canonical_unit("M/uL"), canonical_unit("K/uL"));
     assert_ne!(canonical_unit("ng/L"), canonical_unit("ng/mL"));
     assert_eq!(canonical_unit("Mmol/L"), None);
+}
+
+#[test]
+fn report_names_resolve_without_rewriting_originals_or_merging_distinct_tests() {
+    use longlivehealth::laboratory::infer_metric;
+    for (names, unit, expected) in [
+        (
+            vec!["ApoB", "Apolipoprotein B", "Apolipoprotein B (ApoB)"],
+            "mg/dL",
+            "apob",
+        ),
+        (
+            vec!["HDL-Cholesterol", "HDL cholesterol", "HDL-C"],
+            "mg/dL",
+            "hdl_cholesterol",
+        ),
+        (
+            vec!["ALT", "SGPT", "Alanine Aminotransferase (ALT)"],
+            "U/L",
+            "alt",
+        ),
+        (
+            vec!["WBC", "White Blood Cell (WBC) Count"],
+            "Thousand/uL",
+            "wbc",
+        ),
+        (
+            vec!["Lymphocytes", "Lymphocytes, absolute"],
+            "cells/uL",
+            "lymphocyte_count",
+        ),
+        (
+            vec!["Lymphocytes %", "Lymphocyte percentage"],
+            "%",
+            "lymphocyte_percent",
+        ),
+        (
+            vec!["hs-CRP", "High-Sensitivity C-Reactive Protein (hs-CRP)"],
+            "mg/L",
+            "hs_crp",
+        ),
+        (
+            vec!["Free PSA", "Prostate Specific Antigen (PSA), Free"],
+            "ng/mL",
+            "psa_free",
+        ),
+    ] {
+        for name in names {
+            assert_eq!(infer_metric(name, Some(unit)), Some(expected), "{name}");
+        }
+    }
+    assert_ne!(
+        infer_metric("Free PSA", Some("ng/mL")),
+        infer_metric("Total PSA", Some("ng/mL"))
+    );
+    assert_ne!(
+        infer_metric("CRP", Some("mg/L")),
+        infer_metric("hs-CRP", Some("mg/L"))
+    );
+    assert_ne!(
+        infer_metric("Albumin", Some("g/dL")),
+        infer_metric("Albumin, Random Urine without Creatinine", Some("mg/dL"))
+    );
+    assert_eq!(infer_metric("Thyroglobulin", Some("IU/mL")), None);
+    assert_eq!(infer_metric("LDL", Some("nmol/L")), None);
+    assert_eq!(
+        infer_metric("Unknown similar biomarker", Some("mg/dL")),
+        None
+    );
+    let mut input = observation_payload();
+    input.metric_id = None;
+    input.raw_name = "Basophils".into();
+    input.raw_unit = Some("cells/uL".into());
+    input.raw_result = "40".into();
+    let original = serde_json::to_value(&input).unwrap();
+    assert_eq!(normalized(&input), Some(("0.04".into(), "10^9/L".into())));
+    assert_eq!(serde_json::to_value(&input).unwrap(), original);
+    input.metric_id = Some("wbc".into());
+    assert_eq!(
+        longlivehealth::laboratory::resolved_metric(&input),
+        Some("wbc")
+    );
+}
+
+#[test]
+fn administrative_fields_cannot_be_saved_even_with_a_forged_metric_id() {
+    for name in [
+        "Specimen Expiration Date",
+        "status INFORMATION",
+        "Blood bank comment",
+        "Accession Number",
+        "Patient ID",
+    ] {
+        let mut payload = observation_payload();
+        payload.raw_name = name.into();
+        payload.metric_id = Some("glucose".into());
+        assert!(payload.validate(1).is_err(), "{name}");
+        assert!(longlivehealth::laboratory::resolved_metric(&payload).is_none());
+    }
+    for name in [
+        "Antibody Screen",
+        "Glucose - Urine",
+        "Thyroglobulin Antibodies",
+        "Specimen creatinine",
+    ] {
+        let mut payload = observation_payload();
+        payload.raw_name = name.into();
+        payload.metric_id = None;
+        assert!(payload.validate(1).is_ok(), "{name}");
+    }
 }

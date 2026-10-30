@@ -96,6 +96,7 @@ impl Database {
             .execute(&mut *transaction)
             .await?;
         transaction.commit().await?;
+        self.reconcile_report_drafts().await?;
         Ok(())
     }
     pub async fn delete_account(&self, user_id: &str) -> Result<(), AppError> {
@@ -121,6 +122,7 @@ impl Database {
             .execute(&mut *transaction)
             .await?;
         transaction.commit().await?;
+        self.reconcile_report_drafts().await?;
         Ok(())
     }
     pub async fn request_export(&self, user_id: &str) -> Result<String, AppError> {
@@ -295,7 +297,7 @@ async fn build_export(state: &AppState, user_id: &str, export_id: &str) -> Resul
     transaction.commit().await?;
     let field_dictionary: Value =
         serde_json::from_str(include_str!("../archive/field_dictionary.json"))?;
-    let manifest = json!({"field_dictionary":field_dictionary,"format":"longlivehealth-export","version":1,"database_schema_version":7,"table_counts":table_counts,"table_columns":table_columns,"data_revision":revision,"user_id":user_id,"created_at":now()?,
+    let manifest = json!({"field_dictionary":field_dictionary,"format":"longlivehealth-export","version":1,"database_schema_version":8,"table_counts":table_counts,"table_columns":table_columns,"data_revision":revision,"user_id":user_id,"created_at":now()?,
         "conversion_version":crate::laboratory::CONVERSION_VERSION,"metrics":crate::laboratory::metrics(),"tables":queries::EXPORT_TABLES.iter().map(|(name,_)|format!("{name}.jsonl")).collect::<Vec<_>>(),"raw_directory":"raw/","csv":"observations.csv",
         "notes":"JSONL is lossless. CSV formula-leading text is prefixed with an apostrophe. No passwords, sessions or provider secrets are exported."});
     tokio::fs::write(
@@ -410,6 +412,9 @@ fn write_zip(directory: &Path, raw: &Path) -> Result<(), AppError> {
         )?;
     }
     members.insert("observations.csv".into(), csv_member.finish());
+    // Archive each category once, stopping at the snapshot's last committed frame.
+    let mut raw_members: std::collections::BTreeMap<String, Option<u64>> =
+        std::collections::BTreeMap::new();
     for (table, path_key) in [
         ("raw_files", "relative_path"),
         ("health_originals", "raw_path"),
@@ -424,14 +429,44 @@ fn write_zip(directory: &Path, raw: &Path) -> Result<(), AppError> {
             if !crate::raw::valid_relative_path(path) {
                 return Err(AppError::Internal);
             }
-            archive
-                .start_file(path, options)
-                .map_err(|_| AppError::Internal)?;
-            let mut member = DigestMember::new(&mut archive);
-            std::io::copy(&mut std::fs::File::open(raw.join(path))?, &mut member)?;
-            if members.insert(path.into(), member.finish()).is_some() {
-                return Err(AppError::Internal);
+            let end = match (row["raw_offset"].as_u64(), row["raw_length"].as_u64()) {
+                (Some(offset), Some(length)) => Some(
+                    offset
+                        .checked_add(8)
+                        .and_then(|v| v.checked_add(length))
+                        .ok_or(AppError::Internal)?,
+                ),
+                (None, None) => None,
+                _ => return Err(AppError::Internal),
+            };
+            if let Some(previous) = raw_members.get_mut(path) {
+                match (*previous, end) {
+                    (Some(a), Some(b)) => *previous = Some(a.max(b)),
+                    _ => return Err(AppError::Internal),
+                }
+            } else {
+                raw_members.insert(path.to_owned(), end);
             }
+        }
+    }
+    for (path, end) in raw_members {
+        archive
+            .start_file(&path, options)
+            .map_err(|_| AppError::Internal)?;
+        let mut member = DigestMember::new(&mut archive);
+        let file = std::fs::File::open(raw.join(&path))?;
+        if let Some(end) = end {
+            let count = std::io::copy(&mut std::io::Read::take(file, end), &mut member)?;
+            if count != end {
+                return Err(AppError::Conflict(
+                    "Raw archive is shorter than its snapshot",
+                ));
+            }
+        } else {
+            std::io::copy(&mut std::io::BufReader::new(file), &mut member)?;
+        }
+        if members.insert(path, member.finish()).is_some() {
+            return Err(AppError::Internal);
         }
     }
     let mut manifest: Value =
@@ -489,31 +524,50 @@ impl<W: Write> Write for DigestMember<'_, W> {
 
 impl Database {
     pub async fn index_heart_samples(&self) -> Result<usize, AppError> {
-        let rows = sqlx::query(queries::HEART_SAMPLE_REINDEX)
-            .fetch_all(&self.pool)
-            .await?;
+        self.index_sample_projections(queries::HEART_SAMPLE_REINDEX, |payload| {
+            crate::health_batch::heart_samples(payload)
+                .map(|samples| json!({"quantity_samples": samples}))
+        })
+        .await
+    }
+
+    pub async fn index_recovery_hrv(&self) -> Result<usize, AppError> {
+        self.index_sample_projections(
+            queries::RECOVERY_HRV_REINDEX,
+            crate::recovery_hrv::projection,
+        )
+        .await
+    }
+
+    async fn index_sample_projections(
+        &self,
+        query: &str,
+        project: fn(&Value) -> Option<Value>,
+    ) -> Result<usize, AppError> {
+        let rows = sqlx::query(query).fetch_all(&self.pool).await?;
         let mut updated = 0;
         for (index, chunk) in rows.chunks(100).enumerate() {
             let mut prepared = Vec::new();
             for row in chunk {
-                let path: String = row.get("raw_path");
-                if !crate::raw::valid_relative_path(&path) {
-                    return Err(AppError::Internal);
-                }
-                let raw = tokio::fs::read(self.data_dir.join(path)).await?;
+                let raw = crate::health_archive::Location::from_row(row)?
+                    .read(&self.data_dir)
+                    .await?;
                 let original: Value = serde_json::from_slice(&raw)?;
-                let Some(samples) = crate::health_batch::heart_samples(&original["payload"]) else {
+                let Some(fields) = project(&original["payload"]) else {
                     continue;
                 };
                 let previous: String = row.get("payload_json");
                 let mut projection: Value = serde_json::from_str(&previous)?;
-                projection["payload"]["quantity_samples"] = json!(samples);
+                projection["payload"]
+                    .as_object_mut()
+                    .ok_or(AppError::Internal)?
+                    .extend(fields.as_object().ok_or(AppError::Internal)?.clone());
                 prepared.push((row, previous, serde_json::to_string(&projection)?));
             }
             // Read originals outside the short transaction; commit at most 100 projections.
             let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
             for (row, previous, projection) in prepared {
-                updated += sqlx::query(queries::UPDATE_HEART_SAMPLE_PROJECTION)
+                let changed = sqlx::query(queries::UPDATE_HEALTH_SAMPLE_PROJECTION)
                     .bind(projection)
                     .bind(row.get::<String, _>("user_id"))
                     .bind(row.get::<String, _>("platform"))
@@ -524,16 +578,93 @@ impl Database {
                     .execute(&mut *tx)
                     .await?
                     .rows_affected() as usize;
+                if changed > 0 {
+                    sqlx::query(queries::TOUCH_USER_DATA)
+                        .bind(row.get::<String, _>("user_id"))
+                        .execute(&mut *tx)
+                        .await?;
+                    updated += changed;
+                }
             }
             tx.commit().await?;
             if index % 10 == 0 {
                 tracing::info!(
                     updated,
                     remaining = rows.len().saturating_sub((index + 1) * 100),
-                    "Heart sample projections indexed"
+                    "Health sample projections indexed"
                 );
             }
         }
         Ok(updated)
+    }
+}
+
+impl Database {
+    pub async fn index_apple_quantities(&self) -> Result<Value, AppError> {
+        let mut cursor = 0i64;
+        let mut updated = 0u64;
+        let mut counts = std::collections::BTreeMap::<String, (u64, u64)>::new();
+        loop {
+            let rows = sqlx::query(queries::APPLE_QUANTITY_REINDEX)
+                .bind(cursor)
+                .fetch_all(&self.pool)
+                .await?;
+            if rows.is_empty() {
+                break;
+            }
+            let mut prepared = Vec::new();
+            for row in rows {
+                cursor = row.get("archive_row");
+                let kind: String = row.get("record_type");
+                let bytes = crate::health_archive::Location::from_row(&row)?
+                    .read(&self.data_dir)
+                    .await?;
+                let original: Value = serde_json::from_slice(&bytes)?;
+                let Some(fields) = crate::apple_health::projection(&kind, &original["payload"])
+                else {
+                    counts.entry(kind).or_default().1 += 1;
+                    continue;
+                };
+                let previous: String = row.get("payload_json");
+                let mut projection: Value = serde_json::from_str(&previous)?;
+                projection["payload"]
+                    .as_object_mut()
+                    .ok_or(AppError::Internal)?
+                    .extend(fields.as_object().ok_or(AppError::Internal)?.clone());
+                prepared.push((row, previous, serde_json::to_string(&projection)?));
+            }
+            let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+            let mut users = std::collections::BTreeSet::new();
+            for (row, previous, projection) in prepared {
+                let user: String = row.get("user_id");
+                let n = sqlx::query(queries::UPDATE_HEALTH_SAMPLE_PROJECTION)
+                    .bind(projection)
+                    .bind(&user)
+                    .bind(row.get::<String, _>("platform"))
+                    .bind(row.get::<String, _>("source_id"))
+                    .bind(row.get::<String, _>("record_id"))
+                    .bind(row.get::<String, _>("raw_id"))
+                    .bind(previous)
+                    .execute(&mut *tx)
+                    .await?
+                    .rows_affected();
+                if n > 0 {
+                    users.insert(user);
+                    counts.entry(row.get("record_type")).or_default().0 += n;
+                    updated += n;
+                }
+            }
+            for user in users {
+                sqlx::query(queries::TOUCH_USER_DATA)
+                    .bind(user)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            tx.commit().await?;
+            if updated % 10000 < 500 {
+                tracing::info!(updated, "Apple Health quantity projections indexed");
+            }
+        }
+        Ok(json!({"updated":updated,"types":counts}))
     }
 }

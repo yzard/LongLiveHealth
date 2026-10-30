@@ -330,7 +330,7 @@ async fn quantity_glucose_and_clinical_component_share_report_units_and_dates() 
 }
 
 #[tokio::test]
-async fn every_catalog_metric_plots_its_own_records_without_unrelated_exclusions() {
+async fn known_clinical_metrics_plot_their_own_records_without_unrelated_exclusions() {
     let (_directory, state) = fixture().await;
     let user = add_user(&state, "chart-matrix").await;
     let connection = state
@@ -348,7 +348,29 @@ async fn every_catalog_metric_plots_its_own_records_without_unrelated_exclusions
         "2093-3", "2089-1", "2085-9", "2571-8", "1884-6", "4548-4", "2345-7", "718-7", "2160-0",
         "2276-4", "1751-7", "1988-5", "736-9", "787-2", "788-0", "6768-6", "6690-2",
     ];
-    let metrics = longlivehealth::laboratory::metrics();
+    let coded_ids = [
+        "total_cholesterol",
+        "ldl_cholesterol",
+        "hdl_cholesterol",
+        "triglycerides",
+        "apob",
+        "hba1c",
+        "glucose",
+        "hemoglobin",
+        "creatinine",
+        "ferritin",
+        "albumin",
+        "crp",
+        "lymphocyte_percent",
+        "mcv",
+        "rdw",
+        "alp",
+        "wbc",
+    ];
+    let metrics: Vec<_> = longlivehealth::laboratory::metrics()
+        .into_iter()
+        .filter(|metric| coded_ids.contains(&metric.metric_id))
+        .collect();
     assert_eq!(codes.len(), metrics.len());
     let mut records = Vec::new();
     for (index, metric) in metrics.iter().enumerate() {
@@ -506,17 +528,17 @@ async fn browse_discovers_clinical_items_groups_codes_and_retains_text_and_bound
             .unwrap()
             .is_empty()
     );
-    assert!(matches!(
-        history(
-            &state.database,
-            &bob.user_id,
-            HistoryRequest {
-                metric_id: id.into()
-            }
-        )
-        .await,
-        Err(longlivehealth::error::AppError::NotFound)
-    ));
+    let other = history(
+        &state.database,
+        &bob.user_id,
+        HistoryRequest {
+            metric_id: id.into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(other["records"].as_array().unwrap().is_empty());
+    assert!(other["points"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -600,7 +622,11 @@ async fn equivalent_clinical_units_coalesce_display_but_keep_originals_and_disti
             .as_array()
             .unwrap()
             .iter()
-            .find(|m| m["name"] == name)
+            .find(|m| {
+                m["name"]
+                    .as_str()
+                    .is_some_and(|n| n.eq_ignore_ascii_case(name))
+            })
             .unwrap();
         let result = history(
             &state.database,
@@ -613,6 +639,10 @@ async fn equivalent_clinical_units_coalesce_display_but_keep_originals_and_disti
         .unwrap();
         assert_eq!(result["records"].as_array().unwrap().len(), 4, "{name}");
         assert_eq!(result["points"].as_array().unwrap().len(), 4, "{name}");
+        assert!(
+            !result["chart_ranges"]["D"].as_array().unwrap().is_empty(),
+            "{name}"
+        );
         assert!(
             result["points"]
                 .as_array()
@@ -632,4 +662,322 @@ async fn equivalent_clinical_units_coalesce_display_but_keep_originals_and_disti
             0.04
         );
     }
+}
+
+#[tokio::test]
+async fn exact_unitless_clinical_results_plot_but_text_and_thresholds_do_not() {
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "unitless-results").await;
+    let connection = state
+        .database
+        .create_connection(
+            &user.user_id,
+            ConnectionRequest {
+                platform: "apple_health".into(),
+                installation_id: uuid::Uuid::new_v4().to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let mut records = Vec::new();
+    for (id, value) in [
+        ("numeric", json!({"valueQuantity":{"value":12}})),
+        ("text-number", json!({"valueString":"73"})),
+        ("threshold", json!({"valueString":">60"})),
+        ("qualitative", json!({"valueString":"Negative"})),
+    ] {
+        let mut r = json!({"resourceType":"Observation","status":"final","effectiveDateTime":"2026-10-21T00:00:00Z","code":{"text":id}});
+        r.as_object_mut()
+            .unwrap()
+            .extend(value.as_object().unwrap().clone());
+        records.push(HealthRecordInput{record_id:id.into(),source_id:"hospital".into(),record_type:"HKClinicalTypeIdentifierLabResultRecord".into(),start_at:1792540800,end_at:1792540800,version:1,deleted:false,payload:json!({"fhir":{"data_base64":STANDARD.encode(serde_json::to_vec(&r).unwrap())}})});
+    }
+    state
+        .database
+        .sync_health(
+            &user.user_id,
+            SyncRequest {
+                connection_id: connection.connection_id,
+                batch_id: uuid::Uuid::new_v4().to_string(),
+                record_type: "HKClinicalTypeIdentifierLabResultRecord".into(),
+                coverage_status: "observed".into(),
+                records,
+            },
+        )
+        .await
+        .unwrap();
+    let catalog = longlivehealth::metric_history::browse(&state.database, &user.user_id)
+        .await
+        .unwrap();
+    for metric in catalog["metrics"].as_array().unwrap() {
+        let result = history(
+            &state.database,
+            &user.user_id,
+            HistoryRequest {
+                metric_id: metric["metric_id"].as_str().unwrap().into(),
+            },
+        )
+        .await
+        .unwrap();
+        let numeric = matches!(metric["name"].as_str().unwrap(), "numeric" | "text-number");
+        assert_eq!(result["records"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            result["chart_ranges"]["D"].as_array().unwrap().len(),
+            usize::from(numeric)
+        );
+        if numeric {
+            assert_eq!(result["points"][0]["unit"], "Not reported");
+        }
+    }
+}
+
+#[tokio::test]
+async fn report_aliases_share_history_and_browse_without_rewriting_stored_evidence() {
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "alias-review").await;
+    for (name, source) in [
+        ("LDL-C", "Function Health"),
+        ("LDL-Cholesterol", "Local Clinic"),
+    ] {
+        let report = archive(&state, "alias-review").await;
+        let mut payload = observation_payload();
+        payload.raw_name = name.into();
+        payload.metric_id = None;
+        let result = state
+            .database
+            .review(
+                &user.user_id,
+                ReviewRequest {
+                    report_id: report,
+                    expected_revision: 1,
+                    context: Some(serde_json::from_value(json!({"source_name":source})).unwrap()),
+                    observations: vec![ReviewItem {
+                        observation_id: None,
+                        expected_revision: None,
+                        status: "confirmed".into(),
+                        payload,
+                    }],
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["observations"][0]["payload"]["raw_name"], name);
+        assert_eq!(
+            result["observations"][0]["payload"]["metric_id"],
+            Value::Null
+        );
+        assert_eq!(
+            result["observations"][0]["resolved_metric_id"],
+            "ldl_cholesterol"
+        );
+    }
+    let history = read(&state, &user.user_id).await;
+    assert_eq!(history["points"].as_array().unwrap().len(), 2);
+    assert_ne!(
+        history["points"][0]["source_name"],
+        history["points"][1]["source_name"]
+    );
+    let browse = longlivehealth::metric_history::browse(&state.database, &user.user_id)
+        .await
+        .unwrap();
+    assert_eq!(browse["metrics"].as_array().unwrap().len(), 1);
+    assert_eq!(browse["metrics"][0]["metric_id"], "ldl_cholesterol");
+}
+
+#[test]
+fn every_report_catalog_name_resolves_with_its_supported_unit() {
+    for definition in longlivehealth::laboratory::metrics() {
+        assert_eq!(
+            longlivehealth::laboratory::infer_metric(
+                definition.name,
+                Some(definition.standard_unit)
+            ),
+            Some(definition.metric_id),
+            "{}",
+            definition.name
+        );
+    }
+}
+
+#[tokio::test]
+async fn browse_unifies_sodium_sources_and_excludes_workflow_fields() {
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "clean-browse").await;
+    let report = archive(&state, "clean-browse").await;
+    let mut payload = observation_payload();
+    payload.raw_name = "Sodium".into();
+    payload.raw_result = "140".into();
+    payload.raw_unit = Some("mmol/L".into());
+    payload.metric_id = None;
+    state
+        .database
+        .review(
+            &user.user_id,
+            ReviewRequest {
+                report_id: report,
+                expected_revision: 1,
+                context: None,
+                observations: vec![ReviewItem {
+                    observation_id: None,
+                    expected_revision: None,
+                    status: "confirmed".into(),
+                    payload,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    let connection = state
+        .database
+        .create_connection(
+            &user.user_id,
+            ConnectionRequest {
+                platform: "apple_health".into(),
+                installation_id: uuid::Uuid::new_v4().to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let specifications = [
+        (
+            "Sodium",
+            "2951-2",
+            json!({"valueQuantity":{"value":140,"unit":"mmol/L"}}),
+        ),
+        (
+            "sodium",
+            "2951-2",
+            json!({"valueQuantity":{"value":140,"unit":"mmol/L"}}),
+        ),
+        (
+            "Unknown hospital caption",
+            "45374-6",
+            json!({"valueDateTime":"2026-08-05"}),
+        ),
+        (
+            "Status Information",
+            "19066-0",
+            json!({"valueString":"Final"}),
+        ),
+        (
+            "Specimen Expiration Date",
+            "local-expiration",
+            json!({"valueString":"Tomorrow"}),
+        ),
+        (
+            "Antibody screen",
+            "890-4",
+            json!({"valueString":"Negative"}),
+        ),
+        (
+            "Glucose in urine",
+            "2350-7",
+            json!({"valueString":"Negative"}),
+        ),
+    ];
+    let records = specifications.into_iter().enumerate().map(|(i,(name,code,values))| {
+        let mut resource=json!({"resourceType":"Observation","status":"final","effectiveDateTime":"2026-08-03T00:00:00Z",
+            "code":{"text":name,"coding":[{"system":"http://loinc.org","code":code}]}});
+        resource.as_object_mut().unwrap().extend(values.as_object().unwrap().clone());
+        HealthRecordInput { record_id:format!("item-{i}"),source_id:"hospital".into(),record_type:"HKClinicalTypeIdentifierLabResultRecord".into(),start_at:1785715200,end_at:1785715200,version:1,deleted:false,payload:json!({"source_name":"Hospital","fhir":{"data_base64":STANDARD.encode(serde_json::to_vec(&resource).unwrap())}}) }
+    }).collect();
+    state
+        .database
+        .sync_health(
+            &user.user_id,
+            SyncRequest {
+                connection_id: connection.connection_id,
+                batch_id: uuid::Uuid::new_v4().to_string(),
+                record_type: "HKClinicalTypeIdentifierLabResultRecord".into(),
+                coverage_status: "observed".into(),
+                records,
+            },
+        )
+        .await
+        .unwrap();
+    let browse = longlivehealth::metric_history::browse(&state.database, &user.user_id)
+        .await
+        .unwrap();
+    let entries = browse["metrics"].as_array().unwrap();
+    assert_eq!(entries.len(), 3); // Sodium, qualitative antibody result, urine glucose.
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|m| m["metric_id"] == "sodium")
+            .count(),
+        1
+    );
+    assert!(
+        !entries
+            .iter()
+            .any(|m| m["name"].as_str().unwrap().contains("Expiration")
+                || m["name"] == "Status Information")
+    );
+    let result = history(
+        &state.database,
+        &user.user_id,
+        HistoryRequest {
+            metric_id: "sodium".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["records"].as_array().unwrap().len(), 2); // Report and hospital histories.
+    assert_eq!(
+        result["records"][0]["original_records"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(result["points"].as_array().unwrap().len(), 2); // Report + hospital; sources preserved.
+}
+
+#[tokio::test]
+async fn report_history_keeps_undated_and_non_numeric_results() {
+    let (_directory, state) = fixture().await;
+    let alice = add_user(&state, "alice").await;
+    let report = archive(&state, "alice").await;
+    let mut undated = observation_payload();
+    undated.sampled_at = None;
+    let mut text = observation_payload();
+    text.raw_result = "Not available".into();
+    state
+        .database
+        .review(
+            &alice.user_id,
+            ReviewRequest {
+                report_id: report,
+                expected_revision: 1,
+                context: Some(
+                    serde_json::from_value(json!({"source_name":"Function Health"})).unwrap(),
+                ),
+                observations: vec![undated, text]
+                    .into_iter()
+                    .map(|payload| ReviewItem {
+                        observation_id: None,
+                        expected_revision: None,
+                        status: "confirmed".into(),
+                        payload,
+                    })
+                    .collect(),
+            },
+        )
+        .await
+        .unwrap();
+    let result = read(&state, &alice.user_id).await;
+    assert!(result["points"].as_array().unwrap().is_empty());
+    let records = result["records"].as_array().unwrap();
+    assert_eq!(records.len(), 2);
+    assert!(records.iter().any(|r| r["sampled_at"].is_null()));
+    assert!(
+        records
+            .iter()
+            .any(|r| r["display_value"] == "Not available")
+    );
+    assert!(
+        records
+            .iter()
+            .all(|r| r["source_name"] == "Function Health" && r["original"].is_object())
+    );
 }

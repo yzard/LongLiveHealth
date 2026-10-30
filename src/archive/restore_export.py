@@ -39,7 +39,16 @@ def restore(archive_path, destination, username, max_bytes):
                 database = destination / 'database.sqlite'
                 with database.open('xb') as stream:
                     os.chmod(stream.fileno(), 0o600)
+                draft_path = destination / 'draft.sqlite'
+                with draft_path.open('xb') as stream:
+                    os.chmod(stream.fileno(), 0o600)
+                draft_connection = sqlite3.connect(draft_path)
+                try:
+                    draft_connection.executescript((SCHEMA.parent / 'draft_schema.sql').read_text())
+                finally:
+                    draft_connection.close()
                 connection = sqlite3.connect(database)
+                connection.execute('ATTACH DATABASE ? AS draft', (str(draft_path),))
                 try:
                     connection.execute(queries.FOREIGN_KEYS)
                     connection.executescript(SCHEMA.read_text())
@@ -59,7 +68,9 @@ def restore(archive_path, destination, username, max_bytes):
                         fields = [definition[0] for definition in definitions]
                         statement = queries.insert(table, fields)
                         for row in check_export.rows(archive, table + '.jsonl'):
-                            connection.execute(statement, [row[field] for field in fields])
+                            target = queries.insert('report_drafts', fields) if table == 'observations' and row['status'] != 'confirmed' else statement
+                            connection.execute(target, [row[field] for field in fields])
+                    check_export.require(connection.execute(queries.CHECK_DRAFT_OWNERS).fetchone()[0] == 0, "Restored draft ownership is invalid")
                     interrupted = connection.execute(queries.CANCEL_ANALYSIS).rowcount
                     connection.execute(queries.CLEAR_PROCESSING)
                     connection.execute(queries.REQUEUE_DAILY_VIEWS)
@@ -86,7 +97,7 @@ def restore(archive_path, destination, username, max_bytes):
                     connection.close()
                 result = dict(
                     status='restored',
-                    database_schema_version=7,
+                    database_schema_version=8,
                     tables=audit['tables'],
                     original_files=audit['original_files'],
                     account_status='disabled',

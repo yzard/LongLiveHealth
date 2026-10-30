@@ -142,7 +142,7 @@ impl Database {
         let started = std::time::Instant::now();
         let batch_digest = &request.digest;
         // Authenticate and reject/replay completed batches without writing temporary files.
-        let _: String = sqlx::query_scalar(queries::CONNECTION)
+        let initial_platform: String = sqlx::query_scalar(queries::CONNECTION)
             .bind(user_id)
             .bind(&request.connection_id)
             .fetch_optional(&self.pool)
@@ -170,17 +170,20 @@ impl Database {
             request
                 .records
                 .iter()
-                .map(|record| async move {
-                    if record.deleted {
-                        return Ok(None);
+                .map(|record| {
+                    let initial_platform = &initial_platform;
+                    async move {
+                        if record.deleted || initial_platform == "apple_health" {
+                            return Ok(None);
+                        }
+                        crate::raw::stage(
+                            &self.temporary_files,
+                            &self.data_dir,
+                            record.raw_json.as_bytes(),
+                        )
+                        .await
+                        .map(Some)
                     }
-                    crate::raw::stage(
-                        &self.temporary_files,
-                        &self.data_dir,
-                        record.raw_json.as_bytes(),
-                    )
-                    .await
-                    .map(Some)
                 })
                 .collect::<Vec<_>>(),
         )
@@ -194,6 +197,7 @@ impl Database {
         let lock_wait_ms = waiting.elapsed().as_millis() as u64;
         let locked = std::time::Instant::now();
         let mut published_paths = Vec::new();
+        let mut appends = crate::health_archive::Appends::default();
         let platform: String = sqlx::query_scalar(queries::CONNECTION)
             .bind(user_id)
             .bind(&request.connection_id)
@@ -253,7 +257,10 @@ impl Database {
             } else {
                 None
             };
+        let bulk_apple = platform == "apple_health" && current.is_some();
+        let mut bulk_rows = Vec::new();
         let mut changed = false;
+        let mut written_originals = 0;
         for (record, staged) in request.records.iter().zip(&staged) {
             if platform == "manual" {
                 let previous = sqlx::query(queries::HEALTH_RECORD)
@@ -310,7 +317,7 @@ impl Database {
                     continue;
                 }
             }
-            if record.deleted {
+            if record.deleted && platform != "apple_health" {
                 let paths: Vec<String> = sqlx::query_scalar(queries::HEALTH_RAW_TO_DELETE)
                     .bind(user_id)
                     .bind(&platform)
@@ -335,12 +342,14 @@ impl Database {
                     .bind(&record.record_id)
                     .execute(&mut *transaction)
                     .await?;
-                sqlx::query(queries::PURGE_HEALTH_ORIGINS)
-                    .bind(user_id)
-                    .bind(&platform)
-                    .bind(&record.record_id)
-                    .execute(&mut *transaction)
-                    .await?;
+                if platform != "apple_health" {
+                    sqlx::query(queries::PURGE_HEALTH_ORIGINS)
+                        .bind(user_id)
+                        .bind(&platform)
+                        .bind(&record.record_id)
+                        .execute(&mut *transaction)
+                        .await?;
+                }
                 changed = true;
             }
             let stored = if current.is_some() {
@@ -393,6 +402,30 @@ impl Database {
                     {
                         continue;
                     }
+                    if platform == "apple_health" {
+                        let original = sqlx::query(queries::CURRENT_HEALTH_ORIGINAL)
+                            .bind(user_id)
+                            .bind(&platform)
+                            .bind(&record.source_id)
+                            .bind(&record.record_id)
+                            .fetch_optional(&mut *transaction)
+                            .await?;
+                        if let Some(original) = original {
+                            let bytes = crate::health_archive::Location::from_row(&original)?
+                                .read(&self.data_dir)
+                                .await?;
+                            let incoming = record.raw_json.clone();
+                            if self
+                                .cpu
+                                .run(move || {
+                                    crate::health_batch::same_archived_sample(&bytes, &incoming)
+                                })
+                                .await?
+                            {
+                                continue;
+                            }
+                        }
+                    }
                     if platform != "apple_health"
                         || !crate::health_batch::only_source_name_changed(
                             previous.as_deref().ok_or(AppError::Internal)?,
@@ -408,6 +441,33 @@ impl Database {
                     continue;
                 }
             }
+            if bulk_apple {
+                let revision_id = uuid::Uuid::new_v4().to_string();
+                let location = appends
+                    .push(
+                        &mut transaction,
+                        user_id,
+                        &record.record_type,
+                        &record.raw_json,
+                    )
+                    .await?;
+                written_originals += 1;
+                bulk_rows.push(json!([
+                    record.source_id,
+                    record.record_id,
+                    record.record_type,
+                    record.start_at,
+                    record.end_at,
+                    record.version,
+                    record.payload_json,
+                    revision_id,
+                    location.path,
+                    location.offset,
+                    location.length
+                ]));
+                changed = true;
+                continue;
+            }
             sqlx::query(queries::UPSERT_HEALTH)
                 .bind(user_id)
                 .bind(&platform)
@@ -421,7 +481,7 @@ impl Database {
                 .bind(payload)
                 .execute(&mut *transaction)
                 .await?;
-            if record.deleted {
+            if record.deleted && platform != "apple_health" {
                 sqlx::query(queries::PURGE_HEALTH_ORIGINALS)
                     .bind(user_id)
                     .bind(&platform)
@@ -431,36 +491,78 @@ impl Database {
                     .await?;
             } else {
                 let revision_id = uuid::Uuid::new_v4().to_string();
-                let raw_path =
-                    crate::raw::health_path(user_id, &platform, &record.source_id, &revision_id)?;
-                crate::raw::publish(
-                    &self.data_dir,
-                    &raw_path,
-                    staged.as_ref().ok_or(AppError::Internal)?,
-                )
-                .await?;
-                published_paths.push(raw_path.clone());
+                let location = if platform == "apple_health" {
+                    appends
+                        .push(
+                            &mut transaction,
+                            user_id,
+                            &record.record_type,
+                            &record.raw_json,
+                        )
+                        .await?
+                } else {
+                    let path = crate::raw::health_path(
+                        user_id,
+                        &platform,
+                        &record.source_id,
+                        &revision_id,
+                    )?;
+                    crate::raw::publish(
+                        &self.data_dir,
+                        &path,
+                        staged.as_ref().ok_or(AppError::Internal)?,
+                    )
+                    .await?;
+                    published_paths.push(path.clone());
+                    crate::health_archive::Location {
+                        path,
+                        offset: None,
+                        length: None,
+                    }
+                };
+                written_originals += 1;
                 sqlx::query(queries::INSERT_HEALTH_ORIGINAL)
                     .bind(user_id)
                     .bind(&platform)
                     .bind(&record.source_id)
                     .bind(&record.record_id)
                     .bind(&revision_id)
-                    .bind(raw_path)
+                    .bind(location.path)
                     .bind(now()?)
+                    .bind(location.offset)
+                    .bind(location.length)
                     .execute(&mut *transaction)
                     .await?;
-                sqlx::query(queries::SET_HEALTH_ORIGINAL)
-                    .bind(&revision_id)
-                    .bind(user_id)
-                    .bind(&platform)
-                    .bind(&record.source_id)
-                    .bind(&record.record_id)
-                    .execute(&mut *transaction)
-                    .await?;
+                if !record.deleted {
+                    sqlx::query(queries::SET_HEALTH_ORIGINAL)
+                        .bind(&revision_id)
+                        .bind(user_id)
+                        .bind(&platform)
+                        .bind(&record.source_id)
+                        .bind(&record.record_id)
+                        .execute(&mut *transaction)
+                        .await?;
+                }
             }
             changed = true;
         }
+        if !bulk_rows.is_empty() {
+            let rows = serde_json::to_string(&bulk_rows)?;
+            sqlx::query(queries::UPSERT_APPLE_BATCH)
+                .bind(user_id)
+                .bind(&rows)
+                .execute(&mut *transaction)
+                .await?;
+            sqlx::query(queries::INSERT_APPLE_ORIGINALS)
+                .bind(user_id)
+                .bind(&rows)
+                .bind(now()?)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        let (mut transaction, appended_paths) =
+            appends.flush(self.data_dir.clone(), transaction).await?;
+        published_paths.extend(appended_paths);
         sqlx::query(queries::INSERT_SYNC_BATCH)
             .bind(user_id)
             .bind(&request.connection_id)
@@ -469,19 +571,21 @@ impl Database {
             .bind(now()?)
             .execute(&mut *transaction)
             .await?;
-        let successful = ["observed", "no_visible_samples"]
-            .contains(&request.coverage_status.as_str())
-            .then_some(now()?);
-        sqlx::query(queries::UPSERT_COVERAGE)
-            .bind(user_id)
-            .bind(&request.connection_id)
-            .bind(&request.record_type)
-            .bind(request.coverage_status)
-            .bind(now()?)
-            .bind(successful)
-            .bind(successful)
-            .execute(&mut *transaction)
-            .await?;
+        for coverage in &request.coverage {
+            let successful = ["observed", "no_visible_samples"]
+                .contains(&coverage.status.as_str())
+                .then_some(now()?);
+            sqlx::query(queries::UPSERT_COVERAGE)
+                .bind(user_id)
+                .bind(&request.connection_id)
+                .bind(&coverage.record_type)
+                .bind(&coverage.status)
+                .bind(now()?)
+                .bind(successful)
+                .bind(successful)
+                .execute(&mut *transaction)
+                .await?;
+        }
         sqlx::query(queries::INVALIDATE_EXPORTS)
             .bind(user_id)
             .execute(&mut *transaction)
@@ -517,7 +621,8 @@ impl Database {
         transaction.commit().await?;
         tracing::info!(
             records = request.records.len(),
-            originals = published_paths.len(),
+            originals = written_originals,
+            raw_files = published_paths.len(),
             staging_ms,
             lock_wait_ms,
             write_lock_ms = locked.elapsed().as_millis() as u64,
@@ -546,21 +651,17 @@ impl Database {
         user: &str,
         row: &mut StoredHealthRecord,
     ) -> Result<(), AppError> {
-        let path: String = sqlx::query_scalar(queries::CURRENT_HEALTH_ORIGINAL)
+        let original = sqlx::query(queries::CURRENT_HEALTH_ORIGINAL)
             .bind(user)
             .bind(&row.platform)
             .bind(&row.source_id)
             .bind(&row.record_id)
             .fetch_one(&self.pool)
             .await?;
-        if !crate::raw::valid_relative_path(&path) {
-            return Err(AppError::Internal);
-        }
-        let path = self.data_dir.join(path);
-        if tokio::fs::metadata(&path).await?.len() > crate::health_batch::MAX_BATCH_BYTES as u64 {
-            return Err(AppError::TooLarge);
-        }
-        row.payload_json = tokio::fs::read_to_string(path).await?;
+        let bytes = crate::health_archive::Location::from_row(&original)?
+            .read(&self.data_dir)
+            .await?;
+        row.payload_json = String::from_utf8(bytes).map_err(|_| AppError::Internal)?;
         Ok(())
     }
 
@@ -580,23 +681,10 @@ impl Database {
             .fetch_all(&self.pool)
             .await?;
         let mut records = Vec::new();
-        let mut byte_count = 0;
         for row in rows {
-            let path: String = row.try_get("raw_path")?;
-            if !crate::raw::valid_relative_path(&path) {
-                return Err(AppError::Internal);
-            }
-            let file = tokio::fs::File::open(self.data_dir.join(path)).await?;
-            use tokio::io::AsyncReadExt;
-            let remaining = crate::health_batch::MAX_BATCH_BYTES - byte_count;
-            let mut bytes = Vec::new();
-            file.take(remaining as u64 + 1)
-                .read_to_end(&mut bytes)
+            let bytes = crate::health_archive::Location::from_row(&row)?
+                .read(&self.data_dir)
                 .await?;
-            byte_count += bytes.len();
-            if byte_count > crate::health_batch::MAX_BATCH_BYTES {
-                return Err(AppError::TooLarge);
-            }
             records.push((row.get::<String, _>("platform"), bytes));
         }
         self.cpu
@@ -630,19 +718,24 @@ impl Database {
                     "source_id": row.get::<String, _>("source_id"),
                     "record_id": row.get::<String, _>("record_id"),
                     "relative_path": row.get::<String, _>("raw_path"),
-                    "received_at": row.get::<i64, _>("received_at")
+                    "received_at": row.get::<i64, _>("received_at"),
+                    "raw_offset": row.get::<Option<i64>, _>("raw_offset"),
+                    "raw_length": row.get::<Option<i64>, _>("raw_length")
                 })
             })
             .collect::<Vec<_>>();
         Ok(json!({"files": files}))
     }
-    pub async fn health_raw_path(&self, user_id: &str, raw_id: &str) -> Result<String, AppError> {
-        sqlx::query_scalar(queries::HEALTH_RAW_GET)
+    pub async fn health_raw_bytes(&self, user_id: &str, raw_id: &str) -> Result<Vec<u8>, AppError> {
+        let row = sqlx::query(queries::HEALTH_RAW_GET)
             .bind(user_id)
             .bind(raw_id)
             .fetch_optional(&self.pool)
             .await?
-            .ok_or(AppError::NotFound)
+            .ok_or(AppError::NotFound)?;
+        crate::health_archive::Location::from_row(&row)?
+            .read(&self.data_dir)
+            .await
     }
     pub async fn aggregate_health(
         &self,
@@ -754,6 +847,7 @@ pub fn aggregate_records(
     end: NaiveDate,
     timezone: Tz,
 ) -> Result<Value, AppError> {
+    let records = crate::health_connect::sleep_intervals(records)?;
     let expected_unit = daily_unit(kind)?;
     let cumulative = matches!(kind, "steps" | "active_energy" | "basal_energy");
     let mut days = Vec::new();

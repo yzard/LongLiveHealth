@@ -27,7 +27,7 @@ pub async fn history(
         return database.cpu.run(move || {
             let mut groups = crate::clinical_labs::groups(&records);
             let group = groups.remove(&request.metric_id).ok_or(AppError::NotFound)?;
-            Ok(json!({"metric":group.definition,"points":group.points,"records":group.records,"excluded":[],"excluded_count":0,"algorithm_version":"clinical-history-v1"}))
+            Ok(json!({"chart_ranges":point_ranges(&group.points),"metric":group.definition,"points":group.points,"records":group.records,"excluded":[],"excluded_count":0,"algorithm_version":"clinical-history-v1"}))
         }).await;
     }
     let definition = crate::laboratory::metrics()
@@ -48,8 +48,12 @@ pub async fn history(
         .as_array()
         .cloned()
         .ok_or(AppError::Internal)?;
+    let mut report_records = report_history["records"]
+        .as_array()
+        .cloned()
+        .ok_or(AppError::Internal)?;
     let mut sources = BTreeMap::new();
-    for point in &mut points {
+    for point in points.iter_mut().chain(report_records.iter_mut()) {
         let report_id = point["report_id"]
             .as_str()
             .ok_or(AppError::Internal)?
@@ -94,20 +98,38 @@ pub async fn history(
         .ok_or(AppError::Internal)?;
     database.cpu.run(move || {
         let groups = crate::clinical_labs::groups(&health);
-        let records = groups.get(&request.metric_id).map(|g| g.records.clone()).unwrap_or_default();
+        let mut records = groups.get(&request.metric_id).map(|g| g.records.clone()).unwrap_or_default();
+        records.extend(report_records);
         let mut unassigned = Vec::new();
         for record in health { append_health(&record, &request.metric_id, &mut points, &mut excluded, &mut unassigned); }
         // Clinical charts and historical rows share normalization and duplicate grouping.
         points.retain(|point| point["original"]["clinical_observation"].is_null());
         if let Some(group) = groups.get(&request.metric_id) { points.extend(group.points.clone()); }
         points.sort_by(|a,b| a["timestamp"].as_i64().cmp(&b["timestamp"].as_i64()).then_with(|| a["point_id"].as_str().cmp(&b["point_id"].as_str())));
-        let chart_ranges = crate::chart::ranges(points.iter().filter_map(|p| {
-            Some((p["source_key"].as_str().or_else(|| p["source_id"].as_str())?.to_owned(), p["unit"].as_str()?.to_owned(), p["timestamp"].as_f64()?, p["value"].as_f64()?))
-        }), chrono_tz::UTC);
+        let chart_ranges = point_ranges(&points);
         Ok(json!({"chart_ranges":chart_ranges,"metric":definition,"records":records,"points":points,"excluded":excluded,"excluded_count":excluded.len(),
             "unassigned_clinical_records":unassigned,"unassigned_clinical_count":unassigned.len(),
             "algorithm_version":"metric-history-v2","conversion_version":crate::laboratory::CONVERSION_VERSION}))
     }).await
+}
+
+fn point_ranges(points: &[Value]) -> Value {
+    crate::chart::ranges(
+        points.iter().filter_map(|p| {
+            Some((
+                p["source_key"]
+                    .as_str()
+                    .or_else(|| p["source_id"].as_str())?
+                    .to_owned(),
+                p["unit"].as_str()?.to_owned(),
+                p["timestamp"].as_f64()?,
+                p["value"]
+                    .as_f64()
+                    .or_else(|| p["value"].as_str()?.parse::<f64>().ok())?,
+            ))
+        }),
+        chrono_tz::UTC,
+    )
 }
 
 fn append_health(
@@ -301,6 +323,37 @@ pub(crate) fn loinc_metric(code: &str) -> Option<&'static str> {
         "788-0" => "rdw",
         "6768-6" => "alp",
         "6690-2" => "wbc",
+        "1742-6" => "alt",
+        "1920-8" => "ast",
+        "2951-2" => "sodium",
+        "2823-3" => "potassium",
+        "2075-0" => "chloride",
+        "2028-9" => "carbon_dioxide",
+        "17861-6" => "calcium",
+        "3094-0" => "bun",
+        "2336-6" => "globulin",
+        "2885-2" => "total_protein",
+        "1975-2" => "total_bilirubin",
+        "4544-3" => "hematocrit",
+        "785-6" => "mch",
+        "786-4" => "mchc",
+        "32623-1" => "mpv",
+        "777-3" => "platelets",
+        "789-8" => "rbc",
+        "704-7" => "basophil_count",
+        "706-2" => "basophil_percent",
+        "711-2" => "eosinophil_count",
+        "713-8" => "eosinophil_percent",
+        "731-0" => "lymphocyte_count",
+        "742-7" => "monocyte_count",
+        "5905-5" => "monocyte_percent",
+        "751-8" => "neutrophil_count",
+        "770-8" => "neutrophil_percent",
+        "3040-3" => "lipase",
+        "3024-7" => "free_t4",
+        "3016-3" => "tsh",
+        "11580-8" => "tsh",
+        "8098-6" => "thyroglobulin_antibodies",
         _ => return None,
     })
 }
@@ -344,7 +397,7 @@ pub async fn browse(database: &Database, user_id: &str) -> Result<Value, AppErro
             for observation in reports {
                 if let Some(definition) = crate::laboratory::metrics()
                     .into_iter()
-                    .find(|m| Some(m.metric_id) == observation.payload.metric_id.as_deref())
+                    .find(|m| Some(m.metric_id) == observation.resolved_metric_id.as_deref())
                 {
                     entries
                         .entry(definition.metric_id.into())

@@ -43,7 +43,7 @@ def write_archive(path, data, manifest, replacements):
                     HEALTH: json.dumps(dict(source_id='watch', record_id='sample', payload={'value': 42})), 'observations.csv': 'observation_id,revision\nobs,1\n'})
     if manifest.get('version') == 1:
         manifest = copy.deepcopy(manifest)
-        manifest['database_schema_version'] = 7
+        manifest['database_schema_version'] = 8
         manifest['table_counts'] = {name: len(rows) for name, rows in data.items()}
         manifest['table_columns'] = {name: [dict(name=field, sqlite_type='TEXT', not_null=False, primary_key_position=0)
                                           for field in sorted(set().union(*(row.keys() for row in rows)) if rows else {'user_id'})]

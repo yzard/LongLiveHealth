@@ -2,7 +2,7 @@
 # inside this container; only the authenticated OCR HTTP service is published.
 services:
   backend_ocr:
-    image: longlivehealth-backend-ocr:local
+    image: longlivehealth-backend-ocr:reportdates65
     pull_policy: never
     restart: unless-stopped
     environment:

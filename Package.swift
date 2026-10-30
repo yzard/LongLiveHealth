@@ -6,7 +6,7 @@ let package = Package(
     platforms: [.iOS(.v17), .macOS(.v14)],
     products: [.library(name: "LongLiveHealthCore", targets: ["LongLiveHealthCore"])],
     targets: [
-        .target(name: "LongLiveHealthCore", path: "src/ios/Core"),
-        .testTarget(name: "LongLiveHealthCoreTests", dependencies: ["LongLiveHealthCore"], path: "tests/ios/Core")
+        .target(name: "LongLiveHealthCore", path: "src/shared/Core"),
+        .testTarget(name: "LongLiveHealthCoreTests", dependencies: ["LongLiveHealthCore"], path: "tests/shared/Core")
     ]
 )

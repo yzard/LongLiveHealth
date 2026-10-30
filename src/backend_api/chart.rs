@@ -148,3 +148,50 @@ pub fn ranges(
     }
     output
 }
+
+/// One selected calendar period: bounded by buckets and sources, not sample count.
+pub struct PeriodRanges {
+    period: String,
+    timezone: Tz,
+    groups: BTreeMap<(String, String, i64), Range>,
+}
+impl PeriodRanges {
+    pub fn new(period: &str, timezone: Tz) -> Option<Self> {
+        ["H", "D", "W", "M", "6M", "Y"]
+            .contains(&period)
+            .then(|| Self {
+                period: period.into(),
+                timezone,
+                groups: BTreeMap::new(),
+            })
+    }
+    pub fn add(&mut self, source: String, unit: String, at: f64, value: f64) {
+        if !at.is_finite() || !value.is_finite() {
+            return;
+        }
+        if let Some((start, end)) = interval(at, &self.period, self.timezone, false) {
+            self.groups
+                .entry((source, unit, start))
+                .or_insert(Range {
+                    end,
+                    first: at,
+                    last: at,
+                    min: value,
+                    max: value,
+                    latest: value,
+                    count: 0,
+                })
+                .add(at, value);
+        }
+    }
+    pub fn finish(self) -> Value {
+        let mut result = json!({"H":[],"D":[],"W":[],"M":[],"6M":[],"Y":[]});
+        result[&self.period] = json!(
+            self.groups
+                .into_iter()
+                .map(|((source, unit, start), range)| range.json(&source, &unit, start))
+                .collect::<Vec<_>>()
+        );
+        result
+    }
+}

@@ -1,9 +1,53 @@
 import Foundation
 import UIKit
+import PDFKit
 import Testing
 @testable import LongLiveHealth
 
 @MainActor @Suite(.serialized) struct AppModelTests {
+    @Test func cameraReviewDeletesOnlySelectedPageAndPreservesOrder() throws {
+        func image(_ size: CGSize) -> UIImage {
+            UIGraphicsImageRenderer(size: size).image { context in
+                UIColor.white.setFill(); context.fill(CGRect(origin: .zero, size: size))
+            }
+        }
+        var pages = CameraReportPages(images: [image(CGSize(width: 100, height: 200)),
+            image(CGSize(width: 100, height: 100)), image(CGSize(width: 200, height: 100))], selected: 1)
+        pages.deleteSelected()
+        #expect(pages.images.count == 2)
+        #expect(pages.selected == 1)
+        let pdf = try #require(PDFDocument(data: pages.pdf()))
+        #expect(pdf.pageCount == 2)
+        let first = try #require(pdf.page(at: 0)).bounds(for: .mediaBox)
+        let last = try #require(pdf.page(at: 1)).bounds(for: .mediaBox)
+        #expect(first.height > first.width)
+        #expect(last.width > last.height)
+        pages.deleteSelected()
+        #expect(pages.selected == 0)
+        pages.deleteSelected()
+        #expect(pages.images.isEmpty)
+        #expect(throws: (any Error).self) { try pages.pdf() }
+    }
+
+    @Test func cameraPagesBecomeOneOrderedReport() throws {
+        let sizes = [CGSize(width: 120, height: 240), CGSize(width: 300, height: 150)]
+        let bytes = try CameraReportPDF.make(pageCount: sizes.count) { index in
+            UIGraphicsImageRenderer(size: sizes[index]).image { context in
+                UIColor.white.setFill()
+                context.fill(CGRect(origin: .zero, size: sizes[index]))
+            }
+        }
+        let pdf = try #require(PDFDocument(data: bytes))
+        #expect(pdf.pageCount == 2)
+        let first = try #require(pdf.page(at: 0)).bounds(for: .mediaBox)
+        let second = try #require(pdf.page(at: 1)).bounds(for: .mediaBox)
+        #expect(first.height > first.width)
+        #expect(second.width > second.height)
+        #expect(throws: (any Error).self) {
+            try CameraReportPDF.make(pageCount: 0) { _ in UIImage() }
+        }
+    }
+
     @Test func sourceAliasesPersistForTheirAccountAndUpdateRetainedLabels() async throws {
         try SessionVault.clear()
         let model = AppModel()
@@ -22,7 +66,7 @@ import Testing
         let other = AppModel()
         #expect(other.sourceLabel("apple_health:watch") == "apple_health:watch")
         try other.clearLocalSession()
-        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil)
+        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
         _ = try await control.post("test/reset", body: .object([:]))
     }
 
@@ -79,7 +123,7 @@ import Testing
 
     @Test func renewalCoalescesRequestsAndPersistsAcrossRelaunch() async throws {
         try SessionVault.clear()
-        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil)
+        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
         _ = try await control.post("test/reset", body: .object([:]))
         var saved = StoredSession(server: control.server, userID: "simulator-only", username: "simulator", token: "expired-access")
         saved.refreshToken = String(repeating: "a", count: 64); saved.refreshAfter = 0
@@ -100,7 +144,7 @@ import Testing
 
     @Test func renewalFailureRetainsPendingSuccessorAndRetirementCannotRestoreLogin() async throws {
         try SessionVault.clear()
-        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil)
+        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
         _ = try await control.post("test/reset", body: .object([:]))
         _ = try await control.post("test/fail-refresh", body: .object([:]))
         var saved = StoredSession(server: control.server, userID: "simulator-only", username: "simulator", token: "expired-access")
@@ -156,10 +200,10 @@ import Testing
     }
 
     @Test func backgroundUploadSurvivesCallerCancellationAndCoalescesRetries() async throws {
-        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil)
+        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
         _ = try await control.post("test/reset", body: .object([:]))
         _ = try await control.post("test/slow-upload", body: .object([:]))
-        let client = APIClient(server: URL(string: "http://localhost:18765")!, token: "synthetic-background")
+        let client = APIClient(server: URL(string: "http://localhost:18765")!, token: "synthetic-background", uploadTransport: BackgroundTransfer.transport)
         let draft = UploadDraft(id: UUID(), filename: "background.pdf", contentType: "application/pdf", createdAt: Date(), sourceName: "Synthetic Lab", originalFilename: nil, originalContentType: nil)
         let bytes = Data("%PDF-1.4\nsynthetic background transfer".utf8)
         let first = Task { try await client.upload(bytes, draft: draft, originalBytes: nil) }
@@ -175,7 +219,7 @@ import Testing
     }
     @Test func sharedReportWaitsForAccountAndRetriesWithStableUploadIdentity() async throws {
         try SessionVault.clear()
-        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil)
+        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
         _ = try await control.post("test/reset", body: .object([:]))
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("shared-\(UUID()).pdf")
         try Data("%PDF-1.4\nsynthetic report".utf8).write(to: file)
@@ -187,35 +231,28 @@ import Testing
         }
         signedOut.receiveReportURL(file)
         let shared = try #require(signedOut.sharedReports.first { $0.filename == file.lastPathComponent })
-        await signedOut.importSharedReports(sourceNames: [shared.id: "Function Health"])
+        await signedOut.importSharedReports()
         #expect(signedOut.sharedReports.contains { $0.id == shared.id })
         let restored = AppModel()
         #expect(restored.sharedReports.contains { $0.id == shared.id })
         await restored.login(server: "http://localhost:18765", username: "simulator", password: "synthetic-test-password")
-        await restored.importSharedReports(sourceNames: [shared.id: " "])
-        #expect(restored.sharedReports.contains { $0.id == shared.id })
-        #expect(restored.drafts.isEmpty)
         _ = try await control.post("test/fail-upload", body: .object([:]))
-        await restored.importSharedReports(sourceNames: [shared.id: "Function Health"])
+        await restored.importSharedReports()
         #expect(restored.sharedReports.isEmpty)
         #expect(restored.drafts.map(\.id) == [shared.id])
-        #expect(restored.drafts.first?.sourceName == "Function Health")
+        #expect(restored.drafts.first?.sourceName == nil)
         #expect(restored.selectedTab == "Data" && restored.dataPath == [.reports])
-        _ = try await control.post("test/fail-review", body: .object([:]))
-        await restored.sendDrafts(automatic: false)
-        #expect(restored.drafts.map(\.id) == [shared.id])
-        #expect(restored.drafts.first?.sourceName == "Function Health")
         await restored.sendDrafts(automatic: false)
         #expect(restored.drafts.isEmpty)
         let state = try await control.post("test/state", body: .object([:]))
-        #expect(state["upload_ids"].arrayValue == Array(repeating: .string(shared.id.uuidString), count: 3))
-        #expect(state["context"]["source_name"] == .string("Function Health"))
+        #expect(state["upload_ids"].arrayValue == Array(repeating: .string(shared.id.uuidString), count: 2))
+        #expect(state["context"]["source_name"] == .null)
         await restored.logout()
     }
 
     @Test func unconnectedHealthDoesNotReplaceCompletedWriteStatus() async throws {
         try SessionVault.clear()
-        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil)
+        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
         _ = try await control.post("test/reset", body: .object([:]))
         let model = AppModel()
         await model.login(server: "http://localhost:18765", username: "simulator", password: "synthetic-test-password")
@@ -232,7 +269,7 @@ import Testing
 
     @Test func pausingIndependentHealthSyncPreservesProgress() async throws {
         try SessionVault.clear()
-        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil)
+        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
         _ = try await control.post("test/reset", body: .object([:]))
         let model = AppModel()
         await model.login(server: "http://localhost:18765", username: "simulator", password: "synthetic-test-password")
@@ -267,7 +304,7 @@ import Testing
 
     @Test func completedHealthSyncCooldownSurvivesRelaunchAndCoalescesAutomaticTriggers() async throws {
         try SessionVault.clear()
-        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil)
+        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
         _ = try await control.post("test/reset", body: .object([:]))
         let model = AppModel()
         await model.login(server: "http://localhost:18765", username: "simulator", password: "synthetic-test-password")
@@ -294,7 +331,7 @@ import Testing
 
     @Test func manualHealthSyncBypassesCooldownAndConcurrentAutomaticRequestDoesNotRunAgain() async throws {
         try SessionVault.clear()
-        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil)
+        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
         _ = try await control.post("test/reset", body: .object([:]))
         let model = AppModel()
         await model.login(server: "http://localhost:18765", username: "simulator", password: "synthetic-test-password")
@@ -321,9 +358,25 @@ import Testing
         await model.logout()
     }
 
+    @Test func explicitReportImportWaitsForForegroundRefresh() async throws {
+        try SessionVault.clear()
+        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
+        _ = try await control.post("test/reset", body: .object([:]))
+        let model = AppModel()
+        await model.login(server: "http://localhost:18765", username: "simulator", password: "synthetic-test-password")
+        let foreground = Task { await model.perform { try await Task.sleep(for: .milliseconds(300)) } }
+        while !model.isBusy { await Task.yield() }
+        let retained = await model.addDocument(Data("synthetic report".utf8), filename: "fixture.png", contentType: "image/png", sourceName: nil, originalBytes: nil, originalFilename: nil, originalContentType: nil)
+        await foreground.value
+        #expect(retained && model.drafts.isEmpty && model.errorMessage == nil)
+        let state = try await control.post("test/state", body: .object([:]))
+        #expect(state["upload_ids"].arrayValue.count == 1)
+        await model.logout()
+    }
+
     @Test func initialAdminSessionBlocksBackgroundWorkUntilPasswordChange() async throws {
         try SessionVault.clear()
-        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil)
+        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
         _ = try await control.post("test/reset", body: .object([:]))
         let model = AppModel()
         await model.login(server: "http://localhost:18765", username: "admin", password: "admin")
@@ -347,7 +400,7 @@ import Testing
 
     @Test func sessionUploadRetryCacheAndLogout() async throws {
         try SessionVault.clear()
-        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil)
+        let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
         _ = try await control.post("test/reset", body: .object([:]))
         let model = AppModel()
         await model.login(server: "http://localhost:18765", username: "simulator", password: "synthetic-test-password")

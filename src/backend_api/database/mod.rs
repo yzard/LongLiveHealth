@@ -1,4 +1,5 @@
 mod accounts;
+mod drafts;
 pub(crate) mod queries;
 
 use crate::{
@@ -39,6 +40,9 @@ impl Database {
             use std::os::unix::fs::PermissionsExt;
             tokio::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700)).await?;
         }
+        let draft_path = directory.join("draft.sqlite");
+        drafts::initialize(&draft_path).await?;
+        let draft_path = draft_path.to_string_lossy().into_owned();
         let options = SqliteConnectOptions::new()
             .filename(directory.join("database.sqlite"))
             .create_if_missing(true)
@@ -48,13 +52,26 @@ impl Database {
             .busy_timeout(Duration::from_secs(5));
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
+            .after_connect(move |connection, _| {
+                let path = draft_path.clone();
+                Box::pin(async move {
+                    sqlx::query(queries::ATTACH_DRAFTS)
+                        .bind(path)
+                        .execute(&mut *connection)
+                        .await?;
+                    sqlx::query(queries::REVIEW_OBSERVATIONS_VIEW)
+                        .execute(&mut *connection)
+                        .await?;
+                    Ok(())
+                })
+            })
             .connect_with(options)
             .await?;
         let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
         let version: i64 = sqlx::query_scalar(queries::SCHEMA_VERSION)
             .fetch_one(&mut *transaction)
             .await?;
-        if version != 0 && version != 7 {
+        if version != 0 && version != 8 {
             return Err(AppError::Conflict(
                 "Run the offline storage migration before starting this server",
             ));
@@ -71,12 +88,14 @@ impl Database {
         for folder in ["tmp", "raw"] {
             tokio::fs::create_dir_all(directory.join(folder)).await?;
         }
-        Ok(Self {
+        let database = Self {
             pool,
             data_dir: directory.to_owned(),
             cpu: crate::execution::CpuExecutor::new(2)?,
             temporary_files: crate::temporary::TemporaryFiles::new(directory.join("tmp")),
-        })
+        };
+        database.reconcile_report_drafts().await?;
+        Ok(database)
     }
 
     pub async fn close(&self) {

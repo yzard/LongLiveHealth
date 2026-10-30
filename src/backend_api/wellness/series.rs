@@ -186,7 +186,12 @@ impl Database {
         )
     }
 }
-fn convert(platform: &str, kind: &str, unit: Option<&str>, value: Option<f64>) -> Option<f64> {
+pub(crate) fn convert(
+    platform: &str,
+    kind: &str,
+    unit: Option<&str>,
+    value: Option<f64>,
+) -> Option<f64> {
     let value = value.filter(|v| v.is_finite())?;
     let (value, valid) = match (kind, unit?) {
         ("heart_rate", "count/min" | "bpm") => (value, value > 0.0 && value <= 300.0),
@@ -195,13 +200,16 @@ fn convert(platform: &str, kind: &str, unit: Option<&str>, value: Option<f64>) -
             (value * 18.01559, value > 0.0 && value * 18.01559 <= 2000.0)
         }
         ("vo2_max", "ml/kg*min" | "mL/kg/min") => (value, value > 0.0 && value <= 200.0),
+        ("hrv_rmssd" | crate::recovery_hrv::KIND, "ms") => (value, value >= 0.0),
+        ("height", "m") => (value, value > 0.0),
+        ("body_temperature", "degC") => (value, true),
         ("body_mass", "kg") => (value, value > 0.0 && value <= 1000.0),
         ("body_fat" | "oxygen_saturation", "%") if platform == "apple_health" => {
             (value * 100.0, (0.0..=1.0).contains(&value))
         }
         ("body_fat" | "oxygen_saturation", "%") => (value, (0.0..=100.0).contains(&value)),
         ("respiratory_rate", "count/min") => (value, value > 0.0 && value <= 200.0),
-        _ => return None,
+        _ => return crate::apple_health::normalize(value, unit?, crate::apple_health::unit(kind)?),
     };
     valid.then_some(value)
 }

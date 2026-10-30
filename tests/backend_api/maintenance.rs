@@ -7,6 +7,24 @@ async fn export_contains_raw_and_revisions_without_credentials_and_delete_cleans
     let user = add_user(&state, "alice").await;
     let report = archive(&state, "alice").await;
     confirm(&state, &user.user_id, &report).await;
+    state
+        .database
+        .review(
+            &user.user_id,
+            longlivehealth::reports::ReviewRequest {
+                report_id: report.clone(),
+                expected_revision: 2,
+                context: None,
+                observations: vec![longlivehealth::reports::ReviewItem {
+                    observation_id: None,
+                    expected_revision: None,
+                    status: "pending".into(),
+                    payload: crate::observation_payload(),
+                }],
+            },
+        )
+        .await
+        .unwrap();
     additional_sources(&state, &user.user_id).await;
     let association = state
         .database
@@ -52,7 +70,7 @@ async fn export_contains_raw_and_revisions_without_credentials_and_delete_cleans
     assert!(zip.by_name("sessions.jsonl").is_err());
     let manifest: serde_json::Value =
         serde_json::from_reader(zip.by_name("manifest.json").unwrap()).unwrap();
-    assert_eq!(manifest["database_schema_version"], 7);
+    assert_eq!(manifest["database_schema_version"], 8);
     drop(zip);
     let checker = std::process::Command::new("python3")
         .arg(concat!(
@@ -128,10 +146,19 @@ async fn export_contains_raw_and_revisions_without_credentials_and_delete_cleans
             .unwrap(),
         association
     );
+    assert_eq!(
+        restored_db
+            .observations(&user.user_id, &report)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(restored_db.confirmed(&user.user_id).await.unwrap().len(), 1);
     restored_db.close().await;
     state
         .database
-        .delete_report(&user.user_id, &report, 2)
+        .delete_report(&user.user_id, &report, 3)
         .await
         .unwrap();
     assert!(

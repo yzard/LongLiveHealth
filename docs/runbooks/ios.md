@@ -379,3 +379,133 @@ calendar boundaries respect timezone and DST. Missing buckets remain empty.
 Build 38 passed compilation, 32 core tests and signature verification, and was
 installed wirelessly. Three backend chart tests passed, including matching
 interval boundaries across sources. Build 37's focused Browse UI test passed.
+
+### Build 39: complete daily history
+
+Browse daily detail loads `wellness/history` once per opened detail, preserving
+all sources across calendar periods and Historical Values. Overview retains its
+short baseline request. Loading or failure is explicit; a failed full-history
+request does not pretend its initial overview data is complete. All-source daily
+history uses UTC date labels after aggregation in the requested local timezone.
+The regression checks an old 2020 sleep record in the history screen.
+
+Build 40: Browse measurement charts query the selected calendar interval on demand, including older years; Historical Values uses explicit 500-item pagination. Sleep sessions have a period and date selector. Validation includes a 200,001-sample query across all six chart periods and pagination/owner isolation checks. Real-data audit output is stored under `build/ios/validation/period40-audit.jsonl` (counts and time bounds only).
+
+Build 41: PDF, image/photo/screenshot, camera-scan and shared-PDF imports enqueue without requiring a clinic name first. OCR fills report title and source on the server. Collection context allows corrections; visible pending report details refresh during extraction without replacing an open editor. Device signing/install logs: `build/ios/validation/import41-*`.
+
+
+Build 42 was verified and wirelessly installed with the report marker-count header, direct source editor, on-demand page text, isolated result rows, and off-main JSON decoding/cache encoding. A 126-result UI fixture verifies the count, source save/cancel, no reload on cancel, scrolling and opening an editor. All 32 core and 23 native tests passed. Build 43 adds the automatic report-name matching label and resolved metric hint; its focused UI regression passed. Build 43 subsequently completed device signing, passed strict code-signature and bundle-version verification, and was wirelessly installed on the paired iPhone. Installation proof: `build/ios/validation/markers43-install.log`. Logs: `build/ios/validation/review42-*`, `markers43-*`.
+
+## 2026-10-22 Build 44：同步编码与报告批量确认
+
+诊断证据：设备旧的 Build 40 watchdog 日志（09:42:52）明确显示主线程停在 `HealthBridge.send → APIClient.postOnce → JSONEncoder.encode`，超过 10 秒 scene-update 限制。Build 43 仍使用该同步编码路径，因此本次修正上传编码、响应解码、Health 样本转换、批次准备和大断点文件读写的执行位置，使用 `@concurrent` 离开 UI actor。保留后台上传取消后的回执，以及收到服务端确认后才提交 anchor 的顺序。
+
+报告顶部新增 Confirm all，只提交 pending 项目，保留原 payload、revision 和 confirmed/rejected 决定；126 项一次 reports/review 完成，超过接口 2,000 项上限时按返回版本继续下一批。失败保留剩余 pending，可重试，不自动重新加载报告。没有替用户确认真实报告。
+
+验证：34 项 Core 测试通过（包含后台断点编解码线程检查）；23 项原生测试通过；完整 126 项报告从顶部滚到底部再返回、来源编辑取消、批量确认失败重试和单请求确认的 UI 测试通过（342 秒）。最终 signed Release 为 Build 44。日志在 `build/ios/validation/review44-*`。
+
+限制：本轮用户报告的 Build 43 退出未生成新的可读取 crash 日志，不能直接等同旧 Build 40 watchdog。现场 LLDB 在 Mac 上加载运行时符号发生锁等待，导致采样连接异常及目标暂停；已结束调试器并发送 resume，用户确认恢复。随后无调试器的 21 秒 Time Profiler 捕获包含 App 进程且无 hang rows，但在恢复之后，不能证明最初的 2–3 秒卡顿已经消除。新版需要真实报告与同步并行时复验。
+
+Build 44 已在已连接的 iPhone 安装并启动成功；安装回执 databaseSequenceNumber 2792，记录见 `review44-install.log` 与 `review44-launch.log`。
+
+### Build 45 — contextual help and report actions
+
+Explanatory text uses the shared `InfoHelp` title/`info.circle` popover across the app. Browse metric descriptions below charts remain visible. Status, errors, results and destructive confirmation consequences remain visible. See `docs/validation/contextual-help-build45.md` for the scanned files and validation.
+
+Report source editing places Source before Report Title. View Original, Add Result and Delete share one action row. Delete uses a Cancel/Delete alert, removes official and draft observations through the existing backend endpoint, and updates the local reports cache.
+
+### Build 46 — report summary order
+
+The report summary uses four rows: Report Info, Total Markers, Confirm All, and the View Original / Add Result / Delete actions. The editor title is Report Info; Source and Report Title remain editable there. The former duplicate Report Title row in the summary is removed. The focused simulator test verifies row order, editor opening/cancellation and report deletion. Test passed; device build awaits keychain signing authorization.
+
+### Build 47 — compact report results
+
+Review rows show the printed value followed by the server's standardized display in parentheses when available. Reference explanatory rows are omitted from this review list; evidence and reference data remain stored and editable. A 44-point document icon to the right opens the original page and retains an accessible page label. Focused simulator coverage passed for the result format, absence of reference placeholders, original-page navigation, Report Info order/editing and deletion. Release signature verification passed; Build 47 installed on the iPhone (installation sequence 2808), including the Build 46 layout.
+
+### Build 48 — metric explanations
+
+Browse details now use 169 individually written explanations for daily, measurement and laboratory items, including exact-name mappings for 290 observed hospital/report labels. The descriptions explain purpose and relevant body functions; assay, specimen, antibody and absolute/percentage distinctions remain explicit. The offline catalog and its references/coverage table are in `docs/metrics/`. No record identities, values or sources are changed. Removed Reading the chart and Refresh history from lab details.
+
+Coverage test checks every backend metric definition, measurement kind, daily kind and audited name; the Swift regression checks clinically different names stay distinct and unfamiliar tests do not borrow an explanation. Core tests: 35 passed.
+
+Focused simulator tests passed: visible Sleep explanation, removal of chart-help/manual-refresh controls, LDL explanation, and exactly one `metrics/history/get` request when leaving and reopening the metric. The broader legacy smoke test was also attempted: it still expected no Breathing practice on Overview (corrected to match the current requirement), then failed to find an offscreen LDL row after clearing search. This is not recorded as a full-suite pass; the focused reopen test searches for LDL and passed. Logs: `build48-core.log`, `build48-ui.log`, `build48-reopen-ui.log` under `build/ios/validation/`.
+
+Final Build 48 Release passed strict code-signature verification and was installed on the paired iPhone (installation sequence 2824). Automatic launch was denied because the iPhone was locked; the user can unlock and open the installed app. No new signing prompt was needed. Installation and launch logs: `build48-install.log`, `build48-launch.log`.
+
+### Build 49 — updated clinical titles
+
+Adds education aliases for the backend's explicit vitamin-D, eGFR-formula, parathyroid and serum-magnesium titles. Core tests: 35 passed; editorial coverage check passed. Backend Browse identity/filtering is already live independently of this client update. Build 49 Release passed strict code-signature verification, installed on the paired iPhone (installation sequence 2832), and launched successfully. Evidence: `browse49-device.log`, `browse49-install.log`, and `browse49-launch.log` under `build/ios/validation/`.
+
+### Build 50 — one report import entry
+
+Health Report uses an upload icon and three distinct options: Import PDF (PDF-only Files picker), Import Images (Photos/screenshots), and Camera (multi-page document camera). Removed the redundant inline PDF button and Import files help row. Camera pages become a single ordered PDF and one upload rather than separate reports. The focused picker open/cancel UI test and ordered multi-page PDF test passed with ad-hoc simulator signing. An initial unsigned simulator run failed to save its test Keychain session and is not counted as a pass. Build 50 passed strict signature verification, installed (sequence 2840), and launched on the iPhone.
+
+### Build 51 — camera review and metric header cleanup
+
+Removed All sources section headings from laboratory and daily metric details. Source legends and toggles remain. After camera capture, Review Photos provides page swiping, a discrete bottom slider, selectable thumbnails, and Delete Photo. Cancel discards capture; Import uploads only the remaining pages as one PDF. Removing every page disables Import. Two native tests passed for PDF page order, middle/last-page deletion, selection clamping and rejection of empty reports. Physical camera capture still requires a device check; simulator tests cover the resulting page model and PDF assembly.
+
+Build 51 focused metric UI test passed: no All sources heading, metric explanation retained, and reopening issues one history request. Release build and strict signature verification passed; installed on the iPhone (sequence 2848) and launched successfully. Logs: `import51-tests.log`, `import51-ui.log`, `import51-device.log`, `import51-install.log`, `import51-launch.log` under `build/ios/validation/`.
+
+### Build 52 — adaptive metric Y axis
+
+The shared Browse chart derives Y-axis bounds from the current time window's enabled-source min/max envelopes in display units, with 10% padding above and below. It recalculates with window, period, data and source changes. Constant/single-point series receive 5% magnitude padding (minimum 0.01); empty series use a neutral 0...1 domain. This is chart presentation only: no health records or server aggregation changes. All 37 Core tests passed, including narrow ranges, changed visible values, converted sleep hours, flat/zero/negative values and empty/nonfinite input.
+
+Build 52 Release passed compilation and strict signature verification and was installed on the paired iPhone (sequence 2856). Evidence: `axis52-core.log`, `axis52-device.log`, `axis52-install.log` and `axis52-launch.log` under `build/ios/validation/`.
+
+### Build 53 — shared time columns and source colors
+
+NAS read-only verification found the previous Watch's latest VO2 Max record on 2026-09-03 and the new Watch's earliest on 2026-09-19. The September ranges were incorrectly displayed left/right according to source-key order, creating false chronology. All shared metric charts now place sources at the calendar bucket center. Disjoint value ranges retain their colors; overlap uses Apple Watch, other wearables, other sources, then phone priority. Same-rank overlap uses the newest last sample, then a stable source-key tie break. Classification uses original catalog names, not user aliases. The segments do not sum or modify values; selection retains the original source range. Hiding a priority source restores the other source's full range. Gaps remain empty. Core tests: 40 passed. The focused metric navigation/history UI test also passed.
+
+Build 53 final Release passed compilation and strict signature verification, installed on the paired iPhone (sequence 2864), and launched successfully. Logs: `columns53-final-device.log`, `columns53-install.log`, and `columns53-launch.log` under `build/ios/validation/`.
+
+### Build 54 — rounded range endpoints
+
+Shared chart ranges retain flat internal color seams but add circular caps at exposed ends, including ranges separated by real gaps. Single points use an explicit circle with the same diameter as the bar width. Source segmentation and priority are unchanged. Two focused UI tests passed; the heart-rate screenshot was inspected and confirms rounded top and bottom ends. Build 54 passed Release compilation and strict signature verification, installed on iPhone (sequence 2872), and launched. Evidence: `caps54-device.log`, `caps54-ui.log`, `caps54-heart-ui.log`, `caps54-heart-attachments/`, `caps54-install.log`, and `caps54-launch.log` under `build/ios/validation/`.
+
+### Build 55 — shared Browse metric presentation
+
+Audited every Browse destination: all daily rows route to DailyMetricView, the seven measurement types route to MetricMeasurementsView, all laboratory rows route to MetricHistoryView, and Sleep sessions routes to SleepSessionsView. All four now use MetricDetailScreen and MetricChartSection. The shared screen uses an inline centered principal title with the former Sleep large-title font and bold weight; long names shrink to fit available navigation width. Native back navigation remains. The chart section centralizes clear background, row insets and separators. Each metric retains its data loading and purpose-specific content; no navigation-triggered reloads were added.
+
+Four-route UI verification passed for Sleep, VO2 Max, LDL, and Sleep sessions: shared title identity/text/centering and search preservation on Back. Captured all four screenshots; Sleep and VO2 Max titles were visually inspected at matching large, centered size. Release compilation and strict signature checks passed. Build 55 installed on iPhone (sequence 2880). Automatic launch was denied because the iPhone was locked; the user must unlock and open the installed app. Evidence: `style55-device.log`, `style55-ui.log`, `style55-attachments/`, `style55-install.log`, `style55-launch.log`.
+
+### Build 56 — compact Apple Health sync controls
+
+Removed Selected records, Automatic sync, Health access and Available Health data explanatory rows. During screen-awake syncing, an icon-only Screen awake help button sits directly after Pause Sync in the same row. The prior separate Screen awake label row is removed. The shared InfoHelpButton owns the existing popover behavior; labeled InfoHelp composes it, avoiding duplicate implementations. Sync logic, permissions, error messages and coverage records are unchanged.
+
+Build 56 passed Release compilation, strict signature verification and the updated contextual-help UI test (all four removed titles/buttons absent; Browse metric explanation remains visible). Initial device connection reset; retry installed successfully (sequence 2888), and app launched. Logs: `health56-device.log`, `health56-ui.log`, `health56-install-retry.log`, `health56-launch.log`.
+
+### Build 57 — Today / 7 days / 30 days overview
+
+Overview now anchors to the current local date, including on foreground and refresh. Its shared comparison cells show Today, Last 7 days and Last 30 days; the two multi-day columns remain daily averages over available days, both inclusive of today. The existing wellness/day response already contains 43 calendar days, so no extra API requests or server changes are needed. All 41 Core tests passed, including today's value, inclusive 7/30-day boundaries, and exclusion of older/future dates.
+
+Focused UI test passed for the three headings and their left-to-right order; screenshot inspected. Release compilation and strict signature verification passed. Build 57 installed (sequence 2896) and launched on iPhone. Evidence: `overview57-core.log`, `overview57-ui.log`, `overview57-attachments/`, `overview57-device.log`, `overview57-install.log`, `overview57-launch.log`.
+
+
+### Build 58 - mixed-type Health sync blocks
+
+Health sync now fills 10,000-record blocks across anchored types and snapshots;
+partial tails and empty coverage are flushed at the end. Requests carry per-type
+coverage and all checkpoint writes. Durable replay precedes committing any cursor.
+The producer prefetches one block during upload, and old pending requests drain
+without resetting anchors. Total request-byte splitting was removed.
+
+Validation: 41 Core tests, 26 native simulator tests, simulator test build, unsigned
+Release build, signed Release build and strict codesign verification passed.
+Build 58 installed wirelessly on the paired iPhone (sequence 2904), then launched.
+The first connection reset; the second install succeeded. Logs:
+`/tmp/longlivehealth-mixed-ios.log`, `-native.log`, `-device.log`, `-install.log`,
+and `-launch.log` (each with the `longlivehealth-mixed` prefix).
+
+## Build 63 — Health series working memory
+
+A 2026-10-28 Jetsam snapshot lists LongLiveHealth at 108,744 × 16 KiB (1,699 MiB). The explicit victim in that event is momentsd, so it does not prove the cause of the reported App exit; no new LongLiveHealth crash report was available. The app had no pending upload checkpoint.
+
+Large series types now query one HealthKit sample at a time. Mixed blocks flush at an estimated 16 MiB working-buffer target or 10,000 records; a single larger record is accepted intact. Blocks containing series upload before the next read, instead of overlapping two large series batches. Page anchors attach only to the final block. This is a buffering strategy, not an upload byte ceiling.
+
+Build 63 passed 44 core tests and 28 native tests, strict signature verification, and wireless installation (device database sequence 2528). Real-device sync completion remains to be verified after installation.
+
+## Build 64 — byte-sized mixed Health batches
+
+Replaces the 10,000-record ceiling and estimated-memory threshold with an 8 MiB encoded-record JSON target. UTF-8 serialization is measured off the main actor; request metadata adds overhead. Types mix in one block, oversized individual records remain intact, and page checkpoints commit only after their final block is acknowledged. Query paging is independent of upload batching (1,000 ordinary samples or one large series).
+
+Validation: 45 core tests, 28 native simulator tests, simulator test build and unsigned Release build passed. Tests cover more than 10,000 small mixed records, Unicode byte size, oversized records and split-page checkpoint safety. Signed Build 64 passed strict signature verification and installed on the paired iPhone (device database sequence 2536). Real-device sync throughput remains to be verified.

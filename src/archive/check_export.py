@@ -4,6 +4,7 @@ import argparse
 import csv
 import hashlib
 import io
+import itertools
 import json
 import re
 import stat
@@ -124,7 +125,7 @@ def audit(path, max_bytes):
         require(manifest.get('format') == 'longlivehealth-export', 'Unknown archive format')
         require(type(manifest.get('version')) is int and manifest['version'] == 1, 'Only export version 1 is supported')
         version = manifest['version']
-        require(manifest.get('database_schema_version') == 7, 'Unknown database schema')
+        require(manifest.get('database_schema_version') == 8, 'Unknown database schema')
         inventory = manifest.get('members')
         require(
             isinstance(inventory, dict) and set(inventory) == names - {'manifest.json'},
@@ -251,9 +252,12 @@ def audit(path, max_bytes):
                     require(all(isinstance(v, str) for v in key), 'Invalid health revision key')
                     raw_path = row.get('raw_path')
                     require(isinstance(raw_path, str), 'Missing health original path')
-                    require(raw_path not in raw_references, 'Duplicate original reference')
+                    offset, length = row.get('raw_offset'), row.get('raw_length')
+                    framed = type(offset) is int and offset >= 0 and type(length) is int and 0 < length <= 40 * 1024 * 1024
+                    require(framed or (offset is None and length is None), 'Invalid original frame bounds')
+                    require(raw_path not in raw_references or (framed and raw_references[raw_path] == (None, None)), 'Duplicate original reference')
                     raw_references[raw_path] = (None, None)
-                    health_references.append((key, raw_path, row.get('raw_id')))
+                    health_references.append((key, raw_path, row.get('raw_id'), offset, length))
             counts[table] = count
         require(all(value in files for value in reports.values()), 'Report refers to a missing file')
         require(
@@ -262,15 +266,29 @@ def audit(path, max_bytes):
         )
         require(all(key in observations for key, _ in revisions), 'Orphan observation revision')
         original_ids = set()
-        for key, raw_path, raw_id in health_references:
-            require(key in health, 'Orphan health original')
+        # Sequential reads avoid repeatedly decompressing a multi-gigabyte category.
+        ordered = sorted(health_references, key=lambda item: (item[1], item[3] if item[3] is not None else -1))
+        for raw_path, references in itertools.groupby(ordered, key=lambda item: item[1]):
             require(raw_path in names, 'Missing health original')
-            require(isinstance(raw_id, str) and raw_id not in original_ids, 'Invalid original ID')
-            original_ids.add(raw_id)
-            original = read_object(archive, raw_path)
-            require(tuple(original.get(k) for k in ('source_id', 'record_id')) == key[1:], 'Original identity differs')
-            if health[key].get('raw_id') == raw_id:
-                require(health_projection(original) == parse_json(health[key]['payload_json']), 'Current original differs from projection')
+            with archive.open(raw_path) as stream:
+                for key, _, raw_id, offset, length in references:
+                    require(key in health, 'Orphan health original')
+                    require(isinstance(raw_id, str) and raw_id not in original_ids, 'Invalid original ID')
+                    original_ids.add(raw_id)
+                    if offset is None:
+                        original = parse_json(stream.read())
+                    else:
+                        require(stream.tell() == offset, 'Noncontiguous or duplicate original frame')
+                        prefix = stream.read(8)
+                        require(len(prefix) == 8 and int.from_bytes(prefix, 'little') == length, 'Original frame length differs')
+                        payload = stream.read(length)
+                        require(len(payload) == length, 'Truncated original frame')
+                        original = parse_json(payload)
+                    require(isinstance(original, dict), 'Invalid original JSON')
+                    require(tuple(original.get(k) for k in ('source_id', 'record_id')) == key[1:], 'Original identity differs')
+                    if health[key].get('raw_id') == raw_id:
+                        require(health_projection(original) == parse_json(health[key]['payload_json']), 'Current original differs from projection')
+                require(not stream.read(1), 'Unindexed bytes in original archive')
         require(all(row.get('deleted') == 1 or row.get('raw_id') in original_ids for row in health.values()), 'Current original is missing')
         require(
             all(
@@ -304,7 +322,7 @@ def audit(path, max_bytes):
                     'Original digest or byte count does not match',
                 )
             else:
-                require(size is None and raw_path.endswith('.json'), 'Missing original digest')
+                require(size is None and raw_path.endswith(('.json', '.frames')), 'Missing original digest')
         with archive.open('observations.csv') as stream:
             reader = csv.DictReader(io.TextIOWrapper(stream, encoding='utf-8', newline=''))
             require(

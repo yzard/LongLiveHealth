@@ -21,3 +21,8 @@ xcuserdata/
 __pycache__/
 
 **/.venv/
+
+# Android signing material stays outside source control.
+*.keystore
+*.jks
+keystore.properties

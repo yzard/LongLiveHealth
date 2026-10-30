@@ -11,15 +11,17 @@ settings:
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     TARGETED_DEVICE_FAMILY: '1'
     MARKETING_VERSION: '0.1.0'
-    CURRENT_PROJECT_VERSION: '38'
+    CURRENT_PROJECT_VERSION: '68'
 targets:
   LongLiveHealth:
     type: application
     platform: iOS
     sources:
       - path: .
-        excludes: [Core, project.yml, Info.plist, LongLiveHealth.entitlements]
-      - path: Core
+        excludes: [project.yml, Info.plist, LongLiveHealth.entitlements]
+      - path: ../shared/Core
+      - path: ../shared/UI
+      - path: ../shared/Application
     info:
       path: ../../build/ios/Info.plist
       properties:

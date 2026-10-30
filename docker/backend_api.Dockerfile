@@ -24,6 +24,7 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata gosu poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /workspace/dist/backend_api/longlivehealth /app/longlivehealth
+COPY dist/android/longlivehealth.apk /app/downloads/longlivehealth.apk
 COPY docker/entrypoint.sh /app/entrypoint.sh
 RUN chmod 755 /app/entrypoint.sh
 ENV PUID=1000 PGID=1000 UMASK=077 TZ=UTC

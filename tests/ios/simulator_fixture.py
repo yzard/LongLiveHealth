@@ -5,6 +5,13 @@ import io
 import json
 import time
 import zipfile
+from pathlib import Path
+_parents = Path(__file__).resolve().parents
+_catalog = (_parents[2] / "src/backend_api/apple_catalog.json") if len(_parents) > 2 else Path("/tmp/apple_catalog.json")
+if not _catalog.exists():
+    _catalog = Path("/tmp/apple_catalog.json")
+apple_catalog = json.loads(_catalog.read_text())
+apple_definitions = {d["kind"]: d for d in apple_catalog}
 from datetime import datetime, timezone, date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -74,6 +81,7 @@ class Handler(BaseHTTPRequestHandler):
             observations[:] = [
                 {
                     'observation_id': 'fixture-glucose',
+                    'interpretation': {'result': {'display': '99.1 mg/dL'}, 'reference': {'reason': 'No reference interval was printed'}},
                     'report_id': 'fixture-report',
                     'revision': 1,
                     'status': 'confirmed',
@@ -87,6 +95,16 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 }
             ]
+        if route == 'test/expand-report':
+            template = observations[0]
+            observations[:] = [
+                dict(template, observation_id=f'fixture-marker-{index}', status='pending',
+                     payload=dict(template['payload'], raw_name=f'Marker {index + 1}'))
+                for index in range(126)
+            ]
+        if route == 'reports/delete':
+            reports[:] = [item for item in reports if item['report_id'] != body.get('report_id')]
+            observations[:] = [item for item in observations if item['report_id'] != body.get('report_id')]
         if route == 'test/fail-review':
             fail_review = True
         if route == 'reports/review' and fail_review:
@@ -214,7 +232,7 @@ class Handler(BaseHTTPRequestHandler):
                         {
                             'observation_id': 'trend-' + str(index),
                             'report_id': 'fixture-report',
-                            'sampled_at': date,
+                            'sampled_at': collection_date,
                             'timestamp': 1790812800 + index * 86400,
                             'value': 100 + index * 10,
                             'unit': 'mg/dL',
@@ -226,7 +244,7 @@ class Handler(BaseHTTPRequestHandler):
                                 'source': {'page': 1},
                             },
                         }
-                        for index, date in enumerate(['2026-10-01', '2026-10-02'])
+                        for index, collection_date in enumerate(['2026-10-01', '2026-10-02'])
                     ]
                     if analysis_enabled
                     else []
@@ -332,6 +350,12 @@ class Handler(BaseHTTPRequestHandler):
                 response = source_preferences
         if route == 'exports/create':
             exports.append({'export_id': 'synthetic-export', 'status': 'ready', 'created_at': 1790985600})
+        if route == 'wellness/sources':
+            response['browse_metrics'] = [dict(d, metric_id=d['kind'], record_count=3) for d in apple_catalog if d['browse']]
+        if route == 'wellness/records/list':
+            response = {'records': [{'platform':'apple_health','source_id':'watch','record_id':'event-1','record_type':body['kind'],'at':int(time.time())-60,'version':1}], 'next_cursor':None}
+        if route == 'wellness/records/get':
+            response = {'record_type':'HKCategoryTypeIdentifierAppleStandHour','start_at':int(time.time())-60,'details':{'category':'Stood'},'notes':[]}
         if route == 'wellness/series':
             if body.get('record_type') == 'heart_rate':
                 response['unit'] = 'count/min'
@@ -381,11 +405,39 @@ class Handler(BaseHTTPRequestHandler):
                             for (source, unit, start, end), samples in groups.items()]
                     (result['summaries'] if window else result)[period] = rows
             return result
+        if route == 'wellness/sources':
+            response['browse_metrics'] = [dict(d, metric_id=d['kind'], record_count=3) for d in apple_catalog if d['browse']]
+        if route == 'wellness/records/list':
+            response = {'records': [{'platform':'apple_health','source_id':'watch','record_id':'event-1','record_type':body['kind'],'at':int(time.time())-60,'version':1}], 'next_cursor':None}
+        if route == 'wellness/records/get':
+            response = {'record_type':'HKCategoryTypeIdentifierAppleStandHour','start_at':int(time.time())-60,'details':{'category':'Stood'},'notes':[]}
         if route == 'wellness/series':
             response['chart_ranges'] = chart_ranges([(s['source'], response['unit'], p['at'], p['value']) for s in response['sources'] for p in s['points']])
+        if route in ('wellness/chart', 'wellness/measurements'):
+            kind = body['record_type']
+            unit = {'heart_rate':'count/min','respiratory_rate':'count/min','body_mass':'kg','vo2_max':'ml/kg*min','blood_glucose':'mg/dL','body_fat':'%','oxygen_saturation':'%','HKQuantityTypeIdentifierHeartRateVariabilityRMSSD':'ms'}.get(kind, apple_definitions.get(kind, {}).get('unit', 'count'))
+            value = 72.5 if kind == 'body_mass' else 42 if kind == 'vo2_max' else 70
+            source = 'manual:longlivehealth' if kind == 'body_mass' else 'apple_health:watch'
+            now = int(datetime.now().astimezone().replace(hour=12, minute=21, second=10, microsecond=0).timestamp()) if kind == 'heart_rate' else int(time.time()) - 60
+            all_points = [(source,unit,at,value+n) for n,at in enumerate([now,now-400*86400,1577836800])]
+            if kind == 'heart_rate':
+                all_points += [(source,unit,now-5,90)]
+            points = [p for p in all_points if body['start_at'] <= p[2] < body['end_at']]
+            response = {'chart_ranges':chart_ranges(points),'unit':unit,'sources':[source], 'first_at':1577836800,'last_at':now,'samples_read':len(points),'valid_samples':len(points),'excluded_samples':0,'complete':True,'data_revision':1}
+            if route == 'wellness/measurements':
+                response = {'points':[{'at':p[2],'value':p[3],'source':p[0],'record_id':str(p[2]),'unit':unit} for p in points],'next_offset':None,'data_revision':1}
         if route == 'wellness/day':
             for metric in response['metrics']:
                 metric['chart_ranges'] = chart_ranges([(p['source'], p['unit'], datetime.fromisoformat(day['date']).replace(tzinfo=timezone.utc).timestamp(), p['value']) for day in metric['history'] for p in day['alternatives']])
+        if route == 'wellness/history':
+            kind = body['record_type']
+            unit, value = {'sleep': ('seconds', 27000), 'workout': ('seconds', 3600), 'resting_heart_rate': ('count/min', 58), 'hrv_sdnn': ('ms', 40), 'active_energy': ('kcal', 500), 'basal_energy': ('kcal', 1500), 'steps': ('count', 6500)}[kind]
+            dates = ['2020-01-01'] + [(date.today()-timedelta(days=n)).isoformat() for n in range(9, 0, -1)]
+            all_dates = dates[:]
+            if body.get('dates'): dates = [d for d in dates if body['dates'][0] <= d <= body['dates'][1]]
+            history = [{'date': d, 'alternatives': [{'source': 'apple_health:watch', 'value': value, 'unit': unit}]} for d in dates]
+            response = {'record_type': kind, 'unit': unit, 'history': history, 'first_record_at':1577836800, 'last_record_at':int(datetime.fromisoformat(all_dates[-1]).replace(tzinfo=timezone.utc).timestamp())}
+            response['chart_ranges'] = chart_ranges([('apple_health:watch', unit, datetime.fromisoformat(d).replace(tzinfo=timezone.utc).timestamp(), value) for d in dates])
         if route == 'test/counts':
             response = request_counts
         if route == 'session/login' and body.get('username') == 'admin':

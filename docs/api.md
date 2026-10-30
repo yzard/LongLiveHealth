@@ -4,6 +4,8 @@
 
 API 同时通过 `GET /` 和固定 `/assets/{app.css,app.mjs,client.mjs,presentation.mjs}` 提供嵌入式 Web GUI；这些页面资源公开，数据读取继续使用上述认证。未知路由仍返回 JSON 404，不用网页覆盖 API 错误。[网页范围](runbooks/webgui.md)限定为浏览与现有血脂 AI 预设，导入和健康平台读写由移动端承担。
 
+Android 安装包通过公开的 `GET /longlivehealth.apk` 下载（旧路径 `/downloads/longlivehealth.apk` 保留为别名）。文件来自后端 Docker 镜像中的固定 APK，不读取用户数据目录；响应包含 APK MIME 类型、文件长度和下载文件名。APK 不包含用户名、密码或登录会话。
+
 | 组件/操作 | 请求 | 返回 |
 | --- | --- | --- |
 | server/status | {} | status、api_version、capabilities |
@@ -35,7 +37,7 @@ API 同时通过 `GET /` 和固定 `/assets/{app.css,app.mjs,client.mjs,presenta
 | health/sync | 见下方 | batch_id、replayed、total_records |
 | health/coverage | {} | coverage、read_permission=unknown、total_records |
 | health/list | limit 1–500、offset 非负 | records，平台和完整 envelope |
-| health/raw/list | limit 1–100、after_id 可空 | files：raw_id、platform、source_id、record_id、relative_path、received_at |
+| health/raw/list | limit 1–100、after_id 可空 | files：raw_id、platform、source_id、record_id、relative_path、received_at、raw_offset、raw_length |
 | health/raw/{raw_id}/download | GET | 该修订的完整原始 JSON |
 | health/aggregate | record_type、start_date、end_date、timezone IANA | days、timezone、算法版本、来源策略、computed_at |
 | exports/create | {} | export_id |
@@ -91,13 +93,32 @@ trends/get 返回标准 value/unit、original、标准化 reference、excluded�
 }
 ```
 
-platform 为 apple_health/health_connect；第二项只提供服务器协议，尚无 Android 客户端。批次最大 1000 条、40 MiB；单条 payload 最大 32 MiB，不接受截断数据。Health 同步在读取正文前取得最多两个共享准入槽，health/list、health/aggregate 共用这两个槽；满时返回 429，客户端保留原批次重试。JSON 类型支持 application/json 及 application/*+json；非法 JSON 为 400、超限为 413。批次解析、校验、摘要和原始 envelope 编码在有界 CPU 执行域准备，事务内不重复编码。health/list 累积 envelope 超过 40 MiB 时明确失败，请减少 limit。查询原件索引不返回大载荷，单个原件下载为流式响应。
+platform 为 apple_health/health_connect；第二项只提供服务器协议，尚无 Android 客户端。同步请求不限制记录条数或总字节数；单条 payload 也不设字节上限，不接受截断数据。Health 同步在读取正文前取得最多两个共享准入槽，health/list、health/aggregate 共用这两个槽；满时返回 429，客户端保留原批次重试。JSON 类型支持 application/json 及 application/*+json；非法 JSON 为 400、超限为 413。批次解析、校验、摘要和原始 envelope 编码在有界 CPU 执行域准备，事务内不重复编码。health/list 按请求的记录数分页，不设累积 envelope 字节上限。查询原件索引不返回大载荷，单个原件下载按索引只读取对应 JSON，并校验文件实际长度，不设固定字节上限。
 
-同批次不同内容冲突；同记录同版本不同内容冲突；旧版本忽略；删除标记不能被更高版本旧上传覆盖。Apple 删除事件不知道 source 时用 `*`，仅删除事件可用。删除清除内容、历史和对应原件，只留抑制标记。
+同批次不同内容冲突；同记录同版本不同内容冲突；旧版本忽略；删除标记不能被更高版本旧上传覆盖。Apple 删除事件不知道 source 时用 `*`，仅删除事件可用。Apple Health 删除清除 SQLite 的可见投影，保留历史原件并追加带身份、版本的删除标记；其他导入类型仍清除对应原件。
 
 完整 envelope 保存到 raw/<user>/apple_health 或 raw/<user>/google_health；SQLite 只保留查询投影和原件索引。iOS payload.raw_archive 是 HealthKit 可读样本的 secure archive/base64，FHIR 与专门查询的序列另保留。服务端允许其他原始字段，不要求每种类型都能聚合。
 
-coverage_status：observed/no_visible_samples/error/unsupported；它描述该批查询，不代表 Apple 已授予读取权限或整个历史完整。服务器保存最近批次状态、首次/最近成功时间；visible_start_at/visible_end_at 是当前平台/类型的归档范围，不证明中间完整。iOS 每次锚点查询上限 1000 个对象，按字节及记录数拆请求；先持久化全部批次及候选锚点，全部得到回执才推进。断线或响应丢失重放相同批次；特征/活动环/CDA/药物快照独立检查点，不从隐藏或空结果推断删除。
+Mixed batches use `coverage: [{"record_type":"heart_rate","status":"observed"}]`
+instead of top-level `record_type` and `coverage_status`. Every record retains its
+own type, which must appear in coverage. Status is observed, no_visible_samples,
+error, or unsupported; it describes the query, not HealthKit read authorization.
+The server accepts the shipped single-type wire format for installed clients and
+previously persisted pending requests. Mixed records and coverage commit in one
+transaction and share one replay identity.
+
+The iOS client batches records across type boundaries, including snapshots, with
+an 8 MiB encoded-record JSON target (request metadata adds overhead). There is no
+record-count ceiling. A single record larger than the target is sent intact, and
+the final partial block is sent too. Read paging is independent: ordinary anchored
+queries read 1,000 samples; routes, ECG and heartbeat series read one sample.
+Ordinary blocks pipeline preparation and upload; series blocks upload before the
+next read to reduce peak memory.
+Before upload the client persists the entire request and every affected anchor or
+snapshot update; those updates commit only after acknowledgement. A page split
+across blocks attaches its cursor only to the block containing its final record.
+A pending block replays after partial local checkpoint failure. Hidden or absent
+samples never imply deletion.
 
 日聚合版本 health-daily-v2，分析快照引用同一版本。支持 heart_rate/resting_heart_rate/hrv_sdnn/steps/sleep/workout/active_energy/basal_energy。热量以 kcal 按来源累加，跨日区间按时长比例分配。数量类型严格检查单位；前 3 项为样本均值，步数按区间重叠比例分配，睡眠/运动为同来源区间并集。每个来源分别输出；没有数据时无条目或 value=null，不能当作零。每个 day/source 的 sample_count 是实际参与计算的记录数；source_record_count 是该日来源候选数，excluded_sample_count 是未参与数。value_status 为 available/missing/numeric_overflow；后两种 value=null。非数值、错误单位、不适用睡眠类别及无重叠区间不进入计算，原始载荷仍完整归档。最多 367 天、50,000 条候选明细，超限明确失败而非截断。
 
@@ -109,7 +130,7 @@ file.relative_path 指向 raw/<user>/<source>/<file>.<extension> 原件；原件
 
 extraction_outputs 保存每个阶段最终接收的 UTF-8 HTTP 回复（上限 8 MiB），成功或解析失败均可取回；不包括网络失败时不存在的正文、超限正文和中间自动重试回复。已解析 content 与完整 response_body 分开保存。报告元数据列表不加载完整回复正文；读取单个回复及导出均检查用户归属。
 
-导出 manifest.version=1：表 JSONL（当前记录、原件索引、OCR 回复及当前人工复核结果）、辅助 CSV（含标准化结果/参考区间/状态/规则版本），extraction_inputs.jsonl 收录每页证据，以及按数据库 relative_path/raw_path 收录的有效原件；ZIP 使用 raw/<user>/<source>/<file> 路径。删除后的内容不再导出。
+导出 manifest.version=1：表 JSONL（当前记录、原件索引、OCR 回复及当前人工复核结果）、辅助 CSV（含标准化结果/参考区间/状态/规则版本），extraction_inputs.jsonl 收录每页证据，以及按数据库 relative_path/raw_path 收录的有效原件；ZIP 使用 raw/<user>/<source>/<file> 路径。Apple Health 已删除记录的旧原件和删除标记仍包含在归档中，但不作为可见指标；其他类型已删除内容不再导出。
 
 列表按 ID 游标，不保证多请求期间新增数据的快照；趋势最多读取 10,000 条已确认结果，超限明确报错。iPhone 可比较两项指标，图表使用各自尺度；API 保持独立 metric_id/unit。
 
@@ -127,7 +148,7 @@ All routes below require the current user's Bearer session. Source data remains 
 
 `POST /api/v1/wellness/day` accepts `date` (`YYYY-MM-DD`), `timezone` (IANA name), and `source_priority` (metric names mapped to ordered source IDs). The response includes six metrics, their source alternatives, history, coverage, and archive revision. A source ID combines its platform and producer. Multiple available sources require a choice. Missing data remains null. Personal comparisons require 28 earlier valid days from the same source within 42 days. These comparisons describe data. They do not estimate disease risk.
 
-`wellness/day` version `wellness-day-v5` also returns `combined` on step history/current entries. This is the Overview step total: disjoint intervals add; overlaps select Apple Watch, other wearables, unknown sources, then phones. Equal-rank sources use stable source-key ordering; samples within one source keep their summed values. Partial samples are prorated by duration, since individual step timestamps are unavailable. `health/aggregate` exposes the same result in `combined_days`; its existing per-source `days` remain unchanged. Cached daily views with older algorithm versions are recomputed.
+`wellness/day` version `wellness-day-v6` also returns `combined` on step history/current entries. This is the Overview step total: disjoint intervals add; overlaps select Apple Watch, other wearables, unknown sources, then phones. Equal-rank sources use stable source-key ordering; samples within one source keep their summed values. Partial samples are prorated by duration, since individual step timestamps are unavailable. `health/aggregate` exposes the same result in `combined_days`; its existing per-source `days` remain unchanged. Cached daily views with older algorithm versions are recomputed.
 
 `POST /api/v1/wellness/sources` accepts `{}`. The response lists visible source and type combinations, record counts, and timestamp ranges. An empty range does not establish denied permission.
 
@@ -235,9 +256,9 @@ wellness/entries/save 和 wellness/entries/delete 返回 record_id、sync 和 re
 
 `POST /api/v1/metrics/history/get` accepts `{"metric_id":"ldl_cholesterol"}` for a metric from `metrics/list`. It returns `metric`, chronologically ordered `points`, `excluded`, `excluded_count`, and calculation/conversion versions. Each point has a stable `point_id`, `source_id`, `source_name`, `sampled_at`, `timestamp`, canonical `value`/`unit`, and original evidence. Report points also include `report_id`, `observation_id`, revision and filename; their source page remains in `original.source`. Apple Health points retain their record/provider identity and original clinical observation. Values from different sources are not summed or averaged.
 
-Report review context accepts optional `source_name`: the clinic/laboratory/institution entered at import, such as Function Health. Nonempty names must be at most 160 UTF-8 bytes, without control characters; Apple Health is reserved for device archives. Existing reports without a name use their filename until the user edits collection context. Existing persisted upload drafts may lack the field. New iOS imports require it, and retry the same upload ID until both the file and the source name have been acknowledged. There is no database schema migration.
+Report review context accepts optional `source_name`: the clinic/laboratory/institution, such as Function Health. Nonempty names must be at most 160 UTF-8 bytes, without control characters; Apple Health is reserved for device archives. Imports select the file first; OCR fills missing title/source fields. The Report source button edits these fields after import. Existing reports without a name use their filename until a source is identified or entered. Upload retries preserve the same upload ID.
 
-Report history includes only confirmed observations and preserves existing duplicate/superseded-report exclusions and analyte-specific conversions. Apple Health includes active blood glucose quantity records and finalized/amended/corrected clinical FHIR Observations with recognized LOINC codes. Clinical components use their own codes/quantities and the parent collection date. Imported/issued timestamps do not replace missing collection dates. Unrecognized codes, unsupported clinical resources, non-final results, bounds and incompatible units remain archived and are reported as exclusions when relevant; they are not guessed from display labels. The initial closed mapping covers the 17 laboratory metrics in the catalog (LOINC reference: https://loinc.org/). It does not yet map every clinical code or FHIR resource format.
+Report history includes only confirmed observations and preserves existing duplicate/superseded-report exclusions and analyte-specific conversions. Apple Health includes active blood glucose quantity records and finalized/amended/corrected clinical FHIR Observations with recognized LOINC codes. Clinical components use their own codes/quantities and the parent collection date. Imported/issued timestamps do not replace missing collection dates. Unrecognized codes, unsupported clinical resources, non-final results, bounds and incompatible units remain archived and are reported as exclusions when relevant; they are not guessed from display labels. The clinical mapping uses a closed list of verified LOINC codes (reference: https://loinc.org/). It does not yet map every clinical code or FHIR resource format.
 
 The read is user-scoped and applies current deletion state. A single history request is bounded by the existing 10,000-confirmed-observation limit plus 10,000 applicable Health records / 32 MiB of projected clinical data. Exceeding a bound returns 413, never a silently truncated chart. Raw HealthKit binary archives are excluded from this query projection. Large archives that exceed these bounds require a subsequent paginated history implementation.
 
@@ -308,9 +329,14 @@ not append them again to the clinical historical list. Unit derivation version:
 `lab-units-v5`.
 
 
-Storage schema 7 keeps complete Health JSON in `raw/<user>/apple_health/<raw_id>.json`.
+Storage schema 8 keeps Apple Health originals in `raw/<user>/apple_health/<category>.frames`.
+Each frame is an unsigned 8-byte little-endian UTF-8 JSON length followed by the exact JSON bytes.
+Updates and deletion markers append frames; account deletion removes the user archive.
+Normal Apple batches validate conflicts once, write projections and original indexes in two bulk SQL statements, then flush each changed category once before committing.
+Failed transactions leave at most an uncommitted tail, which the next writer truncates using the committed index.
+The filesystem writer retains the SQLite transaction through cancellation.
 `health_records` contains one current query projection and a pointer to its original.
-`health_originals` is a file catalog (identity, path, received time); it contains no JSON
+`health_originals` is an original catalog (identity, path, frame offset, JSON length, received time); it contains no JSON
 payload or historical values. It supports raw listing, export, deletion and orphan cleanup.
 Detailed Apple sampling series, device metadata and opaque archives remain in originals;
 specialty and HRV detail reads load the current original with existing response bounds.
@@ -359,3 +385,70 @@ summary charts keep their UTC date semantics. Half-year windows use Jan–Jun an
 Jul–Dec. Week windows start Sunday; DST days retain their actual duration.
 
 Browse daily charts use the metric’s canonical unit even when today has no selected value. Historical source alternatives remain visible without a preferred source. Workouts measures elapsed workout duration; Active Energy and Resting Energy show source-separated calorie totals.
+
+Clinical histories always include `chart_ranges`, including `clinical:` metrics.
+Exact decimal strings are accepted for chart construction. Hospital-specific exact
+numeric results without a reported unit use `Not reported`, separated from known
+units; no units are inferred. Text, thresholds and qualitative results remain in
+`records` and are not converted to exact numeric points.
+
+`wellness/history` accepts `record_type` and an IANA `timezone`, and returns a
+complete source-separated daily metric (`history`, `unit`, `chart_ranges`, record
+bounds and data revision). It uses the same daily algorithms as Overview but is
+not restricted to its 43-day baseline window. Queries are chunked and capped at
+20,000 calendar days / 100,000 daily source rows; an excess returns an error, not
+a truncated chart. Sleep includes only recorded asleep categories; in-bed-only
+records remain in historical rows and do not become sleep duration.
+
+### Complete Browse measurement periods
+
+`POST wellness/chart` accepts `record_type`, `timezone`, `period` (`H`, `D`, `W`, `M`, `6M`, `Y`), `start_at`, and exclusive `end_at`. A request spans at most 367 days. It streams every stored sample in that interval, including expanded heart-rate quantity samples and manual weights; it does not impose a sample-count cutoff. The response provides source-separated `chart_ranges`, global `first_at`/`last_at` navigation bounds, `samples_read`, `valid_samples`, `excluded_samples`, and `complete`. Unsupported units/values are counted explicitly. A concurrent archive revision causes a conflict instead of a mixed snapshot.
+
+`POST wellness/measurements` accepts the same record type and interval, plus `offset` and nullable `expected_revision`. It returns up to 500 historical values and `next_offset`; null means the interval is exhausted. Subsequent pages must use the returned revision. Browse requests the selected period on demand and retains source filtering locally. Daily summaries use `wellness/history` with inclusive `dates: [start_date, end_date]` (at most 367 days); omitting dates retains the full-history operator/older-client query. Both modes return global first/last record timestamps for navigation; laboratory history retains explicit size-limit errors instead of silently truncating results. Sleep sessions accept selectable ranges up to 367 days.
+
+### OCR report identity
+
+Imports no longer require a source name. The Qwen3.8 OCR response (`laboratory-page-v4`) includes nullable `report_title` and `source_name`, identified from visible headings and organization branding. Missing or uncertain identity stays null. The source is the issuing organization, not the patient, metric, or generic report title. Each successful page fills only absent report context fields, using revision-checked review and existing original-file relocation. Retries do not overwrite populated fields. Titles allow 1–256 UTF-8 bytes; sources retain the 1–160-byte validation and reserved-name checks. Both fields remain editable. Report listings now include context for display.
+
+
+### Report marker identity and review summary
+
+Report observations include `resolved_metric_id`, derived from an explicit name/abbreviation catalog and compatible units when `payload.metric_id` is null. An explicit reviewed `payload.metric_id` takes precedence. Raw names, values, units and stored payloads are not rewritten. This read-time derivation applies to existing reports as well as new OCR candidates; only confirmed observations enter trends. Unknown or ambiguous names remain unmapped. No fuzzy similarity, token deletion, or LLM-assigned metric IDs are used. Specimen qualifiers, percentages versus absolute counts, free versus total analytes, and routine versus high-sensitivity assays stay separate. Report review can override automatic matching by selecting a catalog metric.
+
+The catalog now has 118 report metrics. Known clinical LOINC mappings additionally include ALT 1742-6 and AST 1920-8; unknown clinical codes still use their existing code-derived identity, never guessed from display names. References: https://loinc.org/1742-6 and https://loinc.org/1920-8. Not every clinical code is mapped to the report catalog.
+
+The iOS report review header displays the total observation count and a direct Report source editor. Detailed page OCR text opens on demand. Response JSON decoding and report cache encoding run off the UI executor. Saving patches the current view; closing or cancelling an editor does not reload it.
+
+### Report draft storage
+
+Unconfirmed (`pending` or `rejected`) report observations are persisted in
+`draft.sqlite`, separate from `database.sqlite`. Report metadata, raw-file indexes,
+OCR evidence and job progress remain in the main database. `reports/get` and
+`observations/history` combine the current records from both stores, preserving
+observation IDs, candidate keys and optimistic revision checks. Charts and analysis
+consume confirmed observations only.
+
+`reports/review` with `status=confirmed` commits the reviewed payload to the main
+observation table. The iOS Confirm all action sends all pending items through this
+endpoint (up to 2,000 per request). After that commit, matching older drafts are
+removed. Reverting a result to pending/rejected first persists the draft, then removes
+the old official row. Cleanup is repeatable and runs at startup as well: a process
+interruption between copying and cleanup cannot delete the sole durable copy.
+Existing unconfirmed rows are moved into the draft store without re-running OCR.
+
+Account exports retain the same observations JSONL format and include both review
+states. Restore routes unconfirmed rows directly to `draft.sqlite`. Filesystem
+backups must include both SQLite databases and their active WAL files, or be taken
+with the service stopped; `draft.sqlite` is persistent user data, not disposable tmp.
+
+
+Medication dose source versions can be fractional numbers. For
+`medication_dose_event`, the HTTP decoder accepts finite numeric versions >= 1,
+retains the original version in the archived envelope and projection digest, and
+uses the positive IEEE-754 bit pattern as an internal sortable SQLite version key.
+This keeps fractional and integral dose revisions in one ordered domain without
+truncating fractions. Other types retain their existing integer version contract.
+
+Laboratory history returns all confirmed report results in `records`, including results without a collection date or a plottable numeric value. `points` remains the chart-only projection. Each historical record retains its original payload, report link and source identity. Missing dates and values display as an em dash. OCR prompt v4 explicitly extracts per-result dates, including Function Health dates printed at the right edge of each result row.
+
+OCR completion requires a nonempty printed name, a valid collection date and a nonempty result for every nonadministrative result row. Text results such as Negative and Positive are valid. Missing or invalid required fields fail the extraction job; valid draft candidates and the complete provider output remain available for review. `reports/get.validation_issues` lists `page`, one-based `item_index`, `item_name`, `field` and `reason` for the latest OCR run. The iOS report shows these issues directly. This extraction check does not remove previously confirmed incomplete records from historical values.

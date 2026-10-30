@@ -213,6 +213,11 @@ enum HealthCatalog {
         Entry(identifier: "HKQuantityTypeIdentifierWorkoutEffortScore", family: .quantity, minimumOS: OperatingSystemVersion(majorVersion: 18, minorVersion: 0, patchVersion: 0), kind: "HKQuantityTypeIdentifierWorkoutEffortScore", unit: nil),
         Entry(identifier: "HKCategoryTypeIdentifierBleedingAfterMenopause", family: .category, minimumOS: OperatingSystemVersion(majorVersion: 27, minorVersion: 0, patchVersion: 0), kind: "HKCategoryTypeIdentifierBleedingAfterMenopause", unit: nil),
         Entry(identifier: "HKCategoryTypeIdentifierMenopausalState", family: .category, minimumOS: OperatingSystemVersion(majorVersion: 27, minorVersion: 0, patchVersion: 0), kind: "HKCategoryTypeIdentifierMenopausalState", unit: nil),
+        Entry(identifier: "HKCategoryTypeIdentifierBleedingAfterPregnancy", family: .category, minimumOS: OperatingSystemVersion(majorVersion: 18, minorVersion: 0, patchVersion: 0), kind: "HKCategoryTypeIdentifierBleedingAfterPregnancy", unit: nil),
+        Entry(identifier: "HKCategoryTypeIdentifierBleedingDuringPregnancy", family: .category, minimumOS: OperatingSystemVersion(majorVersion: 18, minorVersion: 0, patchVersion: 0), kind: "HKCategoryTypeIdentifierBleedingDuringPregnancy", unit: nil),
+        Entry(identifier: "HKCategoryTypeIdentifierSleepApneaEvent", family: .category, minimumOS: OperatingSystemVersion(majorVersion: 18, minorVersion: 0, patchVersion: 0), kind: "HKCategoryTypeIdentifierSleepApneaEvent", unit: nil),
+        // Keep the shipped type/payload contract and anchors. The API projects raw_quantity
+        // to milliseconds for Recovery HRV, including originals archived before chart support.
         Entry(identifier: "HKQuantityTypeIdentifierHeartRateVariabilityRMSSD", family: .quantity, minimumOS: OperatingSystemVersion(majorVersion: 27, minorVersion: 0, patchVersion: 0), kind: "HKQuantityTypeIdentifierHeartRateVariabilityRMSSD", unit: nil),
     ]
     static var definitions: [HealthBridge.Definition] {
