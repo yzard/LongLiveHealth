@@ -20,8 +20,7 @@ Android 安装包通过公开的 `GET /longlivehealth.apk` 下载（旧路径 `/
 | users/delete | user_id、confirmation（目标用户名） | user_id、cleanup_queued、sessions_revoked；仅 admin，不能删除 admin |
 | user/delete | confirmation：当前用户名 | cleanup_queued、sessions_revoked |
 | files/upload | multipart file，HEIC/HEIF 可另附 original；X-Upload-Id UUID | file、job、replayed |
-| files/list / reports/list / jobs/list | limit 1–100、after_id 可空 | files / reports / jobs |
-| files/get / jobs/get | file_id / job_id | 对应对象 |
+| reports/list / jobs/list | limit 1–100、after_id 可空 | reports / jobs |
 | files/{file_id}/download | GET | 原件流 |
 | jobs/retry | job_id | 更新后的任务；仅 failed 可重试 |
 | reports/get | report_id | report、context、observations、relation、pages、extraction_outputs 元数据、duplicate_candidates |
@@ -30,16 +29,11 @@ Android 安装包通过公开的 `GET /longlivehealth.apk` 下载（旧路径 `/
 | reports/review | 见下方 | 新报告快照；可能附 analysis_trigger |
 | reports/relate | report_id、expected_revision、preferred_report_id 可空、kind | updated |
 | reports/delete | report_id、expected_revision | cleanup_queued |
-| observations/history | observation_id | history 数组，仅含当前结果（已安装客户端兼容入口） |
 | metrics/list | {} | metrics：metric_id/name/standard_unit |
 | trends/get | metric_ids 1–20、start_at/end_at 可空 | points、incomparable_count、算法/转换版本 |
 | health/connect | platform、installation_id UUID | connection_id、platform、installation_id |
 | health/sync | 见下方 | batch_id、replayed、total_records |
 | health/coverage | {} | coverage、read_permission=unknown、total_records |
-| health/list | limit 1–500、offset 非负 | records，平台和完整 envelope |
-| health/raw/list | limit 1–100、after_id 可空 | files：raw_id、platform、source_id、record_id、relative_path、received_at、raw_offset、raw_length |
-| health/raw/{raw_id}/download | GET | 该修订的完整原始 JSON |
-| health/aggregate | record_type、start_date、end_date、timezone IANA | days、timezone、算法版本、来源策略、computed_at |
 | exports/create | {} | export_id |
 | exports/list | {} | exports，最近 100 项 |
 | exports/delete | export_id | cleanup_queued |
@@ -93,7 +87,7 @@ trends/get 返回标准 value/unit、original、标准化 reference、excluded�
 }
 ```
 
-platform 为 apple_health/health_connect；第二项只提供服务器协议，尚无 Android 客户端。同步请求不限制记录条数或总字节数；单条 payload 也不设字节上限，不接受截断数据。Health 同步在读取正文前取得最多两个共享准入槽，health/list、health/aggregate 共用这两个槽；满时返回 429，客户端保留原批次重试。JSON 类型支持 application/json 及 application/*+json；非法 JSON 为 400、超限为 413。批次解析、校验、摘要和原始 envelope 编码在有界 CPU 执行域准备，事务内不重复编码。health/list 按请求的记录数分页，不设累积 envelope 字节上限。查询原件索引不返回大载荷，单个原件下载按索引只读取对应 JSON，并校验文件实际长度，不设固定字节上限。
+iOS 和 Android 分别使用 Apple Health 与 Health Connect，调用同一 health/connect、health/sync、health/coverage 协议。同步不限制记录条数或总字节数，客户端按字节大小分批，保持原批次重试语义。解析、校验、摘要和原始 envelope 编码在有界 CPU 执行域完成。原始 JSON 通过完整导出保留；浏览和图表查询读取 SQLite 的索引与投影。
 
 同批次不同内容冲突；同记录同版本不同内容冲突；旧版本忽略；删除标记不能被更高版本旧上传覆盖。Apple 删除事件不知道 source 时用 `*`，仅删除事件可用。Apple Health 删除清除 SQLite 的可见投影，保留历史原件并追加带身份、版本的删除标记；其他导入类型仍清除对应原件。
 
@@ -148,7 +142,7 @@ All routes below require the current user's Bearer session. Source data remains 
 
 `POST /api/v1/wellness/day` accepts `date` (`YYYY-MM-DD`), `timezone` (IANA name), and `source_priority` (metric names mapped to ordered source IDs). The response includes six metrics, their source alternatives, history, coverage, and archive revision. A source ID combines its platform and producer. Multiple available sources require a choice. Missing data remains null. Personal comparisons require 28 earlier valid days from the same source within 42 days. These comparisons describe data. They do not estimate disease risk.
 
-`wellness/day` version `wellness-day-v6` also returns `combined` on step history/current entries. This is the Overview step total: disjoint intervals add; overlaps select Apple Watch, other wearables, unknown sources, then phones. Equal-rank sources use stable source-key ordering; samples within one source keep their summed values. Partial samples are prorated by duration, since individual step timestamps are unavailable. `health/aggregate` exposes the same result in `combined_days`; its existing per-source `days` remain unchanged. Cached daily views with older algorithm versions are recomputed.
+`wellness/day` version `wellness-day-v6` also returns `combined` on step history/current entries. This is the Overview step total: disjoint intervals add; overlaps select Apple Watch, other wearables, unknown sources, then phones. Equal-rank sources use stable source-key ordering; samples within one source keep their summed values. Partial samples are prorated by duration, since individual step timestamps are unavailable. Cached daily views with older algorithm versions are recomputed.
 
 `POST /api/v1/wellness/sources` accepts `{}`. The response lists visible source and type combinations, record counts, and timestamp ranges. An empty range does not establish denied permission.
 
@@ -166,8 +160,6 @@ Manual entries use `manual:longlivehealth`. GPX records use `file_import:gpx-1.1
 
 `POST /api/v1/wellness/sleep` accepts `start_at`, `end_at`, and `timezone`. The interval cannot exceed 90 days. Results keep each source separate and include original stage intervals with record IDs and revisions. A 90-minute gap separates groups. This engineering threshold does not classify main sleep or naps. In-bed evidence is required for efficiency. Missing, conflicting, and truncated sessions do not produce a complete sleep duration. This endpoint does not infer wakefulness from gaps.
 
-`POST /api/v1/wellness/clinical-age` accepts `report_id`, `age_at_collection_years`, and `research_acknowledged`. The caller must acknowledge research use. Age refers to the collection date and must be between 20 and 120. The model requires nine exact, reviewed values from the same report and collection date. Missing inputs produce `insufficient_data`. Duplicate inputs, unsupported units, and mixed collection dates fail the request. The response includes model inputs, observation revisions, archive revision, conversion version, and the published formula reference. The result does not establish measured biological age or disease risk. These read-time results are not persisted as new observations.
-
 Manual edits require the next version. A stale version or a change of entry type returns a conflict. A repeated identical version remains safe to retry. An entry list is also limited to 4 MiB of stored payloads. A daily metric that exceeds the existing query budget reports `query_limit_exceeded`; other daily metrics remain available.
 
 ### 来源趋势、偏好和回顾
@@ -175,8 +167,6 @@ Manual edits require the next version. A stale version or a change of entry type
 所有接口使用 POST 和当前账户鉴权。
 
 `wellness/preferences/get` 返回 `version` 与 `preferences`。`wellness/preferences/save` 接收 `expected_version`、UUID `batch_id` 与完整偏好。偏好包含 `source_priority`、`favorite_metrics` 和可空 `sleep_target_minutes`。收藏为空时显示全部六类指标。睡眠目标是用户指定值，不是生理需求估计。偏好进入手动来源的修订、导出和删除流程。过期修改返回冲突。
-
-`wellness/series` 接收 `record_type`、`start_at`、`end_at` 和 `maximum_gap_seconds`。窗口为左闭右开，最多 200000 个测量点；VO₂ Max 可一次读取完整历史，其他类型最多 90 天。一个请求返回全部来源，`body_mass` 同时包含手动体重记录。`points` 保留原始记录，`chart_points` 在服务端按同一来源、时间和换算后数值去重，保留不同来源的标记。类型为 `blood_glucose`、`vo2_max`、`body_mass`、`body_fat`、`oxygen_saturation`、`respiratory_rate`。每来源返回原值、换算值、单位、记录 ID 与版本。血糖摘要只在相邻样本间隔不超过指定值时左侧保持，允许间隔为 1–1800 秒。最后一点不推断持续时间。重复时间或未知单位停止该来源摘要。稀疏血糖样本不被认定为 CGM。Apple Health 的百分比输入是 0–1，显示时转换为 0–100。其他平台的 `%` 契约是 0–100，不猜测量级。
 
 `wellness/timeline` 接收 `start_at`、`end_at` 与可空 `cursor`，最多 31 天，每页 200 项。范围包括报告上传、原睡眠区间、运动与手动领域记录。报告时间是上传时间。将返回的 `next_cursor` 原样用于下一页。账户数据修订变化时必须从第一页重新读取。
 
@@ -192,8 +182,6 @@ Manual edits require the next version. A stale version or a change of entry type
 
 
 `training_day` 手动日志接收 `status`（`rest` 或 `all_sessions_logged`）与 `note`。日期由记录时间和记录时区决定。训练回顾的 `training` 返回最后 7／28 个已结束本地日历日。仅明确休息日计零；所有训练均填写努力分且确认记录完整，才视为完整训练日。不同记录时区的确认不套用，冲突确认保持未知。窗口缺完整日期时，`total_load_au` 与 `daily_mean_au` 为 null，`observed_sum_au` 单独展示已有记录。
-
-`wellness/series` 另支持 `heart_rate`。可选 `declared_maximum` 包含 `bpm` 和必填 `source`。最大心率为 50–300 bpm；无声明时仅显示绝对分区。心率输入接受 `count/min` 与 `bpm`。相邻样本间隔在 `maximum_gap_seconds` 内才累计时间，最后一点无持续时间。Edwards 分区为最大值的 50–60、60–70、70–80、80–90、90–100%，左闭右开，100% 纳入末区。任何样本超过最大值，负荷保持 null。网页默认查看最近 24 小时并允许修改采样协议；iOS Browse 查询最近 30 天的实际心率采样，默认显示最新一天。默认 15 秒是明确展示的工程假设，不是所有设备的统一协议。
 
 `sleep_correction` 包含 `source`、`session_start`、`session_end`、`classification`、可空 `corrected_asleep_minutes`、`basis_revisions` 和必填 `note`。记录时间必须等于会话开始时间。分类为 `main_sleep`、`nap` 或 `unclassified_session`。会话最多七天，最多引用 1000 条记录。人工估计不能超过会话时长。睡眠页面将人工时长单列，保留设备分期、原时长和效率。来源修订或会话范围变化后显示 `stale_basis`，多个修正显示冲突。修正不生成分钟状态，不改变 SRI。
 
@@ -220,7 +208,7 @@ The current protocol fails synthetic error-rate calibration. `passes_by_threshol
 | `wellness/food/portion` | 接收 `basis`（record_id、version、amount、unit）和 `meal`。food 使用 g，recipe 使用 servings。返回营养素、缺项与来源快照，供人工确认后保存。 |
 | `wellness/nutrition/day` | `date` 与 `timezone`。返回已有摄入、缺值计数及用户目标。重复同时间目标不自动选取。 |
 | `wellness/reminders` | 指定时间窗口返回提醒的本地时间发生项，最多 31 天。静默时段抑制通知。不存在的夏令时时刻明确标记，重复时刻只取首次。 |
-| `wellness/records/list` | `kind` 为 ecg、clinical、blood_pressure，另接可空 `after` 游标。每页 50 项。 |
+| `wellness/records/list` | `kind` 为 ecg、clinical 或 Browse 目录中的记录类型。`after` 为可空 `{at, platform, source_id, record_id}` 游标。每页 50 项，按时间降序返回，并用来源及记录标识稳定处理同一时间的记录。 |
 | `wellness/records/get` | `platform`、`source_id`、`record_id`、`sample_offset`。每页最多 5000 个原始 ECG 或训练样本。返回 FHIR JSON、来源分类、同来源关联记录或训练圈段摘要。 |
 | `wellness/coach` | `question`、`date`、`timezone`、`style`、可空 `prior_run_id`、`allow_drafts`。分析提供者必须启用。按来源证据生成问答，通过原分析任务接口读取。 |
 | `wellness/import/fit` | `filename` 和 `data_base64`。最多 4 MiB 原始字节、50000 个定义/数据消息、一个 Activity Session、七天时长。强制 CRC 校验。原字节、摘要、全部解码消息及来源单位保留。 |
@@ -241,7 +229,7 @@ Coach 输出只允许引用输入提供的证据 ID。可审阅草稿限制为�
 
 训练日与 7／28 日窗口拒绝合计不同 `duration_basis`，返回 incompatible_duration_protocols。单个训练仍保留。NN 记录的起止时长须与窗口末尾偏移一致，容差一秒；七日 lnRMSSD 中位数至少需要五个有效日。
 
-`health/aggregate` 按七个日历日分块读取。每块最多 50000 条记录，最终最多 10000 个来源日。返回结果前核对账户修订。该方式保留跨块睡眠和步数区间的日内截断语义。一个块超限仍返回明确限制错误。每日基线和长期报告复用此路径。
+内部日汇总按七个日历日分块读取。每块最多 50000 条记录，最终最多 10000 个来源日。返回结果前核对账户修订。该方式保留跨块睡眠和步数区间的日内截断语义。一个块超限仍返回明确限制错误。每日基线和长期报告复用此路径。
 
 `cycle.context` 支持 cycle、pregnancy、postpartum、perimenopause 和 unknown。独立 `cycle_prediction` 条目保存 `start_date`、`end_date`、`generated_at`、`source`、`uncertainty`、`note`。日期使用 YYYY-MM-DD，区间最多 366 天。来源与不确定性说明必须填写，未知准确性也须明确写出。预测不转换为实际经期或排卵记录。
 
@@ -302,8 +290,8 @@ remain unchanged. Lab conversion v4 recognizes `K/uL`, `x10(3)/uL`, `10*3/uL`
 and `10*9/L` as count-unit aliases of `10^9/L`. UCUM count notation reference:
 https://hl7.org/fhir/us/core/STU9/Observation-cbc-leukocytes.html .
 
-`POST /api/v1/metrics/browse` returns the authenticated user's available laboratory
-items, discovered from imported clinical Observations/components and confirmed
+`POST /api/v1/browse/catalog` returns the authenticated user's available categories and entries, including laboratory
+items discovered from imported clinical Observations/components and confirmed
 report metrics. `metrics/list` remains the curated catalog for report review.
 Clinical identity uses LOINC (across providers), otherwise provider-scoped coding;
 uncoded records retain individual identity rather than merging guessed labels.
@@ -379,8 +367,8 @@ The server restores the previous label and checks the full semantic digest befor
 accepting it; changed measured values, times or source identifiers still conflict.
 
 Build 35 adds bucket `start_at`/`end_at`, latest sample values, and per-period
-`chart_ranges.summaries` for range headers. `wellness/series` accepts an IANA
-`timezone`; omitted timezone remains UTC for shipped clients. Clinical and daily
+`chart_ranges.summaries` for range headers. `wellness/chart` requires an IANA
+`timezone` and explicit period boundaries. Clinical and daily
 summary charts keep their UTC date semantics. Half-year windows use Jan–Jun and
 Jul–Dec. Week windows start Sunday; DST days retain their actual duration.
 
@@ -452,3 +440,12 @@ truncating fractions. Other types retain their existing integer version contract
 Laboratory history returns all confirmed report results in `records`, including results without a collection date or a plottable numeric value. `points` remains the chart-only projection. Each historical record retains its original payload, report link and source identity. Missing dates and values display as an em dash. OCR prompt v4 explicitly extracts per-result dates, including Function Health dates printed at the right edge of each result row.
 
 OCR completion requires a nonempty printed name, a valid collection date and a nonempty result for every nonadministrative result row. Text results such as Negative and Positive are valid. Missing or invalid required fields fail the extraction job; valid draft candidates and the complete provider output remain available for review. `reports/get.validation_issues` lists `page`, one-based `item_index`, `item_name`, `field` and `reason` for the latest OCR run. The iOS report shows these issues directly. This extraction check does not remove previously confirmed incomplete records from historical values.
+
+
+## Unified mobile API surface
+
+The complete current route-to-caller inventory is [Mobile API inventory](reviews/2026-10-31-mobile-api-inventory.md). Build checks reject routes without mobile callers (except the initial APK download) and mobile calls without routes. iOS and Android compile the same application and UI request code.
+
+Blood pressure uses `HKCorrelationTypeIdentifierBloodPressure` through `wellness/chart` and `wellness/records/list`. The chart returns both components; the history returns paired values in each record. Systolic and diastolic remain valid synchronization record types, but are not separate public chart or history query types. Original record detail remains available through `wellness/records/get`. Reference guidance and assessments are included in the chart response; there is no separate reference lookup request.
+
+Historical Values use newest-first order across both clients. Date-only collection dates retain their date precision, and undated results appear last. Complete laboratory records and additional plot points are merged before sorting; paginated specialty records use a descending time cursor.

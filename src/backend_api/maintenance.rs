@@ -668,3 +668,88 @@ impl Database {
         Ok(json!({"updated":updated,"types":counts}))
     }
 }
+
+impl Database {
+    pub async fn index_component_projections(&self) -> Result<Value, AppError> {
+        let mut cursor = 0i64;
+        let mut counts = std::collections::BTreeMap::<String, (u64, u64)>::new();
+        loop {
+            let rows = sqlx::query(queries::COMPONENT_REINDEX)
+                .bind(cursor)
+                .fetch_all(&self.pool)
+                .await?;
+            if rows.is_empty() {
+                break;
+            }
+            let mut prepared = Vec::new();
+            for row in rows {
+                cursor = row.get("archive_row");
+                let kind: String = row.get("record_type");
+                let start: i64 = row.get("start_at");
+                let end: i64 = row.get("end_at");
+                let previous: String = row.get("payload_json");
+                let stored: Value = serde_json::from_str(&previous)?;
+                let original = if kind.starts_with("HKCategory") || kind == "mindful_session" {
+                    stored.clone()
+                } else {
+                    let bytes = crate::health_archive::Location::from_row(&row)?
+                        .read(&self.data_dir)
+                        .await?;
+                    serde_json::from_slice(&bytes)?
+                };
+                let compute_kind = kind.clone();
+                let samples = self
+                    .cpu
+                    .run(move || {
+                        Ok(crate::wellness::component_projection::project(
+                            &compute_kind,
+                            &original["payload"],
+                            start as f64,
+                            end as f64,
+                        ))
+                    })
+                    .await?;
+                if samples.as_array().is_none_or(|v| v.is_empty()) {
+                    counts.entry(kind).or_default().1 += 1;
+                    continue;
+                }
+                let mut projection = stored;
+                projection["payload"]["chart_components"] = samples;
+                if let Some(at) =
+                    crate::wellness::component_projection::timestamp(&kind, &projection["payload"])
+                {
+                    projection["payload"]["chart_at"] = json!(at);
+                }
+                prepared.push((row, previous, serde_json::to_string(&projection)?));
+            }
+            let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+            let mut users = std::collections::BTreeSet::new();
+            for (row, previous, projection) in prepared {
+                let user: String = row.get("user_id");
+                let n = sqlx::query(queries::UPDATE_HEALTH_SAMPLE_PROJECTION)
+                    .bind(projection)
+                    .bind(&user)
+                    .bind(row.get::<String, _>("platform"))
+                    .bind(row.get::<String, _>("source_id"))
+                    .bind(row.get::<String, _>("record_id"))
+                    .bind(row.get::<String, _>("raw_id"))
+                    .bind(previous)
+                    .execute(&mut *tx)
+                    .await?
+                    .rows_affected();
+                if n > 0 {
+                    users.insert(user);
+                    counts.entry(row.get("record_type")).or_default().0 += n;
+                }
+            }
+            for user in users {
+                sqlx::query(queries::TOUCH_USER_DATA)
+                    .bind(user)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            tx.commit().await?;
+        }
+        Ok(json!({"counts":counts}))
+    }
+}

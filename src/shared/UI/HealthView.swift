@@ -62,12 +62,23 @@ struct HealthView: View {
                 #endif
                 if let note = model.backgroundHealth.registrationError { Text(note).font(.caption).foregroundStyle(.secondary) }
             }
-            Section("Sync coverage") { ForEach(Array(coverage.enumerated()), id: \.offset) { _, entry in
-                VStack(alignment: .leading) { Text(entry["record_type"].stringValue); Text(entry["status"].stringValue).font(.caption)
-                    if let last = entry["last_success_at"].numberValue { Text("Last successful query: \(Date(timeIntervalSince1970: last).formatted())").font(.caption) }
-                    if let first = entry["visible_start_at"].numberValue, let last = entry["visible_end_at"].numberValue { Text("Archived platform range: \(Date(timeIntervalSince1970: first).formatted(date: .abbreviated, time: .omitted)) – \(Date(timeIntervalSince1970: last).formatted(date: .abbreviated, time: .omitted))").font(.caption) } }
-            } }
-        }.navigationTitle(MobilePlatform.healthProviderName).initialTask { await reload() }.refreshable { await reload() }
+            Section("Sync Error") {
+                let errors = coverage.filter { $0["status"] == .string("error") }
+                if errors.isEmpty { Text("No sync errors").foregroundStyle(.secondary) }
+                ForEach(Array(errors.enumerated()), id: \.offset) { _, entry in
+                    SyncCoverageRow(entry: entry)
+                }
+            }
+            Section {
+                NavigationLink("All Sync Coverage Categories") {
+                    List {
+                        ForEach(Array(coverage.filter { $0["status"] == .string("error") }.enumerated()), id: \.offset) { _, entry in SyncCoverageRow(entry: entry) }
+                        ForEach(Array(coverage.filter { $0["status"] != .string("error") }.enumerated()), id: \.offset) { _, entry in SyncCoverageRow(entry: entry) }
+                    }.mobileNavigationTitle("Sync Coverage")
+                }
+            }
+        }.mobileNavigationTitle(MobilePlatform.healthProviderName).initialTask { await reload() }.refreshable { await reload() }
+            .onChange(of: model.isHealthSyncRunning) { _, running in if !running { Task { await reload() } } }
             .onAppear { isVisible = true }
             #if os(iOS)
             .onChange(of: keepsScreenAwake, initial: true) { _, enabled in UIApplication.shared.isIdleTimerDisabled = enabled }
@@ -84,6 +95,25 @@ struct HealthView: View {
     }
     #endif
     private func reload() async { do { if model.client != nil {
-        coverage = try await model.request("health/coverage", body: .object([:]))["coverage"].arrayValue
+        let entries = try await model.request("health/coverage", body: .object([:]))["coverage"].arrayValue
+        let installation = try model.archive?.load(UUID.self, name: "installation.json")
+        coverage = HealthSyncCoverage.currentDevice(entries, platform: MobilePlatform.healthPlatform, installationID: installation)
     } } catch { model.errorMessage = error.localizedDescription } }
+}
+
+struct SyncCoverageRow: View {
+    let entry: JSONValue
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(HealthSyncProgress.name(entry["record_type"].stringValue))
+            Text(entry["status"].stringValue.replacingOccurrences(of: "_", with: " ").capitalized)
+                .font(.caption).foregroundStyle(entry["status"] == .string("error") ? Color.red : Color.secondary)
+            if let last = entry["last_success_at"].numberValue {
+                Text("Last successful query: \(Date(timeIntervalSince1970: last).formatted())").font(.caption)
+            }
+            if let first = entry["visible_start_at"].numberValue, let last = entry["visible_end_at"].numberValue {
+                Text("Archived platform range: \(Date(timeIntervalSince1970: first).formatted(date: .abbreviated, time: .omitted)) – \(Date(timeIntervalSince1970: last).formatted(date: .abbreviated, time: .omitted))").font(.caption)
+            }
+        }
+    }
 }

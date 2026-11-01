@@ -9,10 +9,22 @@ struct ReportView: View {
     @State var preview: DocumentLocation?
     @State var contextVisible = false
     @State var deleting = false
+    @State var rescanning = false
+    @State var rescanConfirmation = false
     @State var confirmingAll = false
     @State var confirmationError: String?
     @Environment(\.scenePhase) var scenePhase
     @Environment(\.dismiss) var dismiss
+
+    private struct IndexedValue: Identifiable {
+        let id: String
+        let value: JSONValue
+    }
+    private func indexedValues(_ section: String) -> [IndexedValue] {
+        document[section].arrayValue.enumerated().map {
+            IndexedValue(id: "\(section)-\($0.offset)", value: $0.element)
+        }
+    }
 
     struct EditTarget: Identifiable { let id = UUID(); let observation: JSONValue }
     var body: some View {
@@ -46,6 +58,9 @@ struct ReportView: View {
                         .accessibilityLabel("View original report").accessibilityIdentifier("report-original")
                     Button { editor = EditTarget(observation: .null) } label: { reportAction("Add Result", icon: "plus") }
                         .accessibilityLabel("Add result manually").accessibilityIdentifier("report-add-result")
+                    Button { rescanConfirmation = true } label: { reportAction("Rescan", icon: "arrow.clockwise") }
+                        .accessibilityLabel("Rescan report").accessibilityIdentifier("report-rescan")
+                        .disabled(extracting || rescanning)
                     Button(role: .destructive) { deleting = true } label: { reportAction("Delete", icon: "trash") }
                         .accessibilityLabel("Delete report").accessibilityIdentifier("report-delete")
                 }.buttonStyle(.borderless)
@@ -60,7 +75,8 @@ struct ReportView: View {
             }
             if !document["validation_issues"].arrayValue.isEmpty {
                 Section("OCR incomplete") {
-                    ForEach(Array(document["validation_issues"].arrayValue.enumerated()), id: \.offset) { _, issue in
+                    ForEach(indexedValues("validation_issues")) { entry in
+                        let issue = entry.value
                         VStack(alignment: .leading, spacing: 4) {
                             Text(issue["item_name"].stringValue.isEmpty ? "Item \(Int(issue["item_index"].numberValue ?? 0))" : issue["item_name"].stringValue).font(.headline)
                             Text("Page \(Int(issue["page"].numberValue ?? 0)) · \(issue["reason"].stringValue == "invalid_date" ? "Invalid" : "Missing") \(issue["field"].stringValue.replacingOccurrences(of: "_", with: " "))")
@@ -72,47 +88,23 @@ struct ReportView: View {
             Section("Review results") {
                 if document["observations"].arrayValue.isEmpty { Text("No extracted results yet.").foregroundStyle(.secondary)
                     InfoHelp(title: "Manual results", message: "You can add results manually while OCR is disabled or processing.") }
-                ForEach(document["observations"].arrayValue, id: \.identifier) { observation in
+                ForEach(document["observations"].arrayValue.filter { ["pending", "confirmed"].contains($0["status"].stringValue) }, id: \.identifier) { observation in
                     ReportObservationRow(observation: observation, isBusy: model.isBusy,
                         edit: { editor = EditTarget(observation: observation) },
                         showSource: { showSource(page: $0) },
                         writeHealth: { healthWriter = EditTarget(observation: observation) })
                 }
             }
-            if !document["pages"].arrayValue.isEmpty {
-                Section("Page processing") {
-                    ForEach(Array(document["pages"].arrayValue.enumerated()), id: \.offset) { _, page in
-                        NavigationLink("Page \(Int(page["page"].numberValue ?? 0)) · \(page["status"].stringValue)") {
-                            ScrollView { CopyableText(page["content"].stringValue).font(.caption).padding() }
-                                .navigationTitle("Page processing")
-                        }
-                    }
-                }
-            }
-            if !document["extraction_inputs"].arrayValue.isEmpty {
-                Section("Document evidence") {
-                    ForEach(Array(document["extraction_inputs"].arrayValue.enumerated()), id: \.offset) { _, input in
-                        NavigationLink("Page \(Int(input["page"].numberValue ?? 0)) · text layer: \(input["text_status"].stringValue.isEmpty ? "image only" : input["text_status"].stringValue)") {
-                            DocumentEvidenceView(model: model, reportID: reportID, input: input)
-                        }
-                    }
-                }
-            }
-            if !document["extraction_outputs"].arrayValue.isEmpty {
-                Section("Original OCR output") {
-                    ForEach(Array(document["extraction_outputs"].arrayValue.enumerated()), id: \.offset) { _, output in
-                        NavigationLink("Page \(Int(output["page"].numberValue ?? 0)) · \(output["stage"].stringValue)") {
-                            ExtractionOutputView(model: model, reportID: reportID, output: output)
-                        }
-                    }
-                }
+            Section {
+                NavigationLink("Detail") { List { reportDetails }.mobileNavigationTitle("Detail") }
+                    .accessibilityIdentifier("report-detail")
             }
         }
-        .disabled(confirmingAll)
-        .navigationTitle(document["context"]["report_title"].stringValue.isEmpty ? (document["report"]["original_name"].stringValue.isEmpty ? "Report" : document["report"]["original_name"].stringValue) : document["context"]["report_title"].stringValue)
+        .disabled(confirmingAll || rescanning)
+        .mobileNavigationTitle(document["context"]["report_title"].stringValue.isEmpty ? "Health Report" : document["context"]["report_title"].stringValue)
         .navigationBarTitleDisplayMode(.inline)
         .initialTask { await reload() }
-        .task { await followExtraction() }
+        .task(id: model.jobs.first { $0["file_id"].stringValue == reportID }?["job_id"].stringValue) { await followExtraction() }
         .refreshable { await reload() }
         .sheet(item: $preview) { DocumentPreview(location: $0) }
         .sheet(item: $editor) { target in
@@ -122,6 +114,10 @@ struct ReportView: View {
         }
         .sheet(item: $healthWriter) { target in ReviewedGlucoseWriter(model: model, observation: target.observation) }
         .sheet(isPresented: $contextVisible) { ContextEditor(context: document["context"]) { context in try await save(observations: [], context: context) } }
+        .alert("Rescan report?", isPresented: $rescanConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Rescan", role: .destructive) { Task { await rescan() } }
+        } message: { Text("This replaces all existing results, including confirmed results and manual edits. Your original report and Report Info are kept. Review the new results and use Confirm All to include them in charts.") }
         .alert("Delete report?", isPresented: $deleting) {
             Button("Cancel", role: .cancel) {}
             Button("Delete report", role: .destructive) { Task { await model.perform {
@@ -135,6 +131,50 @@ struct ReportView: View {
             } } }
         } message: { Text("This deletes the report, its confirmed and draft results, and related analysis from your archive. The server then removes stored files. Offline backups you made are separate.") }
     }
+    @ViewBuilder private var reportDetails: some View {
+        let rejected = document["observations"].arrayValue.filter { $0["status"].stringValue == "rejected" }
+        if !rejected.isEmpty {
+            Section("Rejected results") {
+                ForEach(rejected, id: \.identifier) { observation in
+                    ReportObservationRow(observation: observation, isBusy: model.isBusy,
+                        edit: { editor = EditTarget(observation: observation) },
+                        showSource: { showSource(page: $0) },
+                        writeHealth: { healthWriter = EditTarget(observation: observation) })
+                }
+            }
+        }
+            if !document["pages"].arrayValue.isEmpty {
+                Section("Page processing") {
+                    ForEach(indexedValues("pages")) { entry in
+                        let page = entry.value
+                        NavigationLink("Page \(Int(page["page"].numberValue ?? 0)) · \(page["status"].stringValue)") {
+                            ScrollView { CopyableText(page["content"].stringValue).font(.caption).padding() }
+                                .mobileNavigationTitle("Page processing")
+                        }
+                    }
+                }
+            }
+            if !document["extraction_inputs"].arrayValue.isEmpty {
+                Section("Document evidence") {
+                    ForEach(indexedValues("extraction_inputs")) { entry in
+                        let input = entry.value
+                        NavigationLink("Page \(Int(input["page"].numberValue ?? 0)) · text layer: \(input["text_status"].stringValue.isEmpty ? "image only" : input["text_status"].stringValue)") {
+                            DocumentEvidenceView(model: model, reportID: reportID, input: input)
+                        }
+                    }
+                }
+            }
+            if !document["extraction_outputs"].arrayValue.isEmpty {
+                Section("Original OCR output") {
+                    ForEach(indexedValues("extraction_outputs")) { entry in
+                        let output = entry.value
+                        NavigationLink("Page \(Int(output["page"].numberValue ?? 0)) · \(output["stage"].stringValue)") {
+                            ExtractionOutputView(model: model, reportID: reportID, output: output)
+                        }
+                    }
+                }
+            }
+    }
     private func reportAction(_ title: String, icon: String) -> some View {
         VStack(spacing: 5) {
             Image(systemName: MobileSymbol.name(icon)).font(.body)
@@ -143,6 +183,18 @@ struct ReportView: View {
     }
     private var extracting: Bool {
         model.jobs.contains { $0["file_id"].stringValue == reportID && ["queued", "running"].contains($0["status"].stringValue) }
+    }
+    private func rescan() async {
+        guard !rescanning, !extracting else { return }
+        rescanning = true
+        defer { rescanning = false }
+        await model.perform {
+            let response = try await model.request("reports/rescan", body: .object(["report_id": .string(reportID), "expected_revision": document["report"]["revision"]]))
+            model.jobs.removeAll { $0["file_id"].stringValue == reportID }
+            model.jobs.insert(response["job"], at: 0)
+            try model.archive?.remove(name: "report-\(reportID).json")
+            document = try await model.report(reportID)
+        }
     }
     private func confirmAll() async {
         guard !confirmingAll, !extracting else { return }
@@ -207,7 +259,7 @@ struct ExtractionOutputView: View {
             Text(output["model"].stringValue).font(.caption)
             CopyableText(original["content"].stringValue)
             DisclosureGroup("Complete provider response") { CopyableText(original["response_body"].stringValue).font(.caption.monospaced()) }
-        }.padding() }.navigationTitle("Original OCR output").initialTask {
+        }.padding() }.mobileNavigationTitle("Original OCR output").initialTask {
             do {
                 guard let client = model.client else { return }
                 original = try await model.request("reports/extraction/get", body: .object(["report_id": .string(reportID), "run_id": output["run_id"], "page": output["page"], "stage": output["stage"]]))
@@ -256,7 +308,7 @@ struct ReviewedGlucoseWriter: View {
                 }
                 if saved { dismiss(); await model.synchronizeHealth(requestAccess: false, requestSelectedAccess: false, automatic: false) }
             } }.disabled(!verifiedTime || model.isBusy)
-        }.navigationTitle("Save to \(MobilePlatform.healthProviderName)").toolbar { Button("Cancel") { dismiss() }.disabled(model.isBusy) } }
+        }.mobileNavigationTitle("Save to \(MobilePlatform.healthProviderName)").toolbar { Button("Cancel") { dismiss() }.disabled(model.isBusy) } }
     }
 }
 
@@ -277,7 +329,7 @@ struct DocumentEvidenceView: View {
                 CopyableText(evidence["text_layer"]["text"].stringValue)
                 Text("Positioned words: \(evidence["text_layer"]["words"].arrayValue.count)").font(.caption)
             }
-        }.navigationTitle("Document evidence").initialTask {
+        }.mobileNavigationTitle("Document evidence").initialTask {
             do {
                 guard let client = model.client else { return }
                 evidence = try await model.request("reports/input/get", body: .object(["report_id": .string(reportID), "run_id": input["run_id"], "page": input["page"]]))
@@ -323,6 +375,12 @@ struct ReportObservationRow: View {
                 #if !os(Android)
                 .accessibilityHint("Opens the original report page")
                 #endif
+            }
+            ForEach(Array(observation["browse_issues"].arrayValue.enumerated()), id: \.offset) { _, issue in
+                Label(issue["message"].stringValue, systemImage: MobileSymbol.name("exclamationmark.triangle"))
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("report-result-issue")
             }
             if observation["status"] == .string("confirmed"), observation["payload"]["metric_id"] == .string("glucose") {
                 Button("Save to \(MobilePlatform.healthProviderName)") { writeHealth() }.font(.caption).disabled(isBusy)

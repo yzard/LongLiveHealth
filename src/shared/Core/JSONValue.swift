@@ -51,7 +51,7 @@ public nonisolated enum JSONValue: Codable, Sendable, Equatable {
     public var boolValue: Bool { if case .bool(let value) = self { return value }; return false }
     public static func optional(_ text: String) -> JSONValue { text.isEmpty ? .null : .string(text) }
     public var identifier: String {
-        for key in ["feedback_id", "observation_id", "run_id", "export_id", "job_id", "report_id", "metric_id", "record_id", "user_id"] {
+        for key in ["feedback_id", "observation_id", "run_id", "export_id", "job_id", "report_id", "metric_id", "record_id", "user_id", "id"] {
             let candidate = self[key].stringValue
             if !candidate.isEmpty { return candidate }
         }
@@ -86,10 +86,4 @@ public nonisolated struct UploadDraft: Codable, Identifiable, Sendable {
     public init(id: UUID, filename: String, contentType: String, createdAt: Date, sourceName: String?, originalFilename: String?, originalContentType: String?) {
         self.id = id; self.filename = filename; self.contentType = contentType; self.createdAt = createdAt; self.sourceName = sourceName; self.originalFilename = originalFilename; self.originalContentType = originalContentType
     }
-}
-
-public nonisolated struct SyncCheckpoint: Codable, Sendable {
-    public let requests: [JSONValue]
-    public let nextAnchor: Data
-    public init(requests: [JSONValue], nextAnchor: Data) { self.requests = requests; self.nextAnchor = nextAnchor }
 }

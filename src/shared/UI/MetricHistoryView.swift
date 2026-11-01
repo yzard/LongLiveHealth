@@ -27,7 +27,7 @@ struct MetricHistoryView: View {
                 if !loading && points.isEmpty && !records.isEmpty { Text("Open Historical Values to see the results. A chart requires an exact numeric result, unit and collection date.").font(.caption).foregroundStyle(.secondary) }
                 if !points.isEmpty {
                     ForEach(chartUnits, id: \.self) { unit in
-                    MetricChart(model: model, ranges: history["chart_ranges"], unit: unit,
+                    MetricChart(model: model, guidance: history["reference_guidance"], ranges: history["chart_ranges"], unit: unit,
                                 divisor: 1, sourceKeys: sourceKeys, names: sourceNames,
                                 initialPeriod: .week, showsHour: false, heartRate: false, navigationTimestamps: nil, onWindowChange: nil)
                         .environment(\.timeZone, .gmt)
@@ -53,6 +53,7 @@ struct MetricHistoryView: View {
             }
         }
         .initialTask { await reload() }
+        .onChange(of: model.sourcePreferences["preferences"]["reference_profile"]) { _, _ in Task { await reload() } }
         .refreshable { await reload() }
     }
 
@@ -85,11 +86,11 @@ struct MetricHistoricalValuesView: View {
             if let failure { Text(failure).foregroundStyle(.secondary) }
             if records.isEmpty && points.isEmpty { Text("No historical values yet.").foregroundStyle(.secondary) }
             Section("Historical values") {
-                ForEach(records.reversed(), id: \.historyPointID) { record in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text((record["display_value"].stringValue.isEmpty ? "—" : record["display_value"].stringValue) + (record["unit"].stringValue.isEmpty ? "" : " " + record["unit"].stringValue)).font(.headline)
-                        Text(record["sampled_at"].stringValue.isEmpty ? "—" : record["sampled_at"].stringValue).font(.caption)
-                        Text(model.sourceLabel(record: record)).font(.caption).foregroundStyle(.secondary)
+                let ids = Set(records.map(\.historyPointID).filter { !$0.isEmpty })
+                let all = records + points.filter { $0.historyPointID.isEmpty || !ids.contains($0.historyPointID) }
+                ForEach(Array(HistoricalValue.newestFirst(all, timestamps: ["timestamp"], dates: ["sampled_at"]).enumerated()), id: \.offset) { _, record in
+                    DisclosureGroup {
+                        Text(model.sourceLabel(record: record)).font(.subheadline)
                         if !record["original_records"].arrayValue.isEmpty {
                             DisclosureGroup("Original results (\(record["original_records"].arrayValue.count))") {
                                 ForEach(Array(record["original_records"].arrayValue.enumerated()), id: \.offset) { _, item in
@@ -103,27 +104,14 @@ struct MetricHistoricalValuesView: View {
                             NavigationLink("Review report", destination: ReportView(model: model, reportID: record["report_id"].stringValue))
                         }
                         if !record["status"].stringValue.isEmpty { Text(record["status"].stringValue.capitalized).font(.caption) }
+                    } label: {
+                        HistoricalValueRow(timestamp: nil, dateText: record["sampled_at"].stringValue,
+                            source: model.sourceLabel(record: record), value: HistoricalValue.quantity(record["display_value"] == .null ? record["value"] : record["display_value"], unit: record["unit"].stringValue))
                     }
-                }
-                ForEach(points.filter { point in !records.contains { $0["point_id"] == point["point_id"] } }.reversed(), id: \.historyPointID) { point in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(model.sourceLabel(record: point)).font(.headline)
-                        Text("\(point["value"].numberValue?.formatted() ?? (point["value"].stringValue.isEmpty ? "—" : point["value"].stringValue)) \(point["unit"].stringValue)").stableDigits()
-                        Text(point["sampled_at"].stringValue.isEmpty ? "—" : point["sampled_at"].stringValue).font(.caption)
-                        if !point["report_id"].stringValue.isEmpty {
-                            Text(point["filename"].stringValue).font(.caption).foregroundStyle(.secondary)
-                            Text("Original: \(point["original"]["raw_result"].stringValue) \(point["original"]["raw_unit"].stringValue)").font(.caption)
-                            Button("View original report") { Task { await showSource(point) } }
-                            NavigationLink("Review report", destination: ReportView(model: model, reportID: point["report_id"].stringValue))
-                        } else {
-                            let provider = point["original"]["provider"].stringValue.isEmpty ? point["original"]["payload"]["source_name"].stringValue : point["original"]["provider"].stringValue
-                            if !provider.isEmpty { Text(model.sourceLabel(SourceNames.key(point), name: provider)).font(.caption).foregroundStyle(.secondary) }
-                        }
-                    }.padding(.vertical, 4)
                 }
             }
         }
-        .navigationTitle("Historical Values")
+        .mobileNavigationTitle("Historical Values")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $preview) { DocumentPreview(location: $0) }
     }

@@ -210,7 +210,7 @@ pub fn canonical_unit(raw: &str) -> Option<&'static str> {
         "mg/dL" | "mg/dl" | "MG/DL" => Some("mg/dL"),
         "mg/L" | "mg/l" | "MG/L" => Some("mg/L"),
         "g/L" | "g/l" | "G/L" => Some("g/L"),
-        "g/dL" | "g/dl" | "G/DL" => Some("g/dL"),
+        "g/dL" | "g/dl" | "G/DL" | "g/dL(calc)" | "g/dl(calc)" => Some("g/dL"),
         "mmol/L" | "mmol/l" | "MMOL/L" => Some("mmol/L"),
         "umol/L" | "umol/l" | "UMOL/L" => Some("µmol/L"),
         "ng/mL" | "ng/ml" | "NG/ML" | "NG/mL" | "NG/ml" => Some("ng/mL"),

@@ -55,9 +55,22 @@ pub enum Command {
         #[arg(long)]
         catalog_only: bool,
     },
+    CaptureReferenceViews {
+        #[arg(long)]
+        username: String,
+        #[arg(long)]
+        timezone: String,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    ReassessReferenceViews {
+        #[arg(long)]
+        input: PathBuf,
+    },
     IndexHeartSamples,
     IndexRecoveryHrv,
     IndexAppleQuantities,
+    IndexComponentProjections,
     CheckConfig,
     ProbeProviders,
 }
@@ -100,6 +113,9 @@ fn read_password(password_stdin: bool) -> Result<String, AppError> {
 pub async fn run(cli: Cli) -> Result<(), AppError> {
     if matches!(&cli.command, Command::InitConfig) {
         return write_template(&cli.data_dir);
+    }
+    if let Command::ReassessReferenceViews { input } = &cli.command {
+        return crate::reference_capture::reassess(input).await;
     }
     let config = Config::load(&cli.data_dir)?;
     if matches!(cli.command, Command::CheckConfig) {
@@ -161,11 +177,26 @@ pub async fn run(cli: Cli) -> Result<(), AppError> {
                 .await?
                 .ok_or(AppError::NotFound)?;
             if catalog_only {
-                let catalog = crate::metric_history::browse(&database, &user.user_id).await?;
+                let catalog = crate::browse_catalog::get(&database, &user.user_id).await?;
                 println!("{}", serde_json::to_string(&catalog)?);
             } else {
                 crate::browse_audit::run(&database, &user.user_id, date, timezone).await?;
             }
+        }
+        Command::ReassessReferenceViews { .. } => unreachable!("handled before configuration"),
+        Command::CaptureReferenceViews {
+            username,
+            timezone,
+            output,
+        } => {
+            let user = database
+                .credentials(&normalize_username(&username)?)
+                .await?
+                .ok_or(AppError::NotFound)?;
+            crate::reference_capture::run(&database, &user.user_id, timezone, &output).await?;
+        }
+        Command::IndexComponentProjections => {
+            println!("{}", database.index_component_projections().await?);
         }
         Command::IndexAppleQuantities => {
             println!("{}", database.index_apple_quantities().await?);

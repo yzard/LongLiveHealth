@@ -9,6 +9,7 @@ import Security
     static var protectedDataAvailable: Bool { UIApplication.shared.isProtectedDataAvailable }
     static var isActive: Bool { UIApplication.shared.applicationState == .active }
     static let biometricLabel = "Face ID / Touch ID unlock"
+    static let healthPlatform = "apple_health"
     static let healthProviderName = "Apple Health"
     static let unlockMessage = "Waiting for iPhone unlock; sync will resume automatically."
     static var uploadTransport: APIClient.UploadTransport { BackgroundTransfer.transport }

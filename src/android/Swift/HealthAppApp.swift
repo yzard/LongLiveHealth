@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Android)
+import Android
+#elseif canImport(Glibc)
+import Glibc
+#endif
 import SkipFuse
 import SwiftUI
 
@@ -10,7 +15,12 @@ import SwiftUI
 /* SKIP @bridge */public final class HealthAppAppDelegate: Sendable {
     /* SKIP @bridge */public static let shared = HealthAppAppDelegate()
     private init() {}
-    /* SKIP @bridge */public func onInit() {}
+    /* SKIP @bridge */public func onInit(temporaryDirectory: String) -> Bool {
+        // Set the environment inside the native runtime as well: translated
+        // ARM64 libraries do not share the JVM libc environment on emulators.
+        setenv("TMPDIR", temporaryDirectory, 1) == 0
+            && FileManager.default.temporaryDirectory.path == temporaryDirectory
+    }
     /* SKIP @bridge */public func onLaunch() {}
     /* SKIP @bridge */public func onResume() {
         Task { @MainActor in

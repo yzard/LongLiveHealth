@@ -29,7 +29,7 @@ struct RemindersView: View {
             Section("Upcoming occurrences") {
                 ForEach(Array(occurrences.prefix(100).enumerated()), id: \.offset) { _, item in Text(item["date"].stringValue + " " + item["local_time"].stringValue + " · " + item["title"].stringValue + " · " + item["state"].stringValue) }
             }
-        }.navigationTitle("Reminders").initialTask { await load() }.refreshable { await load() }
+        }.mobileNavigationTitle("Reminders").initialTask { await load() }.refreshable { await load() }
             .onChange(of: model.entryMutation) { _, _ in Task { await load(); await clearScheduled() } }
             .sheet(item: $editor) { selection in
                 NavigationStack { LogEditor(model: model, existing: selection.item, initialKind: "reminder", initialValues: [:], initialDate: Date()) }

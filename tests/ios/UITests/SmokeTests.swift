@@ -35,6 +35,80 @@ nonisolated final class SmokeTests: XCTestCase {
         }
         if name == "Settings", !app.navigationBars["Settings"].exists { app.buttons["Settings"].firstMatch.tap() }
     }
+    @MainActor func testECGShowsWaveformBeforeCompactReadableDetails() async throws {
+        let app = XCUIApplication(); app.launch()
+        dismissPasswordPrompts(app)
+        if app.buttons["Sign in"].exists {
+            let server = app.textFields["http://192.168.1.20:8080"]
+            server.tap()
+            let old = server.value as? String ?? ""
+            if old != "http://192.168.1.20:8080" { server.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count)) }
+            server.typeText("http://127.0.0.1:18765")
+            app.textFields["Username"].tap(); app.textFields["Username"].typeText("simulator")
+            app.secureTextFields["Password"].tap(); app.secureTextFields["Password"].typeText("test-password")
+            app.buttons["Sign in"].tap(); dismissPasswordPrompts(app)
+        }
+        tapTab(app, "Browse")
+        let search = app.searchFields["Search metrics"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10)); search.tap()
+        if let text = search.value as? String, text != "Search metrics" { search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: text.count)) }
+        search.typeText("ECG")
+        let entry = app.buttons["ECG"].firstMatch
+        XCTAssertTrue(entry.waitForExistence(timeout: 10)); entry.tap()
+        let waveform = app.otherElements["ECG voltage waveform, seconds and millivolts"].firstMatch
+        XCTAssertTrue(waveform.waitForExistence(timeout: 15))
+        let details = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Sinus rhythm")).firstMatch
+        XCTAssertTrue(details.waitForExistence(timeout: 10))
+        XCTAssertTrue(details.label.contains("None reported"))
+        XCTAssertLessThan(waveform.frame.minY, details.frame.minY)
+        XCTAssertFalse(app.buttons["Next samples"].exists)
+        XCTAssertFalse(app.buttons["Previous samples"].exists)
+        XCTAssertTrue(NSPredicate(format: "value CONTAINS %@", "24.00 seconds").evaluate(with: waveform)
+            || XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "24.00 seconds"), object: waveform)], timeout: 10) == .completed)
+        let fullWindow = waveform.value as? String
+        waveform.pinch(withScale: 2.5, velocity: 1)
+        XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", fullWindow ?? ""), object: waveform)], timeout: 5) == .completed)
+        let zoomedWindow = waveform.value as? String
+        waveform.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5)).press(forDuration: 0.05,
+            thenDragTo: waveform.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)))
+        XCTAssertNotEqual(waveform.value as? String, zoomedWindow)
+        waveform.doubleTap()
+        XCTAssertEqual(waveform.value as? String, fullWindow)
+        XCTAssertFalse(app.staticTexts["Source classification: 1"].exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot()); screenshot.name = "Compact ECG record"; screenshot.lifetime = .keepAlways; add(screenshot)
+    }
+
+    @MainActor func testBloodPressureUsesOneChartAndCompactHistory() async throws {
+        let app = XCUIApplication(); app.launch()
+        dismissPasswordPrompts(app)
+        if app.buttons["Sign in"].exists {
+            let server = app.textFields["http://192.168.1.20:8080"]
+            server.tap()
+            let old = server.value as? String ?? ""
+            if old != "http://192.168.1.20:8080" { server.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count)) }
+            server.typeText("http://127.0.0.1:18765")
+            app.textFields["Username"].tap(); app.textFields["Username"].typeText("simulator")
+            app.secureTextFields["Password"].tap(); app.secureTextFields["Password"].typeText("test-password")
+            app.buttons["Sign in"].tap(); dismissPasswordPrompts(app)
+        }
+        tapTab(app, "Browse")
+        let search = app.searchFields["Search metrics"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10)); search.tap()
+        if let text = search.value as? String, text != "Search metrics" { search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: text.count)) }
+        search.typeText("Blood pressure")
+        XCTAssertTrue(app.buttons["Blood Pressure"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["Systolic Blood Pressure"].exists)
+        XCTAssertFalse(app.buttons["Diastolic Blood Pressure"].exists)
+        app.buttons["Blood Pressure"].tap()
+        XCTAssertTrue(app.staticTexts["Systolic"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Diastolic"].exists)
+        let history = app.buttons["Historical Values"]
+        reveal(app, history); history.tap()
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "120 / 80 mmHg")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        let screenshot = XCTAttachment(screenshot: app.screenshot()); screenshot.lifetime = .keepAlways; add(screenshot)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Apple Watch")).count > 0 || row.label.contains("Apple Watch"))
+    }
     @MainActor func testBrowseCategoryNavigation() async throws {
         let app = XCUIApplication(); app.launch()
         dismissPasswordPrompts(app)
@@ -55,8 +129,7 @@ nonisolated final class SmokeTests: XCTestCase {
         let heart = app.buttons["Heart"]
         reveal(app, heart); heart.tap()
         XCTAssertTrue(app.buttons["Heart rate"].waitForExistence(timeout: 5))
-        reveal(app, app.buttons["LDL"])
-        XCTAssertTrue(app.buttons["LDL"].exists)
+        XCTAssertFalse(app.buttons["LDL"].exists)
         XCTAssertFalse(app.buttons["Calcium"].exists)
         for _ in 0..<5 {
             if app.buttons["Heart rate"].exists && app.buttons["Heart rate"].isHittable { break }
@@ -75,12 +148,12 @@ nonisolated final class SmokeTests: XCTestCase {
         let blood = app.buttons["Blood Work"]
         reveal(app, blood); blood.tap()
         XCTAssertTrue(app.buttons["Calcium"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["LDL"].exists)
+        XCTAssertTrue(app.buttons["LDL"].exists)
         app.navigationBars.buttons.firstMatch.tap()
         countRequest.url = URL(string: "http://127.0.0.1:18765/api/v1/test/counts")!
         let (countData, _) = try await URLSession.shared.data(for: countRequest)
         let counts = try JSONSerialization.jsonObject(with: countData) as? [String: Int]
-        for route in ["wellness/sources", "metrics/browse", "wellness/day"] {
+        for route in ["browse/catalog", "wellness/sources", "metrics/browse", "wellness/day"] {
             XCTAssertEqual(counts?[route] ?? 0, 0, "Returning to Browse must preserve the loaded directory")
         }
         let shot = XCTAttachment(screenshot: app.screenshot())
@@ -209,6 +282,168 @@ nonisolated final class SmokeTests: XCTestCase {
         screenshot.name = "Rounded heart range"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+        let history = app.buttons["Historical Values"]
+        reveal(app, history); history.tap()
+        let bpm = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "BPM")).firstMatch
+        XCTAssertTrue(bpm.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "count/min")).firstMatch.exists)
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Heart rate"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.searchFields["Search metrics"].waitForExistence(timeout: 10))
+    }
+
+    @MainActor func testOverviewVisibilityControlsAllRows() async throws {
+        let app = XCUIApplication(); app.launch()
+        dismissPasswordPrompts(app)
+        if app.buttons["Sign in"].exists {
+            let server = app.textFields["http://192.168.1.20:8080"]
+            server.tap()
+            let old = server.value as? String ?? ""
+            if old != "http://192.168.1.20:8080" { server.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count)) }
+            server.typeText("http://127.0.0.1:18765")
+            app.textFields["Username"].tap(); app.textFields["Username"].typeText("simulator")
+            app.secureTextFields["Password"].tap(); app.secureTextFields["Password"].typeText("test-password")
+            app.buttons["Sign in"].tap(); dismissPasswordPrompts(app)
+        }
+        var reset = URLRequest(url: URL(string: "http://127.0.0.1:18765/api/v1/test/reset")!)
+        reset.httpMethod = "POST"
+        _ = try await URLSession.shared.data(for: reset)
+        tapTab(app, "Overview")
+        let customize = app.buttons["Customize"]
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: customize)], timeout: 10)
+        customize.tap()
+        let labels = ["Sleep", "Steps", "Heart rate", "Workouts", "Resting heart rate", "HRV SDNN", "Active Energy", "Resting Energy"]
+        for label in labels {
+            let toggle = app.switches[label]
+            reveal(app, toggle)
+            await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: toggle)], timeout: 10)
+            XCTAssertEqual(toggle.value as? String, "1")
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        }
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: app.buttons["Back"])], timeout: 10)
+        app.buttons["Back"].tap()
+        XCTAssertTrue(app.staticTexts["No metrics selected. Turn on metrics in Customize."].waitForExistence(timeout: 10))
+        customize.tap()
+        let energy = app.switches["Active Energy"]
+        reveal(app, energy)
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: energy)], timeout: 10)
+        XCTAssertEqual(energy.value as? String, "0")
+        energy.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: app.buttons["Back"])], timeout: 10)
+        app.buttons["Back"].tap()
+        XCTAssertTrue(app.staticTexts["Active Energy"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Resting Energy"].exists)
+    }
+
+    @MainActor func testDataToolsAndErrorFirstCoverage() async throws {
+        let app = XCUIApplication(); app.launch()
+        dismissPasswordPrompts(app)
+        if app.buttons["Sign in"].exists {
+            let server = app.textFields["http://192.168.1.20:8080"]
+            server.tap()
+            let old = server.value as? String ?? ""
+            if old != "http://192.168.1.20:8080" { server.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count)) }
+            server.typeText("http://127.0.0.1:18765")
+            app.textFields["Username"].tap(); app.textFields["Username"].typeText("simulator")
+            app.secureTextFields["Password"].tap(); app.secureTextFields["Password"].typeText("test-password")
+            app.buttons["Sign in"].tap(); dismissPasswordPrompts(app)
+        }
+        tapTab(app, "Settings")
+        XCTAssertFalse(app.buttons["Create ZIP export"].exists)
+        XCTAssertFalse(app.buttons["About Export contents"].exists)
+        XCTAssertFalse(app.buttons["Reference Profile"].exists)
+        XCTAssertTrue(app.buttons["sleep-goal"].exists)
+        XCTAssertTrue(app.buttons["reference-birth-date"].exists)
+        XCTAssertTrue(app.buttons["reference-biological-sex"].exists)
+        XCTAssertTrue(app.staticTexts["Server URL"].exists)
+        XCTAssertLessThan(app.buttons["reference-biological-sex"].frame.minY, app.buttons["reference-birth-date"].frame.minY)
+        XCTAssertLessThan(app.buttons["reference-birth-date"].frame.minY, app.buttons["sleep-goal"].frame.minY)
+        app.buttons["reference-birth-date"].tap()
+        XCTAssertTrue(app.navigationBars["Date of Birth"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.switches["Use date of birth"].waitForExistence(timeout: 10))
+        app.buttons["Back"].firstMatch.tap()
+        app.buttons["reference-biological-sex"].tap()
+        XCTAssertTrue(app.navigationBars["Biological Sex"].waitForExistence(timeout: 10))
+        app.buttons["biological-sex-picker"].tap()
+        app.buttons["Female"].tap()
+        XCTAssertTrue(app.buttons["Back"].waitForExistence(timeout: 10))
+        app.buttons["Back"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["reference-biological-sex"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["reference-biological-sex"].label.contains("Female"))
+        app.navigationBars.buttons.firstMatch.tap()
+        tapTab(app, "Data")
+        reveal(app, app.buttons["Create ZIP export"])
+        XCTAssertTrue(app.buttons["Create ZIP export"].exists)
+        XCTAssertFalse(app.buttons["Export your complete archive"].exists)
+        app.buttons["Create ZIP export"].tap()
+        XCTAssertTrue(app.buttons["Download and share"].waitForExistence(timeout: 10))
+        app.buttons["Delete export"].tap()
+        XCTAssertTrue(app.buttons["Delete export"].waitForNonExistence(timeout: 10))
+        app.swipeDown()
+        app.buttons["Apple Health"].tap()
+        XCTAssertTrue(app.staticTexts["No sync errors"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Workout Route"].exists)
+        app.buttons["All Sync Coverage Categories"].tap()
+        XCTAssertTrue(app.navigationBars["Sync Coverage"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Workout Route"].exists)
+        app.navigationBars.buttons.firstMatch.tap()
+        app.navigationBars.buttons.firstMatch.tap()
+        app.buttons["Manual Imports"].tap()
+        XCTAssertFalse(app.buttons["About Daily logs"].exists)
+        app.navigationBars.buttons.firstMatch.tap()
+        app.buttons["Source Aliases"].tap()
+        XCTAssertFalse(app.buttons["About Source aliases"].exists)
+        XCTAssertFalse(app.staticTexts["Sources"].exists)
+        tapTab(app, "Overview")
+        XCTAssertFalse(app.buttons["Breathing practice"].exists)
+        app.buttons["Customize"].tap()
+        XCTAssertFalse(app.buttons["About Favorites"].exists)
+        XCTAssertFalse(app.staticTexts["Favorite metrics"].exists)
+    }
+
+    @MainActor func testCharacteristicsShowLatestValueWithoutChart() async throws {
+        let app = XCUIApplication(); app.launch()
+        dismissPasswordPrompts(app)
+        if app.buttons["Sign in"].exists {
+            let server = app.textFields["http://192.168.1.20:8080"]
+            server.tap()
+            let old = server.value as? String ?? ""
+            if old != "http://192.168.1.20:8080" { server.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count)) }
+            server.typeText("http://127.0.0.1:18765")
+            app.textFields["Username"].tap(); app.textFields["Username"].typeText("simulator")
+            app.secureTextFields["Password"].tap(); app.secureTextFields["Password"].typeText("test-password")
+            app.buttons["Sign in"].tap(); dismissPasswordPrompts(app)
+        }
+        tapTab(app, "Browse")
+        for (query, title, expected) in [("Biological Sex", "Biological Sex", "Male"), ("Date Of Birth", "Date Of Birth", "1980"), ("Skin Type", "Fitzpatrick Skin Type", "Type II")] {
+            let search = app.searchFields["Search metrics"]
+            XCTAssertTrue(search.waitForExistence(timeout: 10))
+            search.tap()
+            if let current = search.value as? String, current != "Search metrics" {
+                search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
+            }
+            search.typeText(query)
+            XCTAssertTrue(app.buttons[title].waitForExistence(timeout: 10))
+            app.buttons[title].tap()
+            let value = app.staticTexts["latest-characteristic-value"]
+            XCTAssertTrue(value.waitForExistence(timeout: 10))
+            XCTAssertTrue(value.label.contains(expected))
+            XCTAssertFalse(app.otherElements["metric-range-chart"].exists)
+            XCTAssertFalse(app.buttons["About Reference Levels"].exists)
+            app.navigationBars.buttons.firstMatch.tap()
+        }
+        let search = app.searchFields["Search metrics"]
+        search.tap()
+        let current = search.value as? String ?? ""
+        search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
+        search.typeText("Respiratory")
+        XCTAssertTrue(app.buttons["Respiratory rate"].waitForExistence(timeout: 10))
+        app.buttons["Respiratory rate"].tap()
+        let noLevel = app.staticTexts["No reference level"]
+        reveal(app, noLevel)
+        XCTAssertTrue(noLevel.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["About Reference Levels"].exists)
     }
 
     @MainActor func testMetricEducationAndReopenRefresh() async throws {
@@ -234,6 +469,16 @@ nonisolated final class SmokeTests: XCTestCase {
         app.buttons["LDL"].tap()
         XCTAssertTrue(app.staticTexts["Function Health"].firstMatch.waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["All sources"].exists)
+        XCTAssertFalse(app.staticTexts["Latest measurement in this interval · In range"].exists)
+        XCTAssertFalse(app.buttons["Applicable range guide"].exists)
+        XCTAssertTrue(app.buttons["About Reference Levels"].waitForExistence(timeout: 10))
+        app.buttons["About Reference Levels"].tap()
+        XCTAssertTrue(app.staticTexts["Latest measurement in this interval · In range"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["80 ≤ value ≤ 130 mg/dL"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["80 ≤ value ≤ 130 catalog-unit"].exists)
+        XCTAssertTrue(app.links["Synthetic reference source"].exists || app.buttons["Synthetic reference source"].exists)
+        app.buttons["Done"].tap()
+        XCTAssertFalse(app.staticTexts["80 ≤ value ≤ 130 mg/dL"].exists)
         let chartAppearance = XCTAttachment(screenshot: app.screenshot())
         chartAppearance.name = "Metric chart rounded ends"
         chartAppearance.lifetime = .keepAlways
@@ -421,8 +666,7 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertLessThan(abs(app.staticTexts["Today"].frame.minY - app.staticTexts["Last 7 days"].frame.minY), 30)
         XCTAssertFalse(app.staticTexts["No reference range set"].exists)
         XCTAssertFalse(app.staticTexts["Apple Watch"].exists)
-        reveal(app, app.buttons["Breathing practice"])
-        XCTAssertTrue(app.buttons["Breathing practice"].exists)
+        XCTAssertFalse(app.buttons["Breathing practice"].exists)
         tapTab(app, "Trends")
         reveal(app, app.buttons["Past day"])
         XCTAssertTrue(app.buttons["Past day"].exists)
@@ -462,8 +706,12 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.tabBars.buttons["Data"].waitForExistence(timeout: 10))
         tapTab(app, "Archive")
 
-        let report = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "fixture.png")).firstMatch
-        XCTAssertTrue(report.waitForExistence(timeout: 10)); report.tap()
+        let report = app.buttons["report-row-fixture-report"]
+        XCTAssertTrue(report.waitForExistence(timeout: 10))
+        XCTAssertTrue(report.label.contains("Example Laboratory"))
+        XCTAssertFalse(app.staticTexts["Your reports"].exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Last refreshed")).firstMatch.exists)
+        report.tap()
         let resultRow = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "5.5 mmol/L (99.1 mg/dL)")).firstMatch
         XCTAssertTrue(resultRow.waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Original reference: not provided"].exists)
@@ -503,6 +751,143 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertEqual(deletedCounts?["reports/delete"], 1)
     }
 
+    @MainActor func testReportIssuesDetailsAndPersonalSleepGoal() async throws {
+        func control(_ path: String) async throws -> Data {
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:18765/api/v1/\(path)")!)
+            request.httpMethod = "POST"
+            return try await URLSession.shared.data(for: request).0
+        }
+        _ = try await control("test/reset")
+        _ = try await control("test/seed-report")
+        _ = try await control("test/report-issue")
+        let app = XCUIApplication(); app.launch(); dismissPasswordPrompts(app)
+        if app.buttons["Sign in"].exists {
+            let server = app.textFields["http://192.168.1.20:8080"]
+            server.tap()
+            let old = server.value as? String ?? ""
+            if old != "http://192.168.1.20:8080" { server.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count)) }
+            server.typeText("http://127.0.0.1:18765")
+            app.textFields["Username"].tap(); app.textFields["Username"].typeText("simulator")
+            app.secureTextFields["Password"].tap(); app.secureTextFields["Password"].typeText("test-password")
+            app.buttons["Sign in"].tap(); dismissPasswordPrompts(app)
+        }
+        XCTAssertTrue(app.tabBars.buttons["Data"].waitForExistence(timeout: 10))
+        tapTab(app, "Archive")
+
+        let report = app.buttons["report-row-fixture-report"]
+        XCTAssertTrue(report.waitForExistence(timeout: 10))
+        XCTAssertTrue(report.label.contains("Example Laboratory"))
+        XCTAssertFalse(app.staticTexts["Your reports"].exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Last refreshed")).firstMatch.exists)
+        report.tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["report-result-issue"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Page processing"].exists)
+        XCTAssertFalse(app.staticTexts["Document evidence"].exists)
+        XCTAssertFalse(app.staticTexts["Original OCR output"].exists)
+        let detail = app.buttons["report-detail"]
+        reveal(app, detail); detail.tap()
+        XCTAssertTrue(app.navigationBars["Detail"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Page processing"].exists)
+        XCTAssertTrue(app.staticTexts["Original OCR output"].exists)
+        app.navigationBars.buttons.firstMatch.tap()
+        tapTab(app, "Overview")
+        app.buttons["Customize"].tap()
+        XCTAssertTrue(app.navigationBars["Customize overview"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Your daily sleep target"].exists)
+        XCTAssertFalse(app.textFields["Minutes, optional"].exists)
+        XCTAssertFalse(app.buttons["Save preferences"].exists)
+        let favorite = app.switches["Sleep"]
+        XCTAssertTrue(app.switches["Active Energy"].exists)
+        XCTAssertTrue(app.switches["Resting Energy"].exists)
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: favorite)], timeout: 10)
+        favorite.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: app.buttons["Back"])], timeout: 10)
+        let savedFavorites = try JSONSerialization.jsonObject(with: await control("wellness/preferences/get")) as! [String: Any]
+        let selected = (savedFavorites["preferences"] as! [String: Any])["favorite_metrics"] as! [String]
+        XCTAssertFalse(selected.contains("sleep"))
+        XCTAssertTrue(selected.contains("active_energy"))
+        XCTAssertTrue(selected.contains("basal_energy"))
+        XCTAssertEqual((savedFavorites["preferences"] as! [String: Any])["overview_show_all"] as? Bool, false)
+        app.buttons["Back"].tap()
+        app.buttons["Settings"].firstMatch.tap()
+        let goal = app.buttons["sleep-goal"]
+        reveal(app, goal); goal.tap()
+        XCTAssertTrue(app.navigationBars["Sleep Goal"].waitForExistence(timeout: 5))
+        let goalSwitch = app.switches["Set a sleep goal"]
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: goalSwitch)], timeout: 10)
+        if goalSwitch.value as? String != "1" { goalSwitch.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap() }
+        let hoursPicker = app.descendants(matching: .any)["sleep-goal-hours"].firstMatch
+        XCTAssertTrue(hoursPicker.waitForExistence(timeout: 5))
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: hoursPicker)], timeout: 10)
+        hoursPicker.tap(); app.buttons["7 hr"].tap()
+        let minutesPicker = app.descendants(matching: .any)["sleep-goal-minutes"].firstMatch
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: minutesPicker)], timeout: 10)
+        minutesPicker.tap(); app.buttons["5 min"].tap()
+        XCTAssertFalse(app.buttons["Save"].exists)
+        let back = app.buttons["Back"]
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: back)], timeout: 10)
+        app.buttons["Back"].tap()
+        XCTAssertTrue(goal.waitForExistence(timeout: 5))
+        XCTAssertTrue(goal.label.contains("7 hr 5 min"))
+        goal.tap()
+        XCTAssertTrue(app.navigationBars["Sleep Goal"].waitForExistence(timeout: 5))
+        app.buttons["Back"].tap()
+        XCTAssertTrue(goal.label.contains("7 hr 5 min"))
+    }
+
+    @MainActor func testReportRescanActionAndCancellation() async throws {
+        func control(_ path: String) async throws -> Data {
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:18765/api/v1/\(path)")!)
+            request.httpMethod = "POST"
+            return try await URLSession.shared.data(for: request).0
+        }
+        _ = try await control("test/reset")
+        _ = try await control("test/seed-report")
+        _ = try await control("test/expand-report")
+        let app = XCUIApplication(); app.launch(); dismissPasswordPrompts(app)
+        if app.buttons["Sign in"].exists {
+            let server = app.textFields["http://192.168.1.20:8080"]
+            server.tap()
+            let old = server.value as? String ?? ""
+            if old != "http://192.168.1.20:8080" { server.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count)) }
+            server.typeText("http://127.0.0.1:18765")
+            app.textFields["Username"].tap(); app.textFields["Username"].typeText("simulator")
+            app.secureTextFields["Password"].tap(); app.secureTextFields["Password"].typeText("test-password")
+            app.buttons["Sign in"].tap(); dismissPasswordPrompts(app)
+        }
+        XCTAssertTrue(app.tabBars.buttons["Data"].waitForExistence(timeout: 10))
+        tapTab(app, "Archive")
+
+        let report = app.buttons["report-row-fixture-report"]
+        XCTAssertTrue(report.waitForExistence(timeout: 10))
+        XCTAssertTrue(report.label.contains("Example Laboratory"))
+        XCTAssertFalse(app.staticTexts["Your reports"].exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Last refreshed")).firstMatch.exists)
+        report.tap()
+        let count = app.descendants(matching: .any).matching(identifier: "report-marker-count").firstMatch
+        XCTAssertTrue(count.waitForExistence(timeout: 10))
+        XCTAssertEqual(count.value as? String, "126")
+        let top = XCTAttachment(screenshot: app.screenshot()); top.lifetime = .keepAlways; add(top)
+        let original = app.buttons["report-original"]
+        let manual = app.buttons["report-add-result"]
+        let delete = app.buttons["report-delete"]
+        XCTAssertTrue(original.exists && manual.exists && delete.exists)
+        XCTAssertEqual(original.frame.midY, manual.frame.midY, accuracy: 2)
+        XCTAssertEqual(original.frame.midY, delete.frame.midY, accuracy: 2)
+        let rescan = app.buttons["report-rescan"]
+        XCTAssertTrue(rescan.exists)
+        XCTAssertEqual(original.frame.midY, rescan.frame.midY, accuracy: 2)
+        XCTAssertLessThan(manual.frame.midX, rescan.frame.midX)
+        XCTAssertLessThan(rescan.frame.midX, delete.frame.midX)
+        rescan.tap()
+        XCTAssertTrue(app.alerts["Rescan report?"].waitForExistence(timeout: 3))
+        app.alerts.buttons["Cancel"].tap()
+        XCTAssertEqual(count.value as? String, "126")
+
+        XCTAssertFalse(app.buttons["Duplicate or revised report"].exists)
+    }
+
     @MainActor func testLargeReportCountAndSourceEditing() async throws {
         func control(_ path: String) async throws -> Data {
             var request = URLRequest(url: URL(string: "http://127.0.0.1:18765/api/v1/\(path)")!)
@@ -526,8 +911,12 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.tabBars.buttons["Data"].waitForExistence(timeout: 10))
         tapTab(app, "Archive")
 
-        let report = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "fixture.png")).firstMatch
-        XCTAssertTrue(report.waitForExistence(timeout: 10)); report.tap()
+        let report = app.buttons["report-row-fixture-report"]
+        XCTAssertTrue(report.waitForExistence(timeout: 10))
+        XCTAssertTrue(report.label.contains("Example Laboratory"))
+        XCTAssertFalse(app.staticTexts["Your reports"].exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Last refreshed")).firstMatch.exists)
+        report.tap()
         let count = app.descendants(matching: .any).matching(identifier: "report-marker-count").firstMatch
         XCTAssertTrue(count.waitForExistence(timeout: 10))
         XCTAssertEqual(count.value as? String, "126")
@@ -538,6 +927,16 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(original.exists && manual.exists && delete.exists)
         XCTAssertEqual(original.frame.midY, manual.frame.midY, accuracy: 2)
         XCTAssertEqual(original.frame.midY, delete.frame.midY, accuracy: 2)
+        let rescan = app.buttons["report-rescan"]
+        XCTAssertTrue(rescan.exists)
+        XCTAssertEqual(original.frame.midY, rescan.frame.midY, accuracy: 2)
+        XCTAssertLessThan(manual.frame.midX, rescan.frame.midX)
+        XCTAssertLessThan(rescan.frame.midX, delete.frame.midX)
+        rescan.tap()
+        XCTAssertTrue(app.alerts["Rescan report?"].waitForExistence(timeout: 3))
+        app.alerts.buttons["Cancel"].tap()
+        XCTAssertEqual(count.value as? String, "126")
+
         XCTAssertFalse(app.buttons["Duplicate or revised report"].exists)
         let source = app.buttons["report-info"]
         XCTAssertTrue(source.exists); source.tap()
@@ -578,10 +977,10 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertNil(confirmationCounts?["reports/get"])
         // Traverse the entire long report in both directions, not only its first few rows.
         for _ in 0..<55 {
-            if app.buttons["Page 1 · ocr"].isHittable { break }
+            if app.buttons["report-detail"].isHittable { break }
             app.swipeUp(velocity: .fast)
         }
-        XCTAssertTrue(app.buttons["Page 1 · ocr"].isHittable)
+        XCTAssertTrue(app.buttons["report-detail"].isHittable)
         for _ in 0..<55 {
             if source.isHittable { break }
             app.swipeDown(velocity: .fast)
@@ -695,7 +1094,7 @@ nonisolated final class SmokeTests: XCTestCase {
         if app.navigationBars["Change password"].exists { app.buttons["Sign out"].tap() }
         if app.buttons["Settings"].exists {
             app.buttons["Settings"].tap()
-            app.buttons["Sign out and clear this device"].tap()
+            app.buttons["Sign Out and Clear This Device"].tap()
         }
         XCTAssertTrue(app.textFields["http://192.168.1.20:8080"].waitForExistence(timeout: 10))
         app.textFields["http://192.168.1.20:8080"].tap()
@@ -749,7 +1148,7 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["7 hr 30 min"].firstMatch.waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Device trends"].exists)
         XCTAssertFalse(app.buttons["Timeline"].exists)
-        XCTAssertTrue(app.buttons["Breathing practice"].exists)
+        XCTAssertFalse(app.buttons["Breathing practice"].exists)
         XCTAssertFalse(app.datePickers.firstMatch.exists)
         XCTAssertFalse(app.buttons["LDL"].exists)
         func aliasRequestCounts() async throws -> [String: Int] {
@@ -762,8 +1161,8 @@ nonisolated final class SmokeTests: XCTestCase {
         // Alias changes update retained summaries; editor cancellation leaves the saved alias intact.
         tapTab(app, "Data")
         if app.navigationBars["Health Report"].exists { app.navigationBars.buttons.firstMatch.tap() }
-        reveal(app, app.buttons["Source aliases"])
-        app.buttons["Source aliases"].tap()
+        reveal(app, app.buttons["Source Aliases"])
+        app.buttons["Source Aliases"].tap()
         let aliasRow = app.buttons["sourceAliasRow-apple_health:watch"]
         XCTAssertTrue(aliasRow.waitForExistence(timeout: 10))
         aliasRow.tap()
@@ -788,8 +1187,8 @@ nonisolated final class SmokeTests: XCTestCase {
             if app.navigationBars["Data"].exists { break }
             app.navigationBars.buttons.firstMatch.tap()
         }
-        reveal(app, app.buttons["Manual entries"])
-        app.buttons["Manual entries"].tap()
+        reveal(app, app.buttons["Manual Imports"])
+        app.buttons["Manual Imports"].tap()
         XCTAssertTrue(app.buttons["Record weight"].waitForExistence(timeout: 5))
         app.buttons["Record weight"].tap()
         XCTAssertTrue(app.textFields["Weight (kg)"].waitForExistence(timeout: 5))
@@ -848,8 +1247,8 @@ nonisolated final class SmokeTests: XCTestCase {
         app.terminate()
         app.launch()
         tapTab(app, "Archive")
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "fixture.png")).firstMatch.waitForExistence(timeout: 10))
-        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "fixture.png")).firstMatch.tap()
+        XCTAssertTrue(app.buttons["report-row-fixture-report"].waitForExistence(timeout: 10))
+        app.buttons["report-row-fixture-report"].tap()
         XCTAssertTrue(app.buttons["report-info"].waitForExistence(timeout: 10))
         app.buttons["report-info"].tap()
         XCTAssertTrue(app.navigationBars["Report Info"].waitForExistence(timeout: 5))
@@ -891,14 +1290,16 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.buttons["report-info"].waitForExistence(timeout: 15))
         tapTab(app, "Health")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@ OR label CONTAINS %@", "saved to Apple Health", "Sync complete", "Some types could not be read")).firstMatch.waitForExistence(timeout: 15))
-        tapTab(app, "Settings")
+        tapTab(app, "Data")
+        reveal(app, app.buttons["Create ZIP export"])
         XCTAssertTrue(app.buttons["Create ZIP export"].waitForExistence(timeout: 10))
         app.buttons["Create ZIP export"].tap()
         XCTAssertTrue(app.buttons["Download and share"].waitForExistence(timeout: 10))
         app.buttons["Download and share"].tap()
         XCTAssertTrue(app.staticTexts["Your complete archive is ready"].waitForExistence(timeout: 10))
         tapButton(app, "Done")
-        app.buttons["Sign out and clear this device"].tap()
+        tapTab(app, "Settings")
+        app.buttons["Sign Out and Clear This Device"].tap()
         XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 10))
     }
     @MainActor func testReportEditingEvidenceRelationshipsAndAnalysis() async throws {
@@ -914,7 +1315,7 @@ nonisolated final class SmokeTests: XCTestCase {
         app.launch()
         if app.tabBars.buttons["Data"].exists {
             tapTab(app, "Settings")
-            app.buttons["Sign out and clear this device"].tap()
+            app.buttons["Sign Out and Clear This Device"].tap()
         }
         let server = app.textFields["http://192.168.1.20:8080"]
         XCTAssertTrue(server.waitForExistence(timeout: 10))
@@ -930,8 +1331,8 @@ nonisolated final class SmokeTests: XCTestCase {
         dismissPasswordPrompts(app)
         app.terminate(); app.launch()
         tapTab(app, "Archive")
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "fixture.png")).firstMatch.waitForExistence(timeout: 10))
-        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "fixture.png")).firstMatch.tap()
+        XCTAssertTrue(app.buttons["report-row-fixture-report"].waitForExistence(timeout: 10))
+        app.buttons["report-row-fixture-report"].tap()
         XCTAssertTrue(app.buttons["Add result manually"].waitForExistence(timeout: 5))
         app.buttons["Add result manually"].tap()
         XCTAssertTrue(app.navigationBars["Add result"].waitForExistence(timeout: 5))
@@ -944,6 +1345,8 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Add result"].waitForNonExistence(timeout: 10))
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Manual fixture result")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons.matching(identifier: "Revision history").firstMatch.exists)
+        reveal(app, app.buttons["report-detail"])
+        app.buttons["report-detail"].tap()
         let evidence = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "text layer:")).firstMatch
         reveal(app, evidence)
         evidence.tap()
@@ -974,15 +1377,108 @@ nonisolated final class SmokeTests: XCTestCase {
         app.buttons["Save feedback"].tap()
         XCTAssertTrue(app.staticTexts["Synthetic feedback"].waitForExistence(timeout: 10))
         app.navigationBars.buttons.firstMatch.tap()
-        tapTab(app, "Settings")
+        tapTab(app, "Data")
+        reveal(app, app.buttons["Create ZIP export"])
         app.buttons["Create ZIP export"].tap()
         XCTAssertTrue(app.buttons["Delete export"].waitForExistence(timeout: 10))
         app.buttons["Delete export"].tap()
         XCTAssertTrue(app.buttons["Delete export"].waitForNonExistence(timeout: 10))
+        tapTab(app, "Settings")
         app.buttons["Delete account and all server data"].tap()
         XCTAssertTrue(app.alerts["Delete your account?"].waitForExistence(timeout: 5))
         app.alerts.textFields.firstMatch.tap(); app.alerts.textFields.firstMatch.typeText("simulator")
         app.alerts.buttons["Delete"].tap()
         XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 10))
     }
+    @MainActor func testEveryCapturedBrowseReferencePage() async throws {
+        func control(_ path: String, body: [String:String]) async throws -> Data {
+            var request = URLRequest(url: URL(string:"http://127.0.0.1:18765/api/v1/\(path)")!)
+            request.httpMethod="POST";request.httpBody=try JSONSerialization.data(withJSONObject:body)
+            return try await URLSession.shared.data(for:request).0
+        }
+        let data = try await control("test/reference-cases",body:[:])
+        let payload = try JSONSerialization.jsonObject(with:data) as! [String:Any]
+        let cases = payload["cases"] as! [[String:Any]]
+        let app=XCUIApplication();app.launch();dismissPasswordPrompts(app)
+        if app.buttons["Sign in"].exists {
+            let server=app.textFields["http://192.168.1.20:8080"]
+            server.tap();let old=server.value as? String ?? ""
+            if old != "http://192.168.1.20:8080" {server.typeText(String(repeating:XCUIKeyboardKey.delete.rawValue,count:old.count))}
+            server.typeText("http://127.0.0.1:18765")
+            app.textFields["Username"].tap();app.textFields["Username"].typeText("simulator")
+            app.secureTextFields["Password"].tap();app.secureTextFields["Password"].typeText("test-password")
+            app.buttons["Sign in"].tap();dismissPasswordPrompts(app)
+        }
+        tapTab(app,"Browse")
+        for (index,item) in cases.enumerated() {
+            let entry=item["entry"] as! [String:Any]
+            let kind=entry["kind"] as! String,title=entry["title"] as! String
+            let presentation=entry["presentation"] as! String
+            let capturedData=try await control("test/reference-case-get",body:["kind":kind])
+            let captured=try JSONSerialization.jsonObject(with:capturedData) as! [String:Any]
+            let components=captured["components"] as? [[String:Any]] ?? [captured]
+            let rangeRows=components.flatMap { ($0["chart_ranges"] as? [String:Any] ?? [:]).values.flatMap { $0 as? [[String:Any]] ?? [] } }
+            // Non-numeric records have their own latest-value/history or ECG views.
+            let search=app.searchFields["Search metrics"]
+            XCTAssertTrue(search.waitForExistence(timeout:10),kind)
+            search.tap();let old=search.value as? String ?? ""
+            if search.buttons.firstMatch.exists {search.buttons.firstMatch.tap()}
+            else if old != "Search metrics" {search.typeText(String(repeating:XCUIKeyboardKey.delete.rawValue,count:old.count))}
+            search.typeText(title)
+            let link=app.buttons[title].firstMatch
+            XCTAssertTrue(link.waitForExistence(timeout:10),kind)
+            link.tap()
+            XCTAssertFalse(app.navigationBars["Reference Levels"].exists,"Metric selection must not open reference details: " + kind)
+            if app.buttons["Y"].waitForExistence(timeout:5) {app.buttons["Y"].tap()}
+            if presentation == "records" {
+                let family = entry["family"] as? String ?? (entry["definition"] as? [String:Any])?["family"] as? String
+                if family == "characteristic" {
+                    XCTAssertTrue(app.staticTexts["latest-characteristic-value"].waitForExistence(timeout:10),kind)
+                } else if kind == "electrocardiogram" {
+                    XCTAssertTrue(app.otherElements["ECG voltage waveform, seconds and millivolts"].waitForExistence(timeout:10),kind)
+                } else {
+                    XCTAssertTrue(app.staticTexts["Historical Values"].waitForExistence(timeout:10),kind)
+                }
+                print("REFERENCE_UI_PASS \(index) \(kind)")
+                app.navigationBars.buttons.firstMatch.tap()
+                continue
+            }
+            let chart=app.otherElements["metric-range-chart"]
+            let info=app.buttons["About Reference Levels"].firstMatch
+            let absent=app.staticTexts["No reference level"].firstMatch
+            for _ in 0..<5 {if info.exists || absent.exists {break};app.swipeUp()}
+            if !rangeRows.isEmpty {XCTAssertTrue(info.exists || absent.exists || chart.exists,"No chart/reference outcome: " + kind)}
+            else {XCTAssertTrue(app.buttons["Historical Values"].exists || app.staticTexts["Historical Values"].exists,kind)}
+            let yearlyRows = components.flatMap { ($0["chart_ranges"] as? [String:Any])?["Y"] as? [[String:Any]] ?? [] }
+            if let newest = yearlyRows.compactMap({ $0["last_at"] as? Double }).max() {
+                var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(secondsFromGMT:0)!
+                let year = calendar.component(.year, from:Date(timeIntervalSince1970:newest))
+                let assessments = components.flatMap { ($0["chart_ranges"] as? [String:Any])?["reference_days"] as? [[String:Any]] ?? [] }.filter {
+                    guard let at = $0["last_at"] as? Double else {return false}
+                    return calendar.component(.year, from:Date(timeIntervalSince1970:at)) == year
+                }.compactMap { $0["reference_assessment"] as? [String:Any] }
+                if assessments.contains(where: { $0["applicable_rule"] is [String:Any] }) {
+                    XCTAssertTrue(info.exists,"Applicable reference levels missing: " + kind)
+                }
+            }
+            if info.exists {
+                info.tap()
+                XCTAssertTrue(app.navigationBars["Reference Levels"].waitForExistence(timeout:5),kind)
+                let citationTitles=components.flatMap { ($0["reference_guidance"] as? [String:Any])?["citations"] as? [[String:Any]] ?? [] }.compactMap { $0["title"] as? String }
+                let printed = app.staticTexts.matching(NSPredicate(format:"label BEGINSWITH %@","Source:")).firstMatch.exists
+                if !printed && !citationTitles.isEmpty {
+                    XCTAssertTrue(citationTitles.allSatisfy { app.links[$0].exists || app.buttons[$0].exists },"Source missing: " + kind)
+                }
+                if printed {
+                    let origins=rangeRows.compactMap { ($0["reference_assessment"] as? [String:Any])?["reference_origin"] as? [String:Any] }
+                    if !origins.isEmpty {XCTAssertTrue(origins.contains { !($0["source_key"] as? String ?? "").isEmpty },"Missing original range source: " + kind)}
+                }
+                let screenshot=XCTAttachment(screenshot:app.screenshot());screenshot.name="reference-\(index)";screenshot.lifetime = .keepAlways;add(screenshot)
+                app.navigationBars["Reference Levels"].buttons.firstMatch.tap()
+            }
+            print("REFERENCE_UI_PASS \(index) \(kind)")
+            app.navigationBars.buttons.firstMatch.tap()
+        }
+    }
+
 }

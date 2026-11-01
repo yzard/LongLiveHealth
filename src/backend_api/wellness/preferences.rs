@@ -14,10 +14,14 @@ const SOURCE: &str = "longlivehealth.preferences";
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
+    #[serde(default)] // Persisted preferences from before evidence-based guides.
+    pub reference_profile: crate::reference_guides::Profile,
     #[serde(default)] // Existing saved preferences predate display aliases.
     pub source_aliases: BTreeMap<String, String>,
     pub source_priority: BTreeMap<String, Vec<String>>,
     pub favorite_metrics: Vec<String>,
+    #[serde(default)]
+    pub overview_show_all: Option<bool>,
     pub sleep_target_minutes: Option<u16>,
 }
 #[derive(Deserialize)]
@@ -29,6 +33,7 @@ pub struct SavePreferences {
 }
 impl Preferences {
     fn validate(&self) -> Result<(), AppError> {
+        self.reference_profile.validate()?;
         if self.source_aliases.len() > 1000
             || self.source_aliases.iter().any(|(key, alias)| {
                 !crate::sources::valid_key(key)
@@ -75,7 +80,7 @@ impl Database {
             Ok(json!({"version":row.get::<i64,_>("version"),"preferences":preferences}))
         } else {
             Ok(
-                json!({"version":0,"preferences":Preferences {source_aliases:BTreeMap::new(),source_priority:BTreeMap::new(),favorite_metrics:vec![],sleep_target_minutes:None}}),
+                json!({"version":0,"preferences":Preferences {reference_profile:Default::default(),source_aliases:BTreeMap::new(),source_priority:BTreeMap::new(),favorite_metrics:vec![],overview_show_all:Some(true),sleep_target_minutes:None}}),
             )
         }
     }

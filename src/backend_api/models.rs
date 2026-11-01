@@ -53,12 +53,6 @@ pub struct Job {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct FileRequest {
-    pub file_id: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct JobRequest {
     pub job_id: String,
 }

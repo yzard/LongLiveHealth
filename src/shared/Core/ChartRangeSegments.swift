@@ -4,7 +4,7 @@ import Foundation
 public nonisolated enum ChartRangeSegments {
     public static func segments(rows: [JSONValue], names: [String: String]) -> [JSONValue] {
         let groups = Dictionary(grouping: rows) { row in
-            "\(row["start_at"])|\(row["end_at"])|\(row["unit"])"
+            "\(row["component"])|\(row["start_at"])|\(row["end_at"])|\(row["unit"])"
         }
         return groups.values.flatMap { group -> [JSONValue] in
             let ranked = group.sorted { a, b in

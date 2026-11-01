@@ -5,6 +5,7 @@ pub mod apple_archive;
 pub mod apple_health;
 pub mod authentication;
 mod browse_audit;
+pub mod browse_catalog;
 pub mod chart;
 pub mod cli;
 mod clinical_labs;
@@ -39,3 +40,6 @@ pub mod wellness;
 pub mod worker;
 
 pub mod client_download;
+
+mod reference_capture;
+pub mod reference_guides;

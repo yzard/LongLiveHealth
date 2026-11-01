@@ -3,7 +3,7 @@ use crate::{
     authentication::{self, CurrentUser},
     error::AppError,
     files,
-    models::{FileRequest, JobRequest, ListRequest, LoginRequest},
+    models::{JobRequest, ListRequest, LoginRequest},
 };
 use axum::{
     Json, Router,
@@ -22,10 +22,6 @@ pub fn router(upload_limit: usize) -> Router<AppState> {
             get(crate::client_download::android_package),
         )
         .route(
-            "/downloads/longlivehealth.apk",
-            get(crate::client_download::android_package),
-        )
-        .route(
             "/api/v1/user/password/change",
             post(crate::accounts::change_password),
         )
@@ -33,6 +29,7 @@ pub fn router(upload_limit: usize) -> Router<AppState> {
         .route("/api/v1/users/create", post(crate::accounts::create))
         .route("/api/v1/users/delete", post(crate::accounts::delete))
         .route("/api/v1/reports/delete", post(delete_report))
+        .route("/api/v1/reports/rescan", post(rescan_report))
         .route("/api/v1/user/delete", post(delete_account))
         .route("/api/v1/exports/create", post(create_export))
         .route("/api/v1/exports/list", post(list_exports))
@@ -55,9 +52,8 @@ pub fn router(upload_limit: usize) -> Router<AppState> {
             post(review_report).layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
         )
         .route("/api/v1/reports/relate", post(relate_reports))
-        .route("/api/v1/observations/history", post(observation_history))
         .route("/api/v1/metrics/list", post(list_metrics))
-        .route("/api/v1/metrics/browse", post(browse_metrics))
+        .route("/api/v1/browse/catalog", post(browse_catalog))
         .route("/api/v1/trends/get", post(get_trends))
         .route("/api/v1/metrics/history/get", post(get_metric_history))
         .route("/api/v1/health/connect", post(connect_health))
@@ -66,13 +62,6 @@ pub fn router(upload_limit: usize) -> Router<AppState> {
             post(sync_health).layer(DefaultBodyLimit::disable()),
         )
         .route("/api/v1/health/coverage", post(health_coverage))
-        .route("/api/v1/health/list", post(list_health))
-        .route("/api/v1/health/raw/list", post(list_raw_health))
-        .route(
-            "/api/v1/health/raw/{raw_id}/download",
-            get(download_raw_health),
-        )
-        .route("/api/v1/health/aggregate", post(aggregate_health))
         .route(
             "/api/v1/wellness/entries/save",
             post(wellness_entry_save).layer(DefaultBodyLimit::max(256 * 1024)),
@@ -108,12 +97,10 @@ pub fn router(upload_limit: usize) -> Router<AppState> {
             "/api/v1/wellness/sleep/regularity",
             post(wellness_regularity),
         )
-        .route("/api/v1/wellness/clinical-age", post(wellness_clinical_age))
         .route("/api/v1/wellness/day", post(wellness_day))
         .route("/api/v1/wellness/history", post(wellness_history))
         .route("/api/v1/wellness/chart", post(measurement_chart))
         .route("/api/v1/wellness/measurements", post(measurement_history))
-        .route("/api/v1/wellness/series", post(wellness_series))
         .route("/api/v1/wellness/hrv", post(wellness_hrv))
         .route("/api/v1/wellness/library", post(wellness_library))
         .route("/api/v1/wellness/import/fit", post(import_fit))
@@ -147,11 +134,8 @@ pub fn router(upload_limit: usize) -> Router<AppState> {
             "/api/v1/files/upload",
             post(upload).layer(DefaultBodyLimit::max(upload_limit)),
         )
-        .route("/api/v1/files/list", post(list_files))
-        .route("/api/v1/files/get", post(get_file))
         .route("/api/v1/files/{file_id}/download", get(download))
         .route("/api/v1/jobs/list", post(list_jobs))
-        .route("/api/v1/jobs/get", post(get_job))
         .route("/api/v1/jobs/retry", post(retry_job))
         .fallback(|| async { AppError::NotFound })
 }
@@ -163,22 +147,11 @@ struct ReportRequest {
 }
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ObservationRequest {
-    observation_id: String,
-}
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RelationRequest {
     report_id: String,
     preferred_report_id: Option<String>,
     kind: String,
     expected_revision: i64,
-}
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct HealthListRequest {
-    limit: i64,
-    offset: i64,
 }
 async fn list_reports(
     State(state): State<AppState>,
@@ -292,6 +265,22 @@ struct AnalysisId {
 struct FeedbackRequest {
     run_id: String,
     note: String,
+}
+async fn rescan_report(
+    State(state): State<AppState>,
+    current: CurrentUser,
+    Json(request): Json<DeleteReportRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let _guard = state.file_mutation.lock().await;
+    let job = state
+        .database
+        .rescan_report(
+            &current.user.user_id,
+            &request.report_id,
+            request.expected_revision,
+        )
+        .await?;
+    Ok(Json(json!({"job": job})))
 }
 async fn delete_report(
     State(state): State<AppState>,
@@ -450,28 +439,16 @@ async fn relate_reports(
         .await?;
     Ok(Json(json!({"updated":true})))
 }
-async fn observation_history(
-    State(state): State<AppState>,
-    current: CurrentUser,
-    Json(request): Json<ObservationRequest>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    Ok(Json(
-        state
-            .database
-            .observation_history(&current.user.user_id, &request.observation_id)
-            .await?,
-    ))
-}
 async fn list_metrics(_current: CurrentUser) -> Json<serde_json::Value> {
     Json(json!({"metrics":crate::laboratory::metrics()}))
 }
-async fn browse_metrics(
+async fn browse_catalog(
     State(state): State<AppState>,
     current: CurrentUser,
 ) -> Result<Response, AppError> {
     crate::transport::json_response(
         &state,
-        crate::metric_history::browse(&state.database, &current.user.user_id).await?,
+        crate::browse_catalog::get(&state.database, &current.user.user_id).await?,
     )
     .await
 }
@@ -480,11 +457,12 @@ async fn get_metric_history(
     current: CurrentUser,
     Json(request): Json<crate::metric_history::HistoryRequest>,
 ) -> Result<Response, AppError> {
-    crate::transport::json_response(
-        &state,
-        crate::metric_history::history(&state.database, &current.user.user_id, request).await?,
-    )
-    .await
+    let metric = request.metric_id.clone();
+    let result =
+        crate::metric_history::history(&state.database, &current.user.user_id, request).await?;
+    let result =
+        crate::reference_guides::enrich(&state, &current.user.user_id, metric, result).await?;
+    crate::transport::json_response(&state, result).await
 }
 async fn get_trends(
     State(state): State<AppState>,
@@ -532,36 +510,6 @@ async fn sync_health(
             .await?,
     ))
 }
-async fn list_raw_health(
-    State(state): State<AppState>,
-    current: CurrentUser,
-    Json(request): Json<ListRequest>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    Ok(Json(
-        state
-            .database
-            .health_raw_files(&current.user.user_id, &request)
-            .await?,
-    ))
-}
-async fn download_raw_health(
-    State(state): State<AppState>,
-    current: CurrentUser,
-    Path(raw_id): Path<String>,
-) -> Result<Response, AppError> {
-    let bytes = state
-        .database
-        .health_raw_bytes(&current.user.user_id, &raw_id)
-        .await?;
-    Ok((
-        [
-            (header::CONTENT_TYPE, "application/json"),
-            (header::CONTENT_DISPOSITION, "attachment"),
-        ],
-        Body::from(bytes),
-    )
-        .into_response())
-}
 
 async fn health_coverage(
     State(state): State<AppState>,
@@ -576,44 +524,6 @@ async fn health_coverage(
             .health_coverage(&current.user.user_id)
             .await?,
     ))
-}
-async fn list_health(
-    State(state): State<AppState>,
-    current: CurrentUser,
-    Json(request): Json<HealthListRequest>,
-) -> Result<Response, AppError> {
-    let _admission = state
-        .health_slots
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| AppError::RateLimited)?;
-    crate::transport::json_response(
-        &state,
-        state
-            .database
-            .health_records(&current.user.user_id, request.limit, request.offset)
-            .await?,
-    )
-    .await
-}
-async fn aggregate_health(
-    State(state): State<AppState>,
-    current: CurrentUser,
-    Json(request): Json<crate::health::AggregateRequest>,
-) -> Result<Response, AppError> {
-    let _admission = state
-        .health_slots
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| AppError::RateLimited)?;
-    crate::transport::json_response(
-        &state,
-        state
-            .database
-            .aggregate_health(&current.user.user_id, request)
-            .await?,
-    )
-    .await
 }
 
 async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
@@ -654,27 +564,6 @@ async fn upload(
         files::receive_upload(&state, &current.user.user_id, upload_id, multipart).await?,
     ))
 }
-async fn list_files(
-    State(state): State<AppState>,
-    current: CurrentUser,
-    Json(request): Json<ListRequest>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    Ok(Json(
-        json!({"files":state.database.files(&current.user.user_id, &request).await?}),
-    ))
-}
-async fn get_file(
-    State(state): State<AppState>,
-    current: CurrentUser,
-    Json(request): Json<FileRequest>,
-) -> Result<Json<crate::models::ArchivedFile>, AppError> {
-    Ok(Json(
-        state
-            .database
-            .file(&current.user.user_id, &request.file_id)
-            .await?,
-    ))
-}
 async fn download(
     State(state): State<AppState>,
     current: CurrentUser,
@@ -700,18 +589,6 @@ async fn list_jobs(
 ) -> Result<Json<serde_json::Value>, AppError> {
     Ok(Json(
         json!({"jobs":state.database.jobs(&current.user.user_id, &request).await?}),
-    ))
-}
-async fn get_job(
-    State(state): State<AppState>,
-    current: CurrentUser,
-    Json(request): Json<JobRequest>,
-) -> Result<Json<crate::models::Job>, AppError> {
-    Ok(Json(
-        state
-            .database
-            .job(&current.user.user_id, &request.job_id)
-            .await?,
     ))
 }
 async fn retry_job(
@@ -742,23 +619,56 @@ async fn get_extraction_input(
     .await
 }
 
+fn require_browse_metric(kind: &str) -> Result<(), AppError> {
+    if matches!(
+        kind,
+        "blood_pressure_systolic" | "blood_pressure_diastolic" | "blood_pressure"
+    ) {
+        return Err(AppError::Invalid(
+            "Use Blood Pressure to query systolic and diastolic readings together",
+        ));
+    }
+    Ok(())
+}
+
 async fn measurement_chart(
     State(state): State<AppState>,
     current: CurrentUser,
     Json(request): Json<crate::wellness::measurement_chart::Request>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    Ok(Json(
-        state
-            .database
-            .measurement_chart(&current.user.user_id, request)
-            .await?,
-    ))
+    require_browse_metric(&request.record_type)?;
+    let metric = request.record_type.clone();
+    let result = state
+        .database
+        .measurement_chart(&current.user.user_id, request)
+        .await?;
+    let mut result = result;
+    if let Some(components) = result["components"].as_array_mut() {
+        for component in components {
+            let kind = component["id"]
+                .as_str()
+                .ok_or(AppError::Internal)?
+                .to_owned();
+            *component = crate::reference_guides::enrich(
+                &state,
+                &current.user.user_id,
+                kind,
+                component.take(),
+            )
+            .await?;
+        }
+    } else {
+        result =
+            crate::reference_guides::enrich(&state, &current.user.user_id, metric, result).await?;
+    }
+    Ok(Json(result))
 }
 async fn measurement_history(
     State(state): State<AppState>,
     current: CurrentUser,
     Json(request): Json<crate::wellness::measurement_chart::HistoryRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    require_browse_metric(&request.record_type)?;
     Ok(Json(
         state
             .database
@@ -771,12 +681,14 @@ async fn wellness_history(
     current: CurrentUser,
     Json(request): Json<crate::wellness::history::HistoryRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    Ok(Json(
-        state
-            .database
-            .daily_history(&current.user.user_id, request)
-            .await?,
-    ))
+    let metric = request.record_type.clone();
+    let result = state
+        .database
+        .daily_history(&current.user.user_id, request)
+        .await?;
+    let result =
+        crate::reference_guides::enrich(&state, &current.user.user_id, metric, result).await?;
+    Ok(Json(result))
 }
 async fn wellness_day(
     State(state): State<AppState>,
@@ -873,19 +785,6 @@ async fn wellness_sleep(
     ))
 }
 
-async fn wellness_clinical_age(
-    State(state): State<AppState>,
-    current: CurrentUser,
-    Json(request): Json<crate::wellness::clinical::ClinicalRequest>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    Ok(Json(
-        state
-            .database
-            .clinical_age(&current.user.user_id, request)
-            .await?,
-    ))
-}
-
 async fn wellness_import_list(
     State(state): State<AppState>,
     current: CurrentUser,
@@ -933,24 +832,6 @@ async fn wellness_preferences_save(
         state
             .database
             .save_wellness_preferences(&current.user.user_id, request)
-            .await?,
-    ))
-}
-
-async fn wellness_series(
-    State(state): State<AppState>,
-    current: CurrentUser,
-    Json(request): Json<crate::wellness::series::SeriesRequest>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let _permit = state
-        .health_slots
-        .acquire()
-        .await
-        .map_err(|_| AppError::Internal)?;
-    Ok(Json(
-        state
-            .database
-            .wellness_series(&current.user.user_id, request)
             .await?,
     ))
 }
@@ -1131,6 +1012,7 @@ async fn specialty_records(
     current: CurrentUser,
     Json(request): Json<crate::wellness::records::ListRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    require_browse_metric(&request.kind)?;
     Ok(Json(
         state
             .database

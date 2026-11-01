@@ -8,12 +8,9 @@ struct MetricDetailScreen<Content: View>: View {
     var body: some View {
         List { content }
             .metricListStyle()
-            #if os(Android)
-            .navigationTitle("")
-            #else
-            .navigationTitle(title)
-            #endif
+            .mobileNavigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
+            #if !os(Android)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text(title)
@@ -24,6 +21,7 @@ struct MetricDetailScreen<Content: View>: View {
                         .accessibilityIdentifier("metric-detail-title")
                 }
             }
+            #endif
     }
 }
 

@@ -23,6 +23,7 @@ if [ "$(uname -s)" != Darwin ]; then
         bash -c 'swiftc -frontend -parse src/ios/*.swift src/ios/Platform/*.swift src/shared/Core/*.swift src/shared/UI/*.swift src/shared/Application/*.swift && swift test --scratch-path build/ios/core'
 fi
 python3 tests/tools/test_apple_catalog.py
+python3 tests/tools/test_mobile_api_contract.py
 swift test --scratch-path build/ios/core
 if $CORE_ONLY; then exit 0; fi
 command -v xcodegen >/dev/null || { echo 'Install XcodeGen before building iOS' >&2; exit 1; }

@@ -12,12 +12,11 @@ struct SourceAliasesView: View {
     var body: some View {
         List {
             Section {
-                InfoHelp(title: "Source aliases", message: "Charts and history use the original source name by default. Set an alias only when you want a different name.")
                 if loading { ProgressView("Loading sources") }
                 if let failure { Text(failure).foregroundStyle(.secondary) }
                 if !loading && keys.isEmpty { Text("Import or sync data to add sources.") }
             }
-            Section("Sources") {
+            Section {
                 ForEach(keys, id: \.self) { key in
                     Button { editing = SourceAliasSelection(id: key) } label: {
                         VStack(alignment: .leading, spacing: 4) {
@@ -28,7 +27,7 @@ struct SourceAliasesView: View {
                 }
             }
         }
-        .navigationTitle("Source aliases")
+        .mobileNavigationTitle("Source Aliases")
         .initialTask { await load() }
         .refreshable { await load() }
         .sheet(item: $editing) { source in NavigationStack { SourceAliasEditor(model: model, key: source.id) } }
@@ -64,7 +63,7 @@ struct SourceAliasEditor: View {
             Section("Original source") { CopyableText(key).font(.caption) }
             if let failure { Section { Text(failure); Button("Reload current settings") { Task { await load(replaceDraft: false) } } } }
         }
-        .navigationTitle("Edit source alias")
+        .mobileNavigationTitle("Edit source alias")
         .interactiveDismissDisabled(alias != initialAlias || saving)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Cancel") { if alias != initialAlias { discard = true } else { dismiss() } }.disabled(saving) }

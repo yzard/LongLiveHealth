@@ -981,3 +981,71 @@ async fn report_history_keeps_undated_and_non_numeric_results() {
             .all(|r| r["source_name"] == "Function Health" && r["original"].is_object())
     );
 }
+
+#[tokio::test]
+async fn every_function_health_marker_is_available_in_browse_after_confirmation() {
+    let (_directory, state) = crate::fixture().await;
+    let user = crate::add_user(&state, "function-labs").await;
+    let report = crate::archive(&state, "function-labs").await;
+    // Only marker names and units; all values/dates below are synthetic.
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("fixtures/function_health_markers.json")).unwrap();
+    let mut observations = Vec::new();
+    for row in &rows {
+        let name = row["name"].as_str().unwrap();
+        let unit = row["unit"].as_str();
+        assert_eq!(
+            longlivehealth::laboratory::infer_metric(name, unit),
+            row["metric_id"].as_str(),
+            "{name}: {unit:?}"
+        );
+        let mut payload = crate::observation_payload();
+        payload.raw_name = name.into();
+        payload.raw_unit = unit.map(str::to_owned);
+        payload.raw_result = if unit.is_some() { "1" } else { "Negative" }.into();
+        payload.metric_id = None;
+        observations.push(longlivehealth::reports::ReviewItem {
+            observation_id: None,
+            expected_revision: None,
+            status: "confirmed".into(),
+            payload,
+        });
+    }
+    state
+        .database
+        .review(
+            &user.user_id,
+            longlivehealth::reports::ReviewRequest {
+                report_id: report,
+                expected_revision: 1,
+                context: None,
+                observations,
+            },
+        )
+        .await
+        .unwrap();
+    let browse = longlivehealth::metric_history::browse(&state.database, &user.user_id)
+        .await
+        .unwrap();
+    let metrics = browse["metrics"].as_array().unwrap();
+    for row in &rows {
+        assert!(
+            metrics.iter().any(|m| m["metric_id"] == row["metric_id"]),
+            "Missing from Browse: {}",
+            row["name"]
+        );
+    }
+    let globulin = history(
+        &state.database,
+        &user.user_id,
+        HistoryRequest {
+            metric_id: "globulin".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(globulin["points"].as_array().unwrap().len(), 1);
+    assert_eq!(globulin["points"][0]["unit"], "g/dL");
+    assert_eq!(globulin["points"][0]["value"], "1");
+    assert_eq!(globulin["records"].as_array().unwrap().len(), 1);
+}

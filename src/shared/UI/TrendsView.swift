@@ -5,9 +5,9 @@ import Charts
 
 struct TrendsView: View {
     var model: AppModel
-    @State var selected = "ldl_cholesterol"
+    @State var selected = ""
     @State var comparing = false
-    @State var second = "hdl_cholesterol"
+    @State var second = ""
     @State var preview: DocumentLocation?
     var body: some View {
         List {
@@ -22,10 +22,14 @@ struct TrendsView: View {
                 Toggle("Compare a second metric", isOn: $comparing)
                 if comparing { picker("Second metric", selection: $second) }
             }
-            TrendSeries(model: model, metric: selected, openPreview: { preview = $0 }).id(selected)
-            if comparing && second != selected { TrendSeries(model: model, metric: second, openPreview: { preview = $0 }).id(second) }
+            if !selected.isEmpty { TrendSeries(model: model, metric: selected, openPreview: { preview = $0 }).id(selected) }
+            if comparing && !second.isEmpty && second != selected { TrendSeries(model: model, metric: second, openPreview: { preview = $0 }).id(second) }
             RecentActivitySection(model: model)
-        }.navigationTitle("Trends")
+        }.mobileNavigationTitle("Trends")
+            .onChange(of: model.metrics, initial: true) { _, values in
+                if !values.contains(where: { $0["metric_id"].stringValue == selected }) { selected = values.first?["metric_id"].stringValue ?? "" }
+                if !values.contains(where: { $0["metric_id"].stringValue == second }) { second = values.dropFirst().first?["metric_id"].stringValue ?? selected }
+            }
             .sheet(item: $preview) { DocumentPreview(location: $0) }
     }
     private func picker(_ label: String, selection: Binding<String>) -> some View {
@@ -75,6 +79,6 @@ struct TrendSeries: View {
                 if let time, let point = result["points"].arrayValue.min(by: { abs(($0["timestamp"].numberValue ?? 0) - time) < abs(($1["timestamp"].numberValue ?? 0) - time) }) { show(point); selectedTime = nil }
             }
     }
-    private func reload() async { do { if let client = model.client { result = try await model.request("trends/get", body: .object(["metric_ids": .array([.string(metric)])])) } } catch { model.errorMessage = error.localizedDescription } }
+    private func reload() async { do { if let client = model.client { result = try model.cachedResponse("trends/get", body: .object(["metric_ids": .array([.string(metric)])])) ?? result; result = try await model.request("trends/get", body: .object(["metric_ids": .array([.string(metric)])])) } } catch { model.errorMessage = error.localizedDescription } }
     private func show(_ point: JSONValue) { Task { do { openPreview(DocumentLocation(url: try await model.source(point["report_id"].stringValue), page: Int(point["original"]["source"]["page"].numberValue ?? 1))) } catch { model.errorMessage = error.localizedDescription } } }
 }

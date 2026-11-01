@@ -23,13 +23,10 @@ class ReportPreviewActivity : AppCompatActivity() {
     private val renderLock = Any()
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
-        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        layout.addView(Button(this).apply { text = "Done"; setOnClickListener { finish() } })
-        label = TextView(this).apply { textSize = 18f }; layout.addView(label)
-        image = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
-        layout.addView(image, LinearLayout.LayoutParams(-1, 0, 1f))
-        slider = SeekBar(this); layout.addView(slider)
-        setContentView(layout)
+        val layout = ReportPageLayout(this, "Original report")
+        label = layout.label
+        image = layout.image
+        slider = layout.slider
         try {
             val file = File(requireNotNull(intent.getStringExtra("path")))
             val header = ByteArray(5); file.inputStream().use { it.read(header) }

@@ -1,7 +1,7 @@
 const READ_ACTIONS = new Set([
   'wellness/hrv', 'user/get', 'server/status', 'reports/list', 'reports/get', 'reports/input/get',
-  'reports/extraction/get', 'observations/history', 'metrics/list', 'trends/get',
-  'wellness/associations/list', 'wellness/associations/get', 'wellness/review', 'wellness/timeline', 'wellness/sleep/regularity', 'wellness/series', 'wellness/preferences/get', 'wellness/import/list', 'wellness/clinical-age', 'wellness/sleep', 'wellness/entries/list', 'wellness/day', 'wellness/sources', 'exports/list', 'health/coverage', 'health/list', 'health/aggregate', 'analysis/list', 'analysis/get',
+  'reports/extraction/get', 'metrics/list', 'browse/catalog', 'wellness/chart', 'trends/get',
+  'wellness/associations/list', 'wellness/associations/get', 'wellness/review', 'wellness/timeline', 'wellness/sleep/regularity', 'wellness/preferences/get', 'wellness/import/list', 'wellness/sleep', 'wellness/entries/list', 'wellness/day', 'wellness/sources', 'exports/list', 'health/coverage', 'analysis/list', 'analysis/get',
 ]);
 const ACTIONS = new Set([...READ_ACTIONS, 'wellness/associations/run', 'session/login', 'session/logout', 'analysis/create', 'analysis/retry', 'exports/create', 'exports/delete', 'wellness/preferences/save', 'wellness/import/delete', 'wellness/import/fit', 'wellness/import/tcx', 'wellness/import/gpx', 'wellness/entries/save', 'wellness/entries/delete']);
 

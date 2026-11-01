@@ -1,0 +1,133 @@
+{
+  "project": "Material Design Icons by Google",
+  "license": "Apache-2.0",
+  "revision": "10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7",
+  "icons": [
+    {
+      "symbol": "flame.fill",
+      "asset": "health_category_local_fire_department",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/maps/local_fire_department/materialiconsround/48dp/2x/round_local_fire_department_black_48dp.png",
+      "sha256": "f668493b011202e4602a5d0a6f5dbb1b353a9ff0ad909ac55cc66bc5298ca1bb"
+    },
+    {
+      "symbol": "figure.stand",
+      "asset": "health_category_accessibility_new",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/action/accessibility_new/materialiconsround/48dp/2x/round_accessibility_new_black_48dp.png",
+      "sha256": "c22db83a403a6fb22f4c1ca89a5f1878dfa97776592de132443e54e0e7415b30"
+    },
+    {
+      "symbol": "circle.dotted",
+      "asset": "health_category_autorenew",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/action/autorenew/materialiconsround/48dp/2x/round_autorenew_black_48dp.png",
+      "sha256": "4c6ca2cc7ffae89958126ba02ac6c7ab70e584d485b2bd13c4f626ba667929e3"
+    },
+    {
+      "symbol": "ear.fill",
+      "asset": "health_category_hearing",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/av/hearing/materialiconsround/48dp/2x/round_hearing_black_48dp.png",
+      "sha256": "e66937b3b6679f0dd03a7b4146d82801ec85cf72ea62fa96ee1bd6ac588be0cd"
+    },
+    {
+      "symbol": "heart.fill",
+      "asset": "health_category_favorite",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/action/favorite/materialiconsround/48dp/2x/round_favorite_black_48dp.png",
+      "sha256": "6fb5570bbd6c4a1082526eeef43e4f50e7235e904df0b6b233a8193dc96ca4f3"
+    },
+    {
+      "symbol": "pills.fill",
+      "asset": "health_category_medication",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/device/medication/materialiconsround/48dp/2x/round_medication_black_48dp.png",
+      "sha256": "9077fd34f8c5094f7fd0e83b3f441dcec08a129bc4c7c4307adc9cdd3002d849"
+    },
+    {
+      "symbol": "brain.head.profile",
+      "asset": "health_category_psychology",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/social/psychology/materialiconsround/48dp/2x/round_psychology_black_48dp.png",
+      "sha256": "e90167ceef58d45a7a03a9b4996a5a5c2560e7edddd047ad0c85ac11c0a9caa3"
+    },
+    {
+      "symbol": "figure.walk",
+      "asset": "health_category_directions_walk",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/maps/directions_walk/materialiconsround/48dp/2x/round_directions_walk_black_48dp.png",
+      "sha256": "1418c104be8bd213d97ea041fa6f25472d9ed7a25be3aefe4c0b2e4c88f079df"
+    },
+    {
+      "symbol": "carrot.fill",
+      "asset": "health_category_restaurant",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/maps/restaurant/materialiconsround/48dp/2x/round_restaurant_black_48dp.png",
+      "sha256": "65a5ef3c3cea812efc8cf5cdca9d15a22795bb05377362a553095038a56d016f"
+    },
+    {
+      "symbol": "lungs.fill",
+      "asset": "health_category_air",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/device/air/materialiconsround/48dp/2x/round_air_black_48dp.png",
+      "sha256": "2bf099cb0b4f834920fdc339ea499fa39f7ebca1477b3006a9234e6508ac5558"
+    },
+    {
+      "symbol": "bed.double.fill",
+      "asset": "health_category_bed",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/search/bed/materialiconsround/48dp/2x/round_bed_black_48dp.png",
+      "sha256": "9bad59df5ddf1baebb19f6613ddb4479387450bef3142849f61c9902842e7ad3"
+    },
+    {
+      "symbol": "figure",
+      "asset": "health_category_sick",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/social/sick/materialiconsround/48dp/2x/round_sick_black_48dp.png",
+      "sha256": "e90898d495fd9494845f99a62a5f7eb3704896d3ad0e74405fab6df5c18dc907"
+    },
+    {
+      "symbol": "waveform.path.ecg",
+      "asset": "health_category_monitor_heart",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/device/monitor_heart/materialiconsround/48dp/2x/round_monitor_heart_black_48dp.png",
+      "sha256": "f2806bfd23432d0b92e7ef6849c64fdd23fbc9f69f9481a75f2f59114a292145"
+    },
+    {
+      "symbol": "drop.fill",
+      "asset": "health_category_bloodtype",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/device/bloodtype/materialiconsround/48dp/2x/round_bloodtype_black_48dp.png",
+      "sha256": "f04b727d137ed55a18925513cbfd9763a728fe6bc330cf9541187b2fc866eb9c"
+    },
+    {
+      "symbol": "eye.fill",
+      "asset": "health_category_visibility",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/action/visibility/materialiconsround/48dp/2x/round_visibility_black_48dp.png",
+      "sha256": "5a21743164a758c7e16860eddae557722f71c22e558ef46b4a94d03f05ae7d7e"
+    },
+    {
+      "symbol": "cross.fill",
+      "asset": "health_category_add_circle",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/content/add_circle/materialiconsround/48dp/2x/round_add_circle_black_48dp.png",
+      "sha256": "e27e31dac8b43806e32d43b3adbdb40a3eeff7d8730d50b2eecfc3f03b5d79be"
+    },
+    {
+      "symbol": "allergens",
+      "asset": "health_category_flare",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/image/flare/materialiconsround/48dp/2x/round_flare_black_48dp.png",
+      "sha256": "9893f344e7bb9e03249b45a40a9f2ce51ddf4c70cc364cdb76ff1a112f9814f9"
+    },
+    {
+      "symbol": "doc.text.fill",
+      "asset": "health_category_description",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/action/description/materialiconsround/48dp/2x/round_description_black_48dp.png",
+      "sha256": "66934d6ce4fdaa0bebddc85ac7029b487555190bb21607e033c126222ce8ffb2"
+    },
+    {
+      "symbol": "stethoscope",
+      "asset": "health_category_medical_services",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/maps/medical_services/materialiconsround/48dp/2x/round_medical_services_black_48dp.png",
+      "sha256": "2ed7d82366b5b775d3c065cb52f809b576460ebf0858eddfba93f7191d6f09db"
+    },
+    {
+      "symbol": "syringe.fill",
+      "asset": "health_category_vaccines",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/social/vaccines/materialiconsround/48dp/2x/round_vaccines_black_48dp.png",
+      "sha256": "08fed8e441d0f1f4ed1059a5e18379e9cc392e2b602875959b098b43677a76dd"
+    },
+    {
+      "symbol": "cross.case.fill",
+      "asset": "health_category_local_hospital",
+      "url": "https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/png/maps/local_hospital/materialiconsround/48dp/2x/round_local_hospital_black_48dp.png",
+      "sha256": "c0c601540724d965bdd6753f78d6d3dc466e23ba693d1275a5707e0a2e58dee3"
+    }
+  ]
+}

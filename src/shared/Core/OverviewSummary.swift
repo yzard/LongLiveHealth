@@ -7,6 +7,7 @@ public nonisolated enum OverviewSummary {
         public let average: Double
         public let days: Int
         public let targetDays: Int?
+        public let goalMet: Bool?
         public var id: String { source + "|" + unit }
     }
 
@@ -42,7 +43,7 @@ public nonisolated enum OverviewSummary {
         guard !selected.isEmpty, Set(selected.map { $0["unit"].stringValue }).count == 1 else { return nil }
         let values = selected.compactMap { $0["value"].numberValue }
         let goal = metric["record_type"] == .string("sleep") ? sleepTargetMinutes : nil
-        return SourceSummary(source: "", unit: selected[0]["unit"].stringValue, average: values.reduce(0, +) / Double(values.count), days: values.count, targetDays: goal.map { target in values.filter { $0 >= target * 60 }.count })
+        return SourceSummary(source: "", unit: selected[0]["unit"].stringValue, average: values.reduce(0, +) / Double(values.count), days: values.count, targetDays: goal.map { target in values.filter { $0 >= target * 60 }.count }, goalMet: goal.map { values.reduce(0, +) / Double(values.count) >= $0 * 60 })
     }
 
     public static func duration(_ seconds: Double) -> String {
@@ -53,7 +54,7 @@ public nonisolated enum OverviewSummary {
 
     public static func value(_ value: Double, kind: String, unit: String) -> String {
         if kind == "sleep" || kind == "workout" { return duration(value) }
-        let displayUnit = unit == "count" ? "" : unit == "count/min" ? "bpm" : unit
+        let displayUnit = unit == "count" ? "" : HistoricalValue.displayUnit(unit, kind: kind)
         return "\(value.formatted(.number.precision(.fractionLength(0...1)))) \(displayUnit)".trimmingCharacters(in: .whitespaces)
     }
 
@@ -86,7 +87,7 @@ public nonisolated enum OverviewSummary {
             let target = metric["record_type"] == .string("sleep") ? sleepTargetMinutes : nil
             return SourceSummary(source: first.1["source"].stringValue, unit: first.1["unit"].stringValue,
                 average: values.reduce(0, +) / Double(values.count), days: Set(records.map(\.0)).count,
-                targetDays: target.map { goal in values.filter { $0 >= goal * 60 }.count })
+                targetDays: target.map { goal in values.filter { $0 >= goal * 60 }.count }, goalMet: target.map { values.reduce(0, +) / Double(values.count) >= $0 * 60 })
         }
     }
 }

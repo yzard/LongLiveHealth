@@ -12,3 +12,9 @@ import Testing
     value["source"]["page"] = .number(3)
     #expect(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(value)) == value)
 }
+
+@Test func referenceCitationsRetainDistinctSourceIdentities() {
+    let citations: [JSONValue] = [.object(["id":.string("abim")]), .object(["id":.string("cbc")])]
+    #expect(Set(citations.map(\.identifier)).count == 2)
+    #expect(JSONValue.object(["record_id":.string("record"),"id":.string("display")]).identifier == "record")
+}

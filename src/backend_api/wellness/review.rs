@@ -87,7 +87,6 @@ impl Database {
                     ("water_ml", "mL"),
                 ],
                 "training" => &[("duration_minutes", "minutes"), ("session_load_au", "AU")],
-                "breathing" => &[("duration_minutes", "minutes")],
                 _ => &[],
             };
             let bases: BTreeSet<_> = records

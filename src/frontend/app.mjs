@@ -211,11 +211,9 @@ function showShell() {
 
 const titles = {
   associations: ["Behavior associations", "Declared comparisons with uncertainty and missingness."],
-  breathing: ['Breathing practice', 'A self-paced practice with a five-minute timer.'],
   review: ['Log review', 'Recorded training, nutrition and body measurements.'],
   timeline: ['Timeline', 'Archived events, with their source and revision.'],
   series: ['Device trends', 'Measurements remain separate for each source.'],
-  research: ['Research model', 'A fixed blood-test model with explicit input evidence.'],
   sleep: ['Sleep', 'Observed sessions and source stage intervals.'],
   entries: ['Daily logs', 'Your own observations, meals and training.'],
   overview: ['Overview', 'Your daily records, with their sources and coverage.'],
@@ -247,7 +245,7 @@ async function navigate() {
   main.append(loading); main.setAttribute('aria-busy', 'true');
   try {
     const render = {
-      hrv: hrvView, associations: associationsView, breathing: breathingView, review: reviewView, timeline: timelineView, series: seriesView, overview: overviewView, data: dataView, entries: entriesView, sleep: sleepView, research: researchView,
+      hrv: hrvView, associations: associationsView, review: reviewView, timeline: timelineView, series: seriesView, overview: overviewView, data: dataView, entries: entriesView, sleep: sleepView,
       reports: () => id ? reportView(id) : reportsView(), trends: trendsView,
       health: healthView, insights: () => id ? analysisView(id) : insightsView(), settings: settingsView,
     }[view];
@@ -394,52 +392,14 @@ async function trendsView() {
 
 async function healthView() {
   const wrap = el('div');
-  const controls = section('Last 30 days'); controls.classList.add('controls');
-  const input = select([
-    ['resting_heart_rate', 'Resting heart rate'], ['heart_rate', 'Heart rate'], ['hrv_sdnn', 'HRV SDNN'],
-    ['steps', 'Steps'], ['sleep', 'Sleep'], ['workout', 'Workout'],
-  ], filters.kind);
-  input.addEventListener('change', () => { filters.kind = input.value; navigate(); });
-  controls.append(field('Metric', input), el('p', timezone, 'muted'));
-  controls.append(button('Refresh data', navigate, 'quiet'));
-  wrap.append(controls);
-  const [coverage, aggregate, raw] = await Promise.all([
-    post('health/coverage', {}),
-    post('health/aggregate', { record_type: filters.kind, ...dateScope(30, new Date(), timezone) }),
-    post('health/list', { limit: 50, offset: 0 }),
-  ]);
-  const daily = section('Daily view');
-  daily.append(el('p', 'Sources remain separate. Missing days are not zero; sample averages are not daily clinical measurements.', 'muted'));
-  if (!aggregate.days.length) daily.append(empty('No visible samples for this metric. Sync from your mobile device to add data.'));
-  else daily.append(table(['Date', 'Value', 'Source', 'Samples', 'Method'], aggregate.days.map(day => [
-    day.date, day.value === null ? 'No visible samples' : `${numeric(day.value)} ${day.unit ?? ''}`, sourceText(day.source), day.sample_count, day.algorithm,
-  ])));
+  const coverage = await post('health/coverage', {});
   const sync = section('Sync coverage');
-  sync.append(el('p', 'Coverage describes data visible to the syncing device. Empty queries do not establish whether permission was denied or data is absent.', 'muted'));
-  if (!coverage.coverage.length) sync.append(empty('No mobile connections yet. Connect Apple Health in the iPhone app.'));
+  if (!coverage.coverage.length) sync.append(empty('No mobile connections yet. Connect a health provider in the mobile app.'));
   else sync.append(table(['Platform', 'Type', 'Status', 'Last successful query'], coverage.coverage.map(entry => [
     entry.platform, entry.record_type, badge(entry.status), dated(entry.last_success_at),
   ])));
-  const records = section('Archived details');
-  records.append(el('p', 'Browse the original structured records, including platform metadata and nested series.', 'muted'));
-  const list = el('div');
-  const append = values => {
-    for (const entry of values) {
-      const record = entry.record;
-      list.append(detail(`${entry.platform} · ${record.record_type} · ${dated(record.start_at)}`, record));
-    }
-  };
-  append(raw.records);
-  if (!raw.records.length) list.append(empty('No health records archived yet.'));
-  let offset = raw.records.length;
-  const more = actionButton('Load more records', async () => {
-    const signal = controller.signal;
-    const next = await post('health/list', { limit: 50, offset });
-    if (signal.aborted) return;
-    offset += next.records.length; append(next.records); more.hidden = next.records.length < 50;
-  }, 'quiet');
-  more.hidden = raw.records.length < 50;
-  records.append(list, more); wrap.append(daily, sync, records); return wrap;
+  wrap.append(sync, button('Browse measurements', () => route('series'), 'quiet'));
+  return wrap;
 }
 
 async function insightsView() {
@@ -466,7 +426,7 @@ async function insightsView() {
     const info = el('div'); info.append(el('strong', run.prompt_version === 'archive-coach-v1' ? 'Archive question' : 'Lipid review'), el('span', dated(run.created_at), 'muted'));
     link.append(info, badge(run.status), el('span', 'View →', 'row-action')); runs.append(link);
   }
-  wrap.append(preset, runs, button('Blood-test research model', () => route('research'), 'quiet')); return wrap;
+  wrap.append(preset, runs); return wrap;
 }
 
 async function analysisView(id) {
@@ -571,7 +531,6 @@ async function overviewView() {
     card.append(history); grid.append(card);
   }
   const actions = el('div', null, 'toolbar');
-  actions.append(button('Breathing practice', () => route('breathing'), 'quiet'));
   actions.append(button('Record a daily log', () => route('entries'), 'primary'), button('Sleep sessions', () => route('sleep'), 'quiet')); wrap.append(actions);
   wrap.append(grid, button('Browse device records', () => route('health'), 'quiet'));
   return wrap;
@@ -670,7 +629,6 @@ const logForms = {
   body: [['weight_kg', 'Weight (kg)', 'required-number'], ['body_fat_percent', 'Body fat (%)', 'number'], ['waist_cm', 'Waist (cm)', 'number']],
   blood_pressure: [['systolic_mmhg', 'Systolic (mmHg)', 'required-number'], ['diastolic_mmhg', 'Diastolic (mmHg)', 'required-number'], ['pulse_bpm', 'Pulse (bpm)', 'number'], ['arm', 'Arm', ['unknown', 'left', 'right']], ['posture', 'Posture', ['unknown', 'seated', 'standing', 'supine']]],
   cycle: [['flow', 'Flow', ['none', 'spotting', 'light', 'medium', 'heavy']], ['context', 'Context', ['cycle', 'pregnancy', 'postpartum', 'perimenopause', 'unknown']], ['symptoms', 'Symptoms, one per line', 'lines']],
-  breathing: [['duration_minutes', 'Duration (minutes)', 'required-number'], ['breaths_per_minute', 'Breaths per minute (optional)', 'number']],
 };
 async function entriesView() {
   const wrap = el('div');
@@ -834,30 +792,6 @@ async function sleepView() {
   return wrap;
 }
 
-async function researchView() {
-  const wrap = el('div');
-  const reports = await post('reports/list', { limit: 100 });
-  const panel = section('Clinical PhenoAge · research');
-  panel.append(el('p', 'This is a published statistical model. It is not measured biological age, a diagnosis or an estimate of aging speed. It requires nine exact, reviewed results from the same collection.', 'muted'));
-  const form = el('form');
-  const report = el('select');
-  for (const item of reports.reports) { const option = el('option', item.original_name); option.value = item.report_id; report.append(option); }
-  const age = el('input'); age.type = 'number'; age.min = '20'; age.max = '120'; age.step = 'any'; age.required = true;
-  const consent = el('input'); consent.type = 'checkbox'; consent.required = true;
-  form.append(field('Reviewed report', report), field('Age at collection (years)', age), field('I understand that this is a research result', consent));
-  const submit = el('button', 'Calculate from reviewed inputs', 'primary'); submit.type = 'submit'; form.append(submit);
-  const output = el('div');
-  form.onsubmit = event => { event.preventDefault(); action(submit, async () => {
-    const result = await post('wellness/clinical-age', { report_id: report.value, age_at_collection_years: Number(age.value), research_acknowledged: consent.checked });
-    output.replaceChildren();
-    if (result.value == null) output.append(el('p', `Missing reviewed inputs: ${result.missing_metrics.join(', ')}`));
-    else {
-      output.append(el('p', `Research model result: ${numeric(result.value)} years`, 'metric-value'), el('p', result.limitations), detail('Collection and calculation evidence', result));
-      const link = el('a', 'Published formula correction'); link.href = result.reference; link.target = '_blank'; link.rel = 'noopener noreferrer'; output.append(link);
-    }
-  }); };
-  panel.append(form, output); wrap.append(panel); return wrap;
-}
 
 function dailySparkline(metric) {
   const points = metric.history.filter(day => day.selected && Number.isFinite(day.selected.value));
@@ -883,62 +817,45 @@ function dailySparkline(metric) {
   return figure;
 }
 
-const seriesNames = {heart_rate: 'Heart rate', blood_glucose: 'Blood glucose', vo2_max: 'VO₂ Max', body_mass: 'Body weight', body_fat: 'Body fat', oxygen_saturation: 'Oxygen saturation', respiratory_rate: 'Respiratory rate'};
 let selectedSeries = 'blood_glucose';
-let heartRateParameters = {gap: 15, bpm: '', source: ''};
 async function seriesView() {
-  const wrap = el('div');
-  const control = section('Recorded measurements');
-  const choice = select(Object.entries(seriesNames), selectedSeries);
+  const wrap = el('div'), control = section('Recorded measurements');
+  const catalog = await post('browse/catalog', {});
+  const entries = catalog.entries.filter(entry => entry.presentation === 'measurement');
+  if (!entries.length) { wrap.append(empty('No recorded measurements.')); return wrap; }
+  if (!entries.some(entry => entry.kind === selectedSeries)) selectedSeries = entries[0].kind;
+  const choice = select(entries.map(entry => [entry.kind, entry.title]), selectedSeries);
   choice.addEventListener('change', () => { selectedSeries = choice.value; navigate(); });
-  control.append(field('Measurement', choice), el('p', `${selectedSeries === 'heart_rate' ? 'Last 24 hours' : 'Last 30 days'}. Sources and raw units remain available.`, 'muted'));
-  if (selectedSeries === 'heart_rate') {
-    const form = el('form');
-    const gap = el('input'); gap.type = 'number'; gap.min = '1'; gap.max = '1800'; gap.required = true; gap.value = heartRateParameters.gap;
-    const maximum = el('input'); maximum.type = 'number'; maximum.min = '50'; maximum.max = '300'; maximum.value = heartRateParameters.bpm;
-    const source = el('input'); source.value = heartRateParameters.source; source.maxLength = 256;
-    const apply = el('button', 'Apply sampling protocol'); apply.type = 'submit';
-    form.append(field('Maximum sample gap in seconds (match your source protocol)', gap), field('Declared maximum heart rate (optional, bpm)', maximum), field('Maximum heart rate source', source), apply);
-    form.onsubmit = event => { event.preventDefault(); heartRateParameters = {gap: Number(gap.value), bpm: maximum.value, source: source.value}; navigate(); };
-    control.append(el('p', 'Heart rate uses the last 24 hours. The initial 15-second gap is an engineering assumption; set it to your source protocol.', 'footnote'), form);
-  }
-  wrap.append(control);
+  control.append(field('Measurement', choice), el('p', 'Last 30 days', 'muted')); wrap.append(control);
   const end = Math.floor(Date.now() / 1000);
-  const result = await post('wellness/series', {record_type: selectedSeries, start_at: end - (selectedSeries === 'heart_rate' ? 1 : 30) * 86400, end_at: end, maximum_gap_seconds: selectedSeries === 'heart_rate' ? heartRateParameters.gap : 900, declared_maximum: selectedSeries === 'heart_rate' && heartRateParameters.bpm !== '' ? {bpm: Number(heartRateParameters.bpm), source: heartRateParameters.source} : null});
-  if (!result.sources.length) wrap.append(empty('No recorded measurements in this window.'));
-  for (const source of result.sources) {
-    const panel = section(sourceLabel(source.source)); panel.append(badge(source.state));
-    const valid = source.points.filter(p => p.value !== null);
-    if (valid.length) {
-      const latest = valid[valid.length - 1];
-      panel.append(el('p', `${numeric(latest.value)} ${result.unit}`, 'metric-value'), el('p', `Last observation ${dated(latest.at)}`, 'muted'));
-      panel.append(measurementPlot(valid, result.unit));
+  const result = await post('wellness/chart', {record_type: selectedSeries, start_at: end - 30 * 86400, end_at: end, period: 'M', timezone});
+  for (const component of result.components ?? [result]) {
+    const panel = section(component.title ?? entries.find(entry => entry.kind === selectedSeries).title);
+    const ranges = component.chart_ranges?.M ?? [];
+    if (!ranges.length) panel.append(empty('No recorded measurements in this window.'));
+    else {
+      panel.append(measurementRangePlot(ranges, component.unit));
+      panel.append(table(['Time', 'Source', 'Range'], ranges.map(row => [dated(row.start_at), sourceLabel(row.source), `${numeric(row.min)}–${numeric(row.max)} ${component.unit}`])));
     }
-    if (source.glucose_summary) {
-      const summary = source.glucose_summary;
-      panel.append(el('p', `Observed coverage: ${numeric(summary.coverage_fraction * 100)}% · ${numeric(summary.covered_seconds / 3600)} hours`, 'muted'));
-      panel.append(table(['Measurement', 'Value'], [['Time in 70–180 mg/dL', summary.tir_percent === null ? 'Not available' : `${numeric(summary.tir_percent)}%`], ['Time-weighted mean', summary.mean_mg_dl === null ? 'Not available' : `${numeric(summary.mean_mg_dl)} mg/dL`], ['Coefficient of variation', summary.coefficient_of_variation === null ? 'Not available' : `${numeric(summary.coefficient_of_variation)}%`]]));
-    }
-    if (source.heart_rate_summary) {
-      const heart = source.heart_rate_summary;
-      panel.append(badge(heart.state), el('p', `Observed coverage: ${numeric(heart.coverage_fraction * 100)}%`, 'muted'));
-      panel.append(table(['Absolute interval', 'Observed minutes'], heart.absolute_bins.map(b => [`${b.lower_bpm}–${b.upper_bpm} bpm`, numeric(b.seconds / 60)])));
-      if (heart.zone_seconds) panel.append(table(['Relative zone', 'Observed minutes'], heart.zone_seconds.map((seconds, index) => [`${50 + index * 10}–${60 + index * 10}%`, numeric(seconds / 60)])));
-      panel.append(el('p', heart.edwards_load_au == null ? 'Edwards load unavailable' : `Observed Edwards load: ${numeric(heart.edwards_load_au)} AU`), detail('Heart-rate method', heart));
-    }
-    const records = el('details'); records.append(el('summary', `${source.points.length} observations; latest 500 with original units`));
-    records.append(table(['Observed', 'Converted', 'Original', 'Revision'], source.points.slice(-500).map(p => [dated(p.at), p.value === null ? 'Unavailable' : `${numeric(p.value)} ${result.unit}`, `${p.raw_value ?? 'Unknown'} ${p.raw_unit ?? ''}`, p.version])));
-    panel.append(records); wrap.append(panel);
+    wrap.append(panel);
   }
-  const evidence = section('Method and coverage');
-  for (const note of selectedSeries === 'heart_rate' ? ['Heart-rate sources stay separate. Each source includes its interval method and declared maximum.'] : result.notes) evidence.append(el('p', note, 'footnote'));
-  if (selectedSeries === 'blood_glucose') evidence.append(el('p', 'Glucose summaries hold each sample until the next sample only when the gap is at most 15 minutes. Long gaps remain missing.', 'footnote'));
-  evidence.append(button('Download calculation and inputs', () => {
-    const url = URL.createObjectURL(new Blob([JSON.stringify(result, null, 2)], {type: 'application/json'}));
-    const link = el('a'); link.href = url; link.download = `longlivehealth-${result.record_type}-${end}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }, 'quiet'));
-  wrap.append(evidence); return wrap;
+  return wrap;
 }
+function measurementRangePlot(rows, unit) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 600 180'); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', `Recorded ranges in ${unit}`);
+  const first = Math.min(...rows.map(row => row.start_at)), last = Math.max(...rows.map(row => row.end_at));
+  const low = Math.min(...rows.map(row => row.min)), high = Math.max(...rows.map(row => row.max));
+  const y = value => 155 - 130 * (value - low) / (high - low || 1);
+  for (const row of rows) {
+    const mark = document.createElementNS(svg.namespaceURI, 'line');
+    const x = 20 + 560 * (row.at - first) / (last - first || 1);
+    for (const [key, value] of Object.entries({x1:x, x2:x, y1:y(row.min), y2:y(row.max), stroke:'currentColor', 'stroke-width':5, 'stroke-linecap':'round'})) mark.setAttribute(key, value);
+    svg.append(mark);
+  }
+  const figure = el('figure'); figure.append(svg, el('figcaption', `${numeric(low)}–${numeric(high)} ${unit}`, 'footnote')); return figure;
+}
+
 function measurementPlot(points, unit) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 600 180'); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', `Recorded values in ${unit}. Points do not imply continuous coverage.`);
@@ -984,7 +901,7 @@ async function reviewView() {
   training.append(table(['Window', 'Recorded load', 'Complete days', 'Daily mean'], data.training.windows.map(w => [`${w.days} days`, w.observed_sum_au == null ? 'Unknown' : `${numeric(w.observed_sum_au)} AU`, `${w.complete_days}/${w.days}`, w.daily_mean_au == null ? 'Unknown' : `${numeric(w.daily_mean_au)} AU`])));
   training.append(table(['Date', 'State', 'Load'], data.training.days.map(d => [d.date, d.state.replaceAll('_', ' '), d.load_au == null ? 'Unknown' : `${numeric(d.load_au)} AU`])));
   training.append(detail('Training method and input references', data.training)); wrap.append(training);
-  for (const kind of ['training', 'nutrition', 'breathing']) {
+  for (const kind of ['training', 'nutrition']) {
     const days = data.days.filter(d => d.kind === kind);
     if (!days.length) continue;
     const panel = section(kind[0].toUpperCase() + kind.slice(1));
@@ -1013,40 +930,6 @@ async function reviewView() {
   }, 'quiet'));
   return wrap;
 }
-
-function breathingView() {
-  const wrap = el('div'), panel = section('Cyclic sighing');
-  panel.append(el('p', 'Inhale gently through your nose, then take a second small inhale. Exhale slowly through your mouth. Repeat at a comfortable pace. Stop if you feel uncomfortable.'));
-  const source = el('a', 'Study and method'); source.href = 'https://pubmed.ncbi.nlm.nih.gov/36630953/'; source.target = '_blank'; source.rel = 'noopener noreferrer'; panel.append(source);
-  panel.append(el('p', 'The timer records practice duration. It does not measure breathing rate, stress or recovery.', 'footnote'));
-  const clock = el('p', '5:00', 'metric-value'); clock.setAttribute('role', 'timer'); panel.append(clock);
-  let began = null, at = null, elapsed = 0, timer = null, recordID = null, batchID = null;
-  const start = button('Start five minutes', () => {
-    began = performance.now(); at = Math.floor(Date.now() / 1000); elapsed = 0; recordID = crypto.randomUUID(); batchID = crypto.randomUUID();
-    start.disabled = true; stop.disabled = false; save.hidden = true; status.textContent = 'Practice at your own pace.';
-    timer = setInterval(() => { update(); if (elapsed >= 300) finish(); }, 250);
-  }, 'primary');
-  function update() {
-    elapsed = Math.min(300, Math.max(0, (performance.now() - began) / 1000));
-    const remaining = Math.ceil(300 - elapsed); clock.textContent = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
-  }
-  function finish() {
-    if (timer === null) return;
-    update(); clearInterval(timer); timer = null; start.disabled = false; stop.disabled = true;
-    save.hidden = elapsed < 0.6; status.textContent = `${numeric(elapsed / 60)} minutes recorded. Save only if you practiced during this time.`;
-  }
-  const stop = button('Stop practice', finish, 'quiet'); stop.disabled = true;
-  const status = el('p', 'The timer stops when this page becomes hidden.', 'muted'); status.setAttribute('role', 'status');
-  const save = actionButton('Save practice log', async () => {
-    await post('wellness/entries/save', {record_id: recordID, version: 1, batch_id: batchID, at, timezone, entry: {kind: 'breathing', content: {duration_minutes: elapsed / 60, breaths_per_minute: null, note: 'Cyclic sighing guide. Foreground practice timer. Breathing rate was not measured.'}}});
-    save.hidden = true; status.textContent = 'Practice saved to daily logs.';
-  }, 'primary'); save.hidden = true;
-  const signal = controller.signal;
-  document.addEventListener('visibilitychange', () => { if (document.hidden) finish(); }, {signal});
-  signal.addEventListener('abort', () => { if (timer !== null) clearInterval(timer); }, {once: true});
-  const controls = el('div', null, 'toolbar'); controls.append(start, stop, save); panel.append(controls, status); wrap.append(panel); return wrap;
-}
-
 
 async function associationsView() {
   const wrap = el('div'), panel = section('Declare an analysis');

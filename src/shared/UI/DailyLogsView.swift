@@ -11,7 +11,6 @@ struct DailyLogsView: View {
             Section {
                 Button("Record weight") { editing = LogSelection(entry: nil, kind: "body") }
                 Button("Record an event or observation") { editing = LogSelection(entry: nil) }
-                InfoHelp(title: "Daily logs", message: "Missing fields remain unknown. Your full export includes entries and revisions.")
             }
             Section("Last 30 days") {
                 if entries.isEmpty { Text("No entries in this range.").foregroundStyle(.secondary) }
@@ -38,7 +37,7 @@ struct DailyLogsView: View {
                     }
                 }
             }
-        }.navigationTitle("Manual entries")
+        }.mobileNavigationTitle("Manual Imports")
             .initialTask { await reload() }.refreshable { await reload() }
             .onChange(of: model.entryMutation) { _, change in if let change { entries = change.applying(to: entries) { ($0["at"].numberValue ?? 0) >= Date().timeIntervalSince1970 - 30 * 86400 && ($0["at"].numberValue ?? 0) <= Date().timeIntervalSince1970 } } }
             .sheet(item: $editing) { selection in
@@ -110,7 +109,7 @@ struct LogEditor: View {
             if kind == "training" { InfoHelp(title: "Training effort", message: "Record effort for the whole session on the CR10 scale, ideally about 30 minutes afterward. External weight excludes body mass.") }
             if let failure { Text(failure).foregroundStyle(.red) }
             Button("Save log") { Task { await save() } }.disabled(saving)
-        }.disabled(saving).navigationTitle(existing == nil ? (kind == "body" ? "Record weight" : "New observation") : "Edit observation")
+        }.disabled(saving).mobileNavigationTitle(existing == nil ? (kind == "body" ? "Record weight" : "New observation") : "Edit observation")
             .toolbar { Button("Cancel") { dismiss() }.disabled(saving) }
             .interactiveDismissDisabled()
             .onAppear {

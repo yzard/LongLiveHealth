@@ -3,6 +3,8 @@ pub mod algorithms;
 pub mod associations;
 pub mod clinical;
 pub mod coach;
+pub mod combined_chart;
+pub mod component_projection;
 pub mod diet;
 pub mod entries;
 pub mod fit;
@@ -42,7 +44,7 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const VERSION: &str = "wellness-day-v6";
+pub const VERSION: &str = "wellness-day-v7";
 pub const KINDS: &[&str] = &[
     "sleep",
     "workout",
@@ -84,8 +86,11 @@ impl Database {
             .ok_or(AppError::NotFound)?;
         let mut metrics = Vec::new();
         for kind in KINDS {
-            let aggregate = self
-                .aggregate_health(
+            let aggregate = if *kind == "sleep" {
+                self.sleep_wake_days(user, lower, date, &request.timezone)
+                    .await
+            } else {
+                self.aggregate_health(
                     user,
                     AggregateRequest {
                         record_type: (*kind).into(),
@@ -94,7 +99,8 @@ impl Database {
                         timezone: request.timezone.clone(),
                     },
                 )
-                .await;
+                .await
+            };
             let aggregate = match aggregate {
                 Ok(value) => value,
                 Err(AppError::TooLarge) => {
@@ -142,7 +148,7 @@ impl Database {
             json!({"date":request.date,"timezone":request.timezone,"data_revision":revision,
             "algorithm_version":VERSION,"computed_at":now()?,"metrics":metrics,"coverage":coverage["coverage"],
             "source_priority":request.source_priority,"source_policy":"explicit_priority_or_single_source_per_day","steps_combined_policy":"overlap_device_priority_prorated_v1","evidence_status":"descriptive",
-            "notes":["Calendar-day sleep is not a main sleep session.","Missing records are not zero.","Different HRV protocols are not combined."]}),
+            "notes":["Sleep is the sum of observed asleep time in complete sessions assigned to their local wake date; awake and in-bed time are excluded.","Missing records are not zero.","Different HRV protocols are not combined."]}),
         )
     }
 
@@ -158,7 +164,7 @@ impl Database {
         })).collect();
         let catalog = crate::sources::catalog(self, user, &sources).await?;
         Ok(
-            json!({"browse_metrics":crate::apple_health::browse_catalog(&sources),"sources":sources,"catalog":catalog,"supported_daily_types":KINDS,"coverage_scope":"visible_records_not_read_permission"}),
+            json!({"sources":sources,"catalog":catalog,"supported_daily_types":KINDS,"coverage_scope":"visible_records_not_read_permission"}),
         )
     }
 }

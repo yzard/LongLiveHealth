@@ -38,7 +38,6 @@ pub enum Entry {
     CyclePrediction(CyclePrediction),
     Body(Body),
     BloodPressure(BloodPressure),
-    Breathing(Breathing),
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -163,13 +162,6 @@ pub struct BloodPressure {
     pub arm: String,
     pub note: String,
 }
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Breathing {
-    pub duration_minutes: f64,
-    pub breaths_per_minute: Option<f64>,
-    pub note: String,
-}
 fn bounded(value: f64, low: f64, high: f64) -> bool {
     value.is_finite() && value >= low && value <= high
 }
@@ -201,7 +193,6 @@ impl Entry {
             Self::CyclePrediction(_) => "cycle_prediction",
             Self::Body(_) => "body",
             Self::BloodPressure(_) => "blood_pressure",
-            Self::Breathing(_) => "breathing",
         }
     }
     pub fn validate(&self) -> Result<(), AppError> {
@@ -335,11 +326,6 @@ impl Entry {
                     && ["seated", "standing", "supine", "unknown"].contains(&v.posture.as_str())
                     && text(&v.note, false)
             }
-            Self::Breathing(v) => {
-                bounded(v.duration_minutes, 0.01, 180.0)
-                    && optional(v.breaths_per_minute, 1.0, 60.0)
-                    && text(&v.note, false)
-            }
         };
         if !valid {
             return Err(AppError::Invalid("Invalid entry fields or units"));
@@ -408,7 +394,6 @@ fn valid_kind(kind: &str) -> bool {
         "cycle_prediction",
         "body",
         "blood_pressure",
-        "breathing",
     ]
     .contains(&kind)
 }
@@ -523,6 +508,10 @@ impl Database {
             .bind(&request.kind)
             .fetch(&self.pool);
         while let Some(row) = stream.try_next().await? {
+            // Retired manual entry kinds remain in the archive, not active editors.
+            if !valid_kind(&row.record_type) {
+                continue;
+            }
             bytes = bytes.saturating_add(row.payload_json.len());
             if bytes > 4 * 1024 * 1024 || rows.len() >= 1000 {
                 return Err(AppError::Invalid(

@@ -58,11 +58,18 @@ impl Database {
             }
             while cursor <= end_date {
                 let end = cursor
-                    .checked_add_days(Days::new(365))
+                    .checked_add_days(Days::new(if request.record_type == "sleep" {
+                        89
+                    } else {
+                        365
+                    }))
                     .ok_or(AppError::Internal)?
                     .min(end_date);
-                let result = self
-                    .aggregate_health(
+                let result = if request.record_type == "sleep" {
+                    self.sleep_wake_days(user, cursor, end, &request.timezone)
+                        .await?
+                } else {
+                    self.aggregate_health(
                         user,
                         AggregateRequest {
                             record_type: request.record_type.clone(),
@@ -71,7 +78,8 @@ impl Database {
                             timezone: request.timezone.clone(),
                         },
                     )
-                    .await?;
+                    .await?
+                };
                 days.extend(
                     result["days"]
                         .as_array()
@@ -92,7 +100,7 @@ impl Database {
             &request.record_type,
             &end_date.to_string(),
             &[],
-            &json!({"days":days,"algorithm_version":crate::health::ALGORITHM_VERSION}),
+            &json!({"days":days,"algorithm_version":if request.record_type == "sleep" {"sleep-wake-days-v1"} else {crate::health::ALGORITHM_VERSION}}),
         )?;
         result["data_revision"] = json!(revision);
         result["first_record_at"] = json!(first);

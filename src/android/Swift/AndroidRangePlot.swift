@@ -3,6 +3,7 @@ import SwiftUI
 /// Same server buckets, selection and source priority as the native iOS chart.
 struct AndroidRangePlot: View {
     let rows: [JSONValue]
+    let referenceBand: JSONValue
     let domain: ClosedRange<Double>
     let start: Double
     let length: Double
@@ -19,6 +20,18 @@ struct AndroidRangePlot: View {
             let w = max(1, geometry.size.width - 38)
             let h = max(1, geometry.size.height - 26)
             ZStack(alignment: .topLeading) {
+                if referenceBand != .null {
+                    let lower = referenceBand["lower"].numberValue.map { $0 / divisor } ?? domain.lowerBound
+                    let upper = referenceBand["upper"].numberValue.map { $0 / divisor } ?? domain.upperBound
+                    let top = h * (domain.upperBound - upper) / (domain.upperBound - domain.lowerBound)
+                    let bottom = h * (domain.upperBound - lower) / (domain.upperBound - domain.lowerBound)
+                    Rectangle().fill(Color.pink.opacity(0.18)).frame(width: w, height: max(0, bottom - top)).offset(y: top)
+                    ForEach([referenceBand["lower"].numberValue, referenceBand["upper"].numberValue].compactMap { $0 }, id: \.self) { value in
+                        let y = h * (domain.upperBound - value / divisor) / (domain.upperBound - domain.lowerBound)
+                        Rectangle().fill(Color.pink).frame(width: w, height: 1).offset(y: y)
+                        Text((value / divisor).formatted(.number.precision(.fractionLength(0...2)))).font(.caption2).foregroundStyle(Color.pink).offset(x: w - 34, y: y - 14)
+                    }
+                }
                 ForEach(0..<4, id: \.self) { index in
                     let value = domain.lowerBound + (domain.upperBound - domain.lowerBound) * Double(index) / 3
                     let y = h * (1 - Double(index) / 3)
@@ -52,7 +65,7 @@ struct AndroidRangePlot: View {
                 }
             }.frame(width: geometry.size.width, height: geometry.size.height)
                 .background(Color.black.opacity(0.001))
-                .gesture(DragGesture(minimumDistance: 0).onEnded { drag in
+                .simultaneousGesture(DragGesture(minimumDistance: 0).onEnded { drag in
                     if abs(drag.translation.width) > 24 && abs(drag.translation.width) > abs(drag.translation.height) * 1.5 {
                         move(drag.translation.width > 0 ? -1 : 1)
                     } else if abs(drag.translation.height) < 15 {

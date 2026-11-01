@@ -6,16 +6,15 @@ import Testing
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let archive = try LocalArchive(directory: directory)
     defer { try? archive.clear() }
-    let checkpoint = SyncCheckpoint(requests: [.object(["batch_id": .string("stable")])], nextAnchor: Data([1,2,3]))
+    let checkpoint = JSONValue.object(["batch_id": .string("stable")])
     try archive.save(checkpoint, name: "pending.json")
     let reopened = try LocalArchive(directory: directory)
-    let loaded = try #require(try reopened.load(SyncCheckpoint.self, name: "pending.json"))
-    #expect(loaded.requests == checkpoint.requests)
-    #expect(loaded.nextAnchor == checkpoint.nextAnchor)
+    let loaded = try #require(try reopened.load(JSONValue.self, name: "pending.json"))
+    #expect(loaded == checkpoint)
     #expect(throws: (any Error).self) { try archive.location("../private") }
     #expect(throws: (any Error).self) { try archive.location("..") }
     try archive.remove(name: "pending.json")
-    #expect(try archive.load(SyncCheckpoint.self, name: "pending.json") == nil)
+    #expect(try archive.load(JSONValue.self, name: "pending.json") == nil)
 }
 
 private struct ThreadCheckedValue: Codable, Sendable {

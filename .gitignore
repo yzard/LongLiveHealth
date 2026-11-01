@@ -2,7 +2,7 @@
 /dist/
 /.build/
 __pycache__/
-/target/
+**/target/
 /playground/data/
 /playground/upload/
 /playground/output/

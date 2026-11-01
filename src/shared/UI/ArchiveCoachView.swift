@@ -23,7 +23,7 @@ struct ArchiveCoachView: View {
                 if let failure { Text(failure).foregroundStyle(.secondary) }
             }
             if let runID { NavigationLink("Open answer and follow up") { CoachAnswerView(model: model, runID: runID) } }
-        }.navigationTitle("Archive questions")
+        }.mobileNavigationTitle("Archive questions")
     }
     private func submit() async {
         guard let client = model.client, let token = model.session?.token else { return }
@@ -78,7 +78,7 @@ struct CoachAnswerView: View {
                     if let nextID { NavigationLink("Open follow-up answer") { CoachAnswerView(model: model, runID: nextID) } }
                 }
             }
-        }.navigationTitle("Archive answer")
+        }.mobileNavigationTitle("Archive answer")
             .task(id: runID) {
                 repeat {
                     await load()
@@ -122,7 +122,7 @@ struct CoachMemoryView: View {
                     Button("Delete", role: .destructive) { Task { await remove(item) } }
                 }
             }
-        }.navigationTitle("Editable memory").initialTask { await load() }
+        }.mobileNavigationTitle("Editable memory").initialTask { await load() }
             .onChange(of: model.entryMutation) { _, change in if let change { items = change.applying(to: items) { $0["entry"]["kind"].stringValue == "memory" } } }
             .sheet(item: $selected) { selection in
                 NavigationStack { LogEditor(model: model, existing: selection.item, initialKind: "memory", initialValues: [:], initialDate: Date()) }

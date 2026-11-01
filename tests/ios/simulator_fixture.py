@@ -29,7 +29,8 @@ relation = {}
 request_counts = {}
 admin_password_changed = False
 refresh_failure = False
-source_preferences = {"version": 0, "preferences": {"source_aliases": {}, "source_priority": {}, "favorite_metrics": [], "sleep_target_minutes": None}}
+fail_preferences = False
+source_preferences = {"version": int(time.time() * 1000), "preferences": {"reference_profile": {"birth_date": None, "reference_sex": None}, "source_aliases": {}, "source_priority": {}, "favorite_metrics": [], "sleep_target_minutes": None}}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -37,7 +38,7 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_POST(self):
-        global fail_upload, upload_delay, fail_review, context, analysis_enabled, relation, admin_password_changed, refresh_failure, source_preferences
+        global fail_upload, upload_delay, fail_review, context, analysis_enabled, relation, admin_password_changed, refresh_failure, source_preferences, fail_preferences
         length = int(self.headers.get('Content-Length', 0))
         raw = self.rfile.read(length)
         body = json.loads(raw) if self.headers.get('Content-Type') == 'application/json' else {}
@@ -50,17 +51,20 @@ class Handler(BaseHTTPRequestHandler):
             status = 401
         if route == 'test/fail-refresh':
             refresh_failure = True
+        if route == 'test/fail-preferences-once':
+            fail_preferences = True
         if route == 'test/reset-counts':
             request_counts.clear()
         if route == 'test/reset':
             request_counts.clear()
             admin_password_changed = False
             refresh_failure = False
+            fail_preferences = False
             exports.clear()
             reports.clear()
             upload_ids.clear()
             observations.clear()
-            source_preferences = {"version": 0, "preferences": {"source_aliases": {}, "source_priority": {}, "favorite_metrics": [], "sleep_target_minutes": None}}
+            source_preferences = {"version": int(time.time() * 1000), "preferences": {"reference_profile": {"birth_date": None, "reference_sex": None}, "source_aliases": {}, "source_priority": {}, "favorite_metrics": [], "sleep_target_minutes": None}}
             context = {}
             runs.clear()
             relation = {}
@@ -73,6 +77,7 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     'report_id': 'fixture-report',
                     'original_name': 'fixture.png',
+                    'context': {'source_name': 'Example Laboratory'},
                     'page_count': 1,
                     'revision': 1,
                     'created_at': 1790985600,
@@ -95,6 +100,8 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 }
             ]
+        if route == 'test/report-issue':
+            observations[0]['browse_issues'] = [{'code': 'unsupported_unit', 'scope': 'browse', 'message': 'Cannot appear in Browse: unit invalid-unit is not supported for this test.'}]
         if route == 'test/expand-report':
             template = observations[0]
             observations[:] = [
@@ -202,12 +209,6 @@ class Handler(BaseHTTPRequestHandler):
                     {'metric_id': 'glucose', 'name': 'Glucose'},
                 ]
             },
-            'metrics/browse': {
-                'metrics': [
-                    {'metric_id': 'ldl_cholesterol', 'name': 'LDL', 'standard_unit': 'mg/dL'},
-                    {'metric_id': 'clinical:calcium', 'name': 'Calcium', 'standard_unit': ''},
-                ]
-            },
             'metrics/history/get': {
                 'points': [
                     {
@@ -252,13 +253,12 @@ class Handler(BaseHTTPRequestHandler):
                 'incomparable_count': 0,
             },
             'analysis/list': {'runs': runs},
-            'health/coverage': {'coverage': [], 'total_records': 29330},
+            'health/coverage': {'coverage': [{'record_type':'heart_rate','status':'observed','last_success_at':1790985600}, {'record_type':'workout_route','status':'error'}, {'record_type':'sleep','status':'no_visible_samples'}], 'total_records': 29330},
             'health/sync': {'replayed': False, 'total_records': 29330},
             'wellness/sleep/regularity': {'sources': [], 'notes': []},
             'wellness/import/list': {'imports': [], 'next_after_id': None},
             'wellness/timeline': {'events': [], 'next_cursor': None},
             'wellness/review': {'days': [], 'measurements': [], 'strength_bests': [], 'notes': []},
-            'wellness/series': {'unit': 'ml/kg*min' if body.get('record_type') == 'vo2_max' else 'kg', 'sources': [{'source': 'apple_health:watch', 'points': [{'at': int(time.time()) - 365 * 86400, 'value': 42, 'record_id': 'older-vo2'}]}] if body.get('record_type') == 'vo2_max' and body.get('start_at', 0) <= int(time.time()) - 365 * 86400 < body.get('end_at', 0) else [], 'notes': []},
             'wellness/preferences/get': source_preferences,
             'wellness/day': {
                 'date': body.get('date'),
@@ -286,7 +286,6 @@ class Handler(BaseHTTPRequestHandler):
             'wellness/sources': {'sources': [{'platform': 'apple_health', 'source_id': 'watch', 'record_type': 'sleep', 'record_count': 10}, {'platform': 'apple_health', 'source_id': 'watch', 'record_type': 'vo2_max', 'first_at': int(time.time()) - 400 * 86400}], 'catalog': [{'source_key': 'apple_health:watch', 'name': 'Apple Watch'}]},
             'wellness/sleep': {'sources': [], 'algorithm_version': 'synthetic'},
             'wellness/entries/list': {'entries': [{'record_id': 'manual-weight', 'at': time.time() - 60, 'version': 1, 'entry': {'kind': 'body', 'content': {'weight_kg': 72.5}}}] if body.get('kind') == 'body' else []},
-            'health/aggregate': {'days': []},
             'health/connect': {'connection_id': 'synthetic-connection'},
             'exports/list': {'exports': exports},
             'files/upload': {'file': {'file_id': 'fixture-report'}},
@@ -334,6 +333,7 @@ class Handler(BaseHTTPRequestHandler):
             if refresh_failure:
                 status = 503
                 refresh_failure = False
+            fail_preferences = False
             response = {
                 'token': 'renewed-' + body['next_refresh_token'],
                 'refresh_token': body['next_refresh_token'],
@@ -342,7 +342,11 @@ class Handler(BaseHTTPRequestHandler):
                 'user': {'user_id': 'simulator-only', 'username': 'simulator'},
             }
         if route == 'wellness/preferences/save':
-            if body['expected_version'] != source_preferences['version']:
+            if fail_preferences:
+                fail_preferences = False
+                status = 409
+                response = {'error': 'Synthetic preferences conflict'}
+            elif body['expected_version'] != source_preferences['version']:
                 status = 409
                 response = {'error': 'Preferences changed'}
             else:
@@ -350,24 +354,20 @@ class Handler(BaseHTTPRequestHandler):
                 response = source_preferences
         if route == 'exports/create':
             exports.append({'export_id': 'synthetic-export', 'status': 'ready', 'created_at': 1790985600})
-        if route == 'wellness/sources':
-            response['browse_metrics'] = [dict(d, metric_id=d['kind'], record_count=3) for d in apple_catalog if d['browse']]
         if route == 'wellness/records/list':
-            response = {'records': [{'platform':'apple_health','source_id':'watch','record_id':'event-1','record_type':body['kind'],'at':int(time.time())-60,'version':1}], 'next_cursor':None}
+            record_id = body['kind'] if body['kind'].startswith('HKCharacteristic') else 'event-1'
+            response = {'records': [{'platform':'apple_health','source_id':'watch','record_id':record_id,'record_type':body['kind'],'at':int(time.time())-60,'version':1}], 'next_cursor':None}
         if route == 'wellness/records/get':
             response = {'record_type':'HKCategoryTypeIdentifierAppleStandHour','start_at':int(time.time())-60,'details':{'category':'Stood'},'notes':[]}
-        if route == 'wellness/series':
-            if body.get('record_type') == 'heart_rate':
-                response['unit'] = 'count/min'
-                response['sources'] = [{'source': 'apple_health:watch', 'points': [{'at': datetime.now().astimezone().replace(hour=12, minute=21, second=0, microsecond=0).timestamp() + offset * 5, 'value': value, 'record_id': str(offset)} for offset, value in enumerate([70, 75, 90])]}]
-            if body.get('record_type') == 'body_mass':
-                response['sources'] = [{'source': 'manual:longlivehealth', 'points': [{'at': int(time.time()) - 60, 'value': 72.5, 'record_id': 'manual-weight'}]}]
-            for source in response.get('sources', []):
-                source['chart_points'] = source['points']
+            if body['record_id'].startswith('HKCharacteristic'):
+                details = {'value': 2}
+                if body['record_id'].endswith('DateOfBirth'):
+                    details = {'date_of_birth': {'NS.year':1980, 'NS.month':2, 'NS.day':3}}
+                response = {'record_type':body['record_id'], 'start_at':int(time.time())-60, 'details':details, 'notes':[]}
         def chart_ranges(points):
             from datetime import timedelta
             from zoneinfo import ZoneInfo
-            zone = ZoneInfo(body.get('timezone', 'UTC')) if route == 'wellness/series' else timezone.utc
+            zone = ZoneInfo(body.get('timezone', 'UTC'))
             def bounds(at, period, window):
                 dt = datetime.fromtimestamp(at, zone)
                 if period == 'H' or (period == 'D' and not window):
@@ -405,14 +405,18 @@ class Handler(BaseHTTPRequestHandler):
                             for (source, unit, start, end), samples in groups.items()]
                     (result['summaries'] if window else result)[period] = rows
             return result
-        if route == 'wellness/sources':
-            response['browse_metrics'] = [dict(d, metric_id=d['kind'], record_count=3) for d in apple_catalog if d['browse']]
         if route == 'wellness/records/list':
-            response = {'records': [{'platform':'apple_health','source_id':'watch','record_id':'event-1','record_type':body['kind'],'at':int(time.time())-60,'version':1}], 'next_cursor':None}
+            record_id = body['kind'] if body['kind'].startswith('HKCharacteristic') else 'event-1'
+            response = {'records': [{'platform':'apple_health','source_id':'watch','record_id':record_id,'record_type':body['kind'],'at':int(time.time())-60,'version':1}], 'next_cursor':None}
         if route == 'wellness/records/get':
             response = {'record_type':'HKCategoryTypeIdentifierAppleStandHour','start_at':int(time.time())-60,'details':{'category':'Stood'},'notes':[]}
-        if route == 'wellness/series':
-            response['chart_ranges'] = chart_ranges([(s['source'], response['unit'], p['at'], p['value']) for s in response['sources'] for p in s['points']])
+            if body['record_id'].startswith('HKCharacteristic'):
+                details = {'value': 2}
+                if body['record_id'].endswith('DateOfBirth'):
+                    details = {'date_of_birth': {'NS.year':1980, 'NS.month':2, 'NS.day':3}}
+                response = {'record_type':body['record_id'], 'start_at':int(time.time())-60, 'details':details, 'notes':[]}
+        if route == 'metrics/history/get':
+            response['chart_ranges'] = chart_ranges([(p.get('source_key', p.get('source_id', '')), p['unit'], p['timestamp'], float(p['value'])) for p in response.get('points', [])])
         if route in ('wellness/chart', 'wellness/measurements'):
             kind = body['record_type']
             unit = {'heart_rate':'count/min','respiratory_rate':'count/min','body_mass':'kg','vo2_max':'ml/kg*min','blood_glucose':'mg/dL','body_fat':'%','oxygen_saturation':'%','HKQuantityTypeIdentifierHeartRateVariabilityRMSSD':'ms'}.get(kind, apple_definitions.get(kind, {}).get('unit', 'count'))
@@ -426,6 +430,13 @@ class Handler(BaseHTTPRequestHandler):
             response = {'chart_ranges':chart_ranges(points),'unit':unit,'sources':[source], 'first_at':1577836800,'last_at':now,'samples_read':len(points),'valid_samples':len(points),'excluded_samples':0,'complete':True,'data_revision':1}
             if route == 'wellness/measurements':
                 response = {'points':[{'at':p[2],'value':p[3],'source':p[0],'record_id':str(p[2]),'unit':unit} for p in points],'next_offset':None,'data_revision':1}
+        if route == 'wellness/chart' and body['record_type'] == 'HKCorrelationTypeIdentifierBloodPressure':
+            now = int(time.time()) - 60
+            source = 'apple_health:watch'
+            components = []
+            for name, value in [('Systolic', 120), ('Diastolic', 80)]:
+                components.append({'id':'blood_pressure_'+name.lower(), 'title':name, 'unit':'mmHg', 'chart_ranges':chart_ranges([(source,'mmHg',now,value)])})
+            response = {'components':components, 'sources':[source], 'first_at':now, 'last_at':now, 'valid_samples':2, 'complete':True, 'latest_reading':{'at':now,'source':source,'values':{c['id']:v for c,v in zip(components,[120,80])}}}
         if route == 'wellness/day':
             for metric in response['metrics']:
                 metric['chart_ranges'] = chart_ranges([(p['source'], p['unit'], datetime.fromisoformat(day['date']).replace(tzinfo=timezone.utc).timestamp(), p['value']) for day in metric['history'] for p in day['alternatives']])
@@ -460,6 +471,43 @@ class Handler(BaseHTTPRequestHandler):
                 'is_admin': True,
                 'must_change_password': not admin_password_changed,
             }
+        if route in ('metrics/history/get', 'wellness/chart', 'wellness/history') and isinstance(response, dict) and 'chart_ranges' in response:
+            response['reference_guidance'] = {'version': 'fixture', 'unit': 'catalog-unit', 'reason': '', 'note': 'Synthetic interval for presentation tests.', 'rules': [{'id':'fixture-rule', 'min_age':18, 'lower':80, 'upper':130, 'lower_inclusive':True, 'upper_inclusive':True, 'bands':[], 'context':{}}], 'citations':[{'id':'fixture-reference','title':'Synthetic reference source','url':'https://example.com/reference'}]}
+            for rows in response['chart_ranges'].values():
+                if not isinstance(rows, list): continue
+                for row in rows:
+                    row['reference_assessment'] = {'status':'in_range','label':'In range','kind':'reference_interval','lower':80,'upper':130,'unit':row['unit'],'applicable_rule':response['reference_guidance']['rules'][0]}
+            response['chart_ranges']['reference_days'] = [dict(row) for row in response['chart_ranges'].get('W', [])]
+        if route == 'wellness/chart' and body.get('record_type') == 'respiratory_rate':
+            response['chart_ranges']['reference_days'] = []
+            response['reference_guidance'] = {'reason': 'No applicable interval in this fixture.', 'citations': []}
+        if route == 'browse/catalog':
+            from pathlib import Path
+            taxonomy = json.loads((Path(__file__).resolve().parents[2] / 'src/backend_api/browse_categories.json').read_text())
+            entries = []
+            for d in apple_catalog:
+                if not d['browse'] or d['kind'] in ('blood_pressure_systolic', 'blood_pressure_diastolic'): continue
+                d = dict(d)
+                kind = d['kind']
+                title = taxonomy['titles'].get(kind, d['title'])
+                d['title'] = title
+                text = ''.join(c for c in (kind + title).lower() if c.isalnum())
+                category = next((r['category'] for r in taxonomy['rules'] if any(t in text for t in r['terms'])), 'other')
+                presentation = 'sleep' if kind == 'sleep' else 'daily' if kind in ('steps','active_energy','basal_energy','resting_heart_rate','hrv_sdnn','workout') else 'measurement' if d['family'] in ('quantity','correlation') else 'records'
+                entries.append(dict(id='health:'+kind,kind=kind,title=title,category_id=category,presentation=presentation,definition=d))
+            for kind,title in [('ldl_cholesterol','LDL'),('clinical:calcium','Calcium')]:
+                entries.append(dict(id='lab:'+kind,kind=kind,title=title,category_id='bloodWork',presentation='lab',definition=dict(metric_id=kind,name=title)))
+            entries.sort(key=lambda e: e['title'].lower())
+            response = dict(categories=[c for c in taxonomy['categories'] if any(e['category_id']==c['id'] for e in entries)],entries=entries)
+        if route == 'wellness/records/list' and body['kind'] == 'HKCorrelationTypeIdentifierBloodPressure':
+            response = {'records':[{'platform':'apple_health','source_id':'watch','record_id':'pressure-pair','record_type':body['kind'],'at':1793451600,'version':1,'values':[{'id':'blood_pressure_systolic','value':120,'unit':'mmHg'},{'id':'blood_pressure_diastolic','value':80,'unit':'mmHg'}]}],'next_cursor':None}
+        if route == 'wellness/records/list' and body['kind'] == 'ecg':
+            response = {'records':[{'platform':'apple_health','source_id':'watch','record_id':'ecg-'+str(i),'record_type':'electrocardiogram','at':int(time.time())-i*86400,'version':1} for i in range(2)],'next_cursor':None}
+        if route == 'wellness/records/get' and body['record_id'].startswith('ecg-'):
+            import math
+            offset = int(body.get('sample_offset', 0))
+            count = 12000
+            response = {'record_type':'electrocardiogram','version':1,'start_at':int(time.time())-int(body['record_id'].split('-')[-1])*86400,'sampling_frequency_hz':500,'sample_count':count,'samples':[{'time_since_start':i/500,'lead_i_volts':math.sin(i/15)/1000} for i in range(offset,min(count,offset+5000))],'next_sample_offset':offset+5000 if offset+5000<count else None,'source_classification':1,'details':{'ecg_symptoms_status':1},'notes':[]}
         data = json.dumps(response).encode()
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
@@ -498,7 +546,7 @@ class Handler(BaseHTTPRequestHandler):
         data = buffer.getvalue()
         if '/files/' in self.path:
             data = base64.b64decode(
-                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII='
+                'iVBORw0KGgoAAAANSUhEUgAAAEAAAABgCAIAAAAip+O/AAAAfklEQVR4nO3PMQ0AMAzAsPInvYLYYVWKESTzjhsd8KsBrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQFtAeMWvCrZgh7FAAAAAElFTkSuQmCC'
             )
         self.send_response(200)
         self.send_header('Content-Length', str(len(data)))

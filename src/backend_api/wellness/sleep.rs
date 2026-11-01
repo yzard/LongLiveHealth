@@ -277,3 +277,76 @@ pub fn apply_corrections(result: &mut Value, corrections: &[Value]) -> Result<()
     ]);
     Ok(())
 }
+
+/// A nightly goal belongs to the wake date, never a midnight-clipped interval.
+/// Keep sources separate and omit ambiguous sessions instead of counting awake time.
+pub fn wake_days(result: &Value, start: chrono::NaiveDate, end: chrono::NaiveDate) -> Value {
+    let mut days = Vec::new();
+    for source in result["sources"].as_array().into_iter().flatten() {
+        let mut totals: BTreeMap<String, (f64, usize, bool)> = BTreeMap::new();
+        for session in source["sessions"].as_array().into_iter().flatten() {
+            let Some(date) = session["wake_date"]
+                .as_str()
+                .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+            else {
+                continue;
+            };
+            if date < start || date > end {
+                continue;
+            }
+            let total = totals.entry(date.to_string()).or_default();
+            // Pure in-bed records are not an additional missing sleep session.
+            if session["state"] == "insufficient_data" {
+                continue;
+            }
+            if session["state"] != "ready" {
+                total.2 = true;
+                continue;
+            }
+            if let Some(seconds) = session["asleep_seconds"]
+                .as_f64()
+                .filter(|n| n.is_finite() && *n >= 0.)
+            {
+                total.0 += seconds;
+                total.1 += 1;
+            }
+        }
+        for (date, (seconds, count, invalid)) in totals {
+            days.push(json!({"date":date,"source":source["source"],"unit":"seconds","value":if count > 0 && !invalid {Some(seconds)} else {None},"sample_count":count,"algorithm":"sleep_complete_sessions_by_wake_date","value_status":if invalid {"incomplete_or_conflicting_session"} else if count==0 {"missing"} else {"available"}}));
+        }
+    }
+    json!({"days":days,"algorithm_version":"sleep-wake-days-v1"})
+}
+
+impl Database {
+    pub async fn sleep_wake_days(
+        &self,
+        user: &str,
+        start: chrono::NaiveDate,
+        end: chrono::NaiveDate,
+        timezone: &str,
+    ) -> Result<Value, AppError> {
+        let tz = timezone
+            .parse::<chrono_tz::Tz>()
+            .map_err(|_| AppError::Invalid("Unknown IANA timezone"))?;
+        // Read preceding nights in full, including DST transitions. Sessions outside
+        // the requested wake dates are removed after grouping, not clipped first.
+        let padded = start
+            .checked_sub_days(chrono::Days::new(7))
+            .ok_or(AppError::Invalid("Invalid sleep range"))?;
+        let exclusive = end
+            .succ_opt()
+            .ok_or(AppError::Invalid("Invalid sleep range"))?;
+        let result = self
+            .sleep_sessions(
+                user,
+                SleepRequest {
+                    start_at: crate::health::day_boundary(tz, padded)?,
+                    end_at: crate::health::day_boundary(tz, exclusive)?,
+                    timezone: timezone.into(),
+                },
+            )
+            .await?;
+        Ok(wake_days(&result, start, end))
+    }
+}

@@ -7,13 +7,15 @@ struct HRVWindowsView: View {
     var model: AppModel
     @State var result: JSONValue = .null
     @State var failure: String?
+    @State var loading = true
     var body: some View {
         List {
             Section {
                 InfoHelp(title: "HRV windows", message: "Five-minute normal-to-normal intervals. SDNN stays a separate measurement.")
                 InfoHelp(title: "Quality and baseline", message: "Unknown quality and gaps exclude a window. Device or protocol changes start a separate baseline.")
                 if let failure { Text(failure).foregroundStyle(.secondary) }
-                if result["sources"].arrayValue.isEmpty { Text("No archived NN or heartbeat windows in the last 90 days.") }
+                if loading { ProgressView("Loading HRV windows") }
+                else if failure == nil && result["sources"].arrayValue.isEmpty { Text("No archived NN or heartbeat windows in the last 90 days.") }
             }
             ForEach(Array(result["sources"].arrayValue.enumerated()), id: \.offset) { _, source in
                 Section(model.sourceLabel(source["source"].stringValue)) {
@@ -50,10 +52,12 @@ struct HRVWindowsView: View {
                     }
                 }
             }
-        }.navigationTitle("HRV windows").initialTask { await load() }.refreshable { await load() }
+        }.mobileNavigationTitle("HRV windows").initialTask { await load() }.refreshable { await load() }
     }
     private func load() async {
         guard let client = model.client, let token = model.session?.token else { return }
+        loading = true
+        defer { loading = false }
         do {
             let now = floor(Date().timeIntervalSince1970)
             let response = try await model.request("wellness/hrv", body: .object(["start_at": .number(now - 90 * 86400), "end_at": .number(now), "timezone": .string(TimeZone.current.identifier)]))

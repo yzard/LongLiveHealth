@@ -1,7 +1,7 @@
 //! Shared Browse catalog and query projections for Apple Health originals.
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, sync::OnceLock};
+use std::sync::OnceLock;
 
 #[derive(Deserialize, Serialize)]
 pub struct Definition {
@@ -28,32 +28,6 @@ pub fn unit(kind: &str) -> Option<&'static str> {
         .filter(|d| d.family == "quantity")
         .map(|d| d.unit.as_str())
 }
-pub fn browse_catalog(sources: &[Value]) -> Vec<Value> {
-    let mut counts = BTreeMap::<&str, i64>::new();
-    for source in sources {
-        if source["platform"] == "apple_health"
-            && let (Some(kind), Some(count)) = (
-                source["record_type"].as_str(),
-                source["record_count"].as_i64(),
-            )
-        {
-            *counts.entry(kind).or_default() += count;
-        }
-    }
-    let mut result: Vec<_> = definitions()
-        .iter()
-        .filter(|d| d.browse && counts.get(d.kind.as_str()).is_some_and(|n| *n > 0))
-        .map(|d| {
-            let mut value = serde_json::to_value(d).expect("serializable catalog definition");
-            value["metric_id"] = json!(d.kind);
-            value["record_count"] = json!(counts[d.kind.as_str()]);
-            value
-        })
-        .collect();
-    result.sort_by(|a, b| a["title"].as_str().cmp(&b["title"].as_str()));
-    result
-}
-
 /// HKQuantity descriptions already express percent as 0–100, unlike doubleValue(.percent()).
 /// Only dimensionally compatible units are converted; invalid records remain in history.
 pub fn normalize(value: f64, from: &str, to: &str) -> Option<f64> {

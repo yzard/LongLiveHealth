@@ -24,10 +24,7 @@ struct ObservationEditor: View {
                     field("Collection date: YYYY-MM-DD or ISO timestamp", "sampled_at")
                 }
                 Section("Comparison") {
-                    Picker("Metric", selection: text("metric_id")) {
-                        Text("Automatic from report name").tag("")
-                        ForEach(metrics, id: \.identifier) { Text($0["name"].stringValue).tag($0["metric_id"].stringValue) }
-                    }
+                    SelectionPicker(title: "Metric", selection: text("metric_id"), placeholder: "Automatic from report name", choices: metrics.map { MenuChoice(id: $0["metric_id"].stringValue, title: $0["name"].stringValue) })
                     if payload["metric_id"] == .null,
                        let match = metrics.first(where: { $0["metric_id"] == observation["resolved_metric_id"] }) {
                         Text("Matched metric: \(match["name"].stringValue)").font(.caption)
@@ -44,7 +41,7 @@ struct ObservationEditor: View {
                     InfoHelp(title: "Review decision", message: "Confirm after checking the original report. Each save retains the previous revision.")
                 }
                 if let error { Section { Text(error).foregroundStyle(.red) } }
-            }.navigationTitle(observation == .null ? "Add result" : "Review result")
+            }.mobileNavigationTitle(observation == .null ? "Add result" : "Review result")
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }
                     ToolbarItem(placement: .confirmationAction) { Button("Save") { Task {
@@ -87,7 +84,7 @@ struct ContextEditor: View {
             Picker("Fasting", selection: $fasting) { Text("Unknown").tag("unknown"); Text("Yes").tag("yes"); Text("No").tag("no") }
             field("Recent exercise", "recent_exercise"); field("Illness", "illness"); field("Medications", "medications"); field("Notes", "notes")
             if let error { Text(error).foregroundStyle(.red) }
-        }.navigationTitle("Report Info").toolbar {
+        }.mobileNavigationTitle("Report Info").toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }
             ToolbarItem(placement: .confirmationAction) { Button("Save") { Task {
                 saving = true; defer { saving = false }

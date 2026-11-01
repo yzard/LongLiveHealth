@@ -53,6 +53,7 @@ enum SessionVault {
     static var isActive: Bool { (try? AndroidSystem.invoke("active", "")) == "true" }
     static func copy(_ value: String) { _ = try? AndroidSystem.invoke("clipboard.copy", value) }
     static let biometricLabel = "Biometric unlock"
+    static let healthPlatform = "health_connect"
     static let healthProviderName = "Health Connect"
     static let unlockMessage = "Waiting for device unlock; sync will resume automatically."
     static var uploadTransport: APIClient.UploadTransport { { request, bytes, _ in

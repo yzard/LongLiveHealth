@@ -30,7 +30,7 @@ struct DietQualityView: View {
                 }
             }
             Section { if !result["notes"].arrayValue.isEmpty { InfoHelp(title: "Method", message: result["notes"].arrayValue.map(\.stringValue).joined(separator: "\n\n")) } }
-        }.navigationTitle("Diet quality").initialTask(id: date) { await load() }
+        }.mobileNavigationTitle("Diet quality").initialTask(id: date) { await load() }
             .sheet(isPresented: $editing) { NavigationStack { LogEditor(model: model, existing: nil, initialKind: "diet_quality", initialValues: [:], initialDate: date) } }
     }
     private func load() async {

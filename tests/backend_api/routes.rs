@@ -27,9 +27,9 @@ async fn archive_replay_download_and_cross_user_isolation() {
     assert_eq!(
         request(
             &router,
-            "/api/v1/files/get",
+            "/api/v1/reports/get",
             Some(&bob),
-            json!({"file_id":file_id})
+            json!({"report_id":file_id})
         )
         .await
         .0,
@@ -37,20 +37,20 @@ async fn archive_replay_download_and_cross_user_isolation() {
     );
     let (_, listing) = request(
         &router,
-        "/api/v1/files/list",
+        "/api/v1/reports/list",
         Some(&alice),
         json!({"limit":100}),
     )
     .await;
-    assert_eq!(listing["files"].as_array().unwrap().len(), 1);
+    assert_eq!(listing["reports"].as_array().unwrap().len(), 1);
     let (_, listing) = request(
         &router,
-        "/api/v1/files/list",
+        "/api/v1/reports/list",
         Some(&bob),
         json!({"limit":100}),
     )
     .await;
-    assert!(listing["files"].as_array().unwrap().is_empty());
+    assert!(listing["reports"].as_array().unwrap().is_empty());
     for (session, expected) in [(&alice, StatusCode::OK), (&bob, StatusCode::NOT_FOUND)] {
         let response = router
             .clone()
@@ -157,12 +157,12 @@ async fn invalid_upload_does_not_create_records_or_leave_temporary_files() {
     assert_eq!(
         request(
             &router,
-            "/api/v1/files/list",
+            "/api/v1/reports/list",
             Some(&token),
             json!({"limit":100})
         )
         .await
-        .1["files"],
+        .1["reports"],
         json!([])
     );
 }
@@ -263,12 +263,118 @@ async fn archived_files_and_sessions_survive_server_restart() {
     assert_eq!(
         request(
             &router,
-            "/api/v1/files/get",
+            "/api/v1/reports/get",
             Some(&token),
-            json!({"file_id":file_id})
+            json!({"report_id":file_id})
         )
         .await
         .0,
         StatusCode::OK
     );
+}
+
+#[tokio::test]
+async fn rescan_route_enforces_owner_and_revision_and_returns_queued_job() {
+    let (_directory, state) = fixture().await;
+    add_user(&state, "alice").await;
+    add_user(&state, "bob").await;
+    let alice = token(&state, "alice").await;
+    let bob = token(&state, "bob").await;
+    let report = crate::archive(&state, "alice").await;
+    let job = state
+        .database
+        .claim_job(2_000_000_000, 600, 3)
+        .await
+        .unwrap()
+        .unwrap();
+    state
+        .database
+        .finish_job(&job, 2_000_000_001, None)
+        .await
+        .unwrap();
+    let router = create_application(state);
+    let body = json!({"report_id":report,"expected_revision":1});
+    assert_eq!(
+        request(&router, "/api/v1/reports/rescan", None, body.clone())
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        request(&router, "/api/v1/reports/rescan", Some(&bob), body.clone())
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    let (status, response) = request(
+        &router,
+        "/api/v1/reports/rescan",
+        Some(&alice),
+        body.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+    assert_eq!(response["job"]["status"], "queued");
+    assert_eq!(response["job"]["file_id"], report);
+    assert_eq!(
+        request(&router, "/api/v1/reports/rescan", Some(&alice), body)
+            .await
+            .0,
+        StatusCode::CONFLICT
+    );
+}
+
+#[tokio::test]
+async fn public_routes_have_no_legacy_aliases_or_separate_pressure_queries() {
+    let (_dir, state) = fixture().await;
+    add_user(&state, "mobile").await;
+    let session = token(&state, "mobile").await;
+    let router = create_application(state);
+    for route in [
+        "reference/catalog",
+        "reference/evaluate",
+        "observations/history",
+        "metrics/browse",
+        "health/list",
+        "health/raw/list",
+        "health/aggregate",
+        "wellness/clinical-age",
+        "wellness/series",
+        "files/list",
+        "files/get",
+        "jobs/get",
+    ] {
+        assert_eq!(
+            request(
+                &router,
+                &format!("/api/v1/{route}"),
+                Some(&session),
+                json!({})
+            )
+            .await
+            .0,
+            StatusCode::NOT_FOUND,
+            "{route}"
+        );
+    }
+    for kind in [
+        "blood_pressure_systolic",
+        "blood_pressure_diastolic",
+        "blood_pressure",
+    ] {
+        assert_eq!(request(&router, "/api/v1/wellness/chart", Some(&session), json!({"record_type":kind,"period":"D","timezone":"UTC","start_at":0,"end_at":86400})).await.0, StatusCode::BAD_REQUEST);
+        assert_eq!(request(&router, "/api/v1/wellness/measurements", Some(&session), json!({"record_type":kind,"start_at":0,"end_at":86400,"offset":0,"expected_revision":null})).await.0, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            request(
+                &router,
+                "/api/v1/wellness/records/list",
+                Some(&session),
+                json!({"kind":kind,"after":null})
+            )
+            .await
+            .0,
+            StatusCode::BAD_REQUEST
+        );
+    }
+    assert_eq!(request(&router, "/api/v1/wellness/chart", Some(&session), json!({"record_type":"HKCorrelationTypeIdentifierBloodPressure","period":"D","timezone":"UTC","start_at":0,"end_at":86400})).await.0, StatusCode::OK);
 }

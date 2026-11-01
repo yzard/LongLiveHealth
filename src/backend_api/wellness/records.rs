@@ -11,6 +11,7 @@ use sqlx::Row;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Cursor {
+    pub at: i64,
     pub platform: String,
     pub source_id: String,
     pub record_id: String,
@@ -35,30 +36,62 @@ impl Database {
         user: &str,
         request: ListRequest,
     ) -> Result<Value, AppError> {
-        if !["ecg", "clinical", "blood_pressure"].contains(&request.kind.as_str())
+        if !["ecg", "clinical"].contains(&request.kind.as_str())
             && !crate::apple_health::definition(&request.kind).is_some_and(|d| d.browse)
         {
-            return Err(AppError::Invalid(
-                "Select ECG, clinical records or blood pressure",
-            ));
+            return Err(AppError::Invalid("Select an available health record type"));
         }
         let a = request.after;
-        let rows = sqlx::query(queries::SPECIALTY_LIST)
+        let (query, kind) = match request.kind.as_str() {
+            "ecg" => (queries::SPECIALTY_LIST, "electrocardiogram"),
+            "clinical" => (queries::SPECIALTY_CLINICAL_LIST, "clinical"),
+            "HKCorrelationTypeIdentifierBloodPressure" => (
+                queries::SPECIALTY_BLOOD_PRESSURE_LIST,
+                request.kind.as_str(),
+            ),
+            _ => (queries::SPECIALTY_LIST, request.kind.as_str()),
+        };
+        let rows = sqlx::query(query)
             .bind(user)
-            .bind(&request.kind)
-            .bind(&request.kind)
-            .bind(&request.kind)
-            .bind(&request.kind)
-            .bind(a.as_ref().map(|v| &v.platform))
+            .bind(kind)
+            .bind(a.as_ref().map(|v| v.at))
+            .bind(a.as_ref().map(|v| v.at))
             .bind(a.as_ref().map(|v| &v.platform))
             .bind(a.as_ref().map(|v| &v.source_id))
             .bind(a.as_ref().map(|v| &v.record_id))
             .fetch_all(&self.pool)
             .await?;
         let more = rows.len() > 50;
-        let items:Vec<_>=rows.into_iter().take(50).map(|r|json!({"platform":r.get::<String,_>("platform"),"source_id":r.get::<String,_>("source_id"),"record_id":r.get::<String,_>("record_id"),"record_type":r.get::<String,_>("record_type"),"at":r.get::<i64,_>("start_at"),"version":r.get::<i64,_>("version")})).collect();
+        let mut items = Vec::new();
+        for r in rows.into_iter().take(50) {
+            let kind: String = r.try_get("record_type")?;
+            let payload: Value = serde_json::from_str(r.try_get::<&str, _>("payload_json")?)?;
+            let related: Value = serde_json::from_str(r.try_get::<&str, _>("related_values")?)?;
+            let mut values = if related.as_array().is_some_and(|v| !v.is_empty()) {
+                related
+            } else {
+                payload["payload"]["chart_components"].clone()
+            };
+            if values.is_null() && payload["payload"]["value"].is_number() {
+                values = json!([{"id":kind,"value":payload["payload"]["value"],"unit":payload["payload"]["unit"]}]);
+            }
+            for value in values.as_array_mut().into_iter().flatten() {
+                let component = value["id"].as_str().unwrap_or("");
+                if let Ok(unit) = super::measurement_chart::unit(component) {
+                    let number = super::series::convert(
+                        r.try_get("platform")?,
+                        component,
+                        value["unit"].as_str(),
+                        value["value"].as_f64(),
+                    );
+                    value["value"] = json!(number);
+                    value["unit"] = json!(unit);
+                }
+            }
+            items.push(json!({"platform":r.get::<String,_>("platform"),"source_id":r.get::<String,_>("source_id"),"record_id":r.get::<String,_>("record_id"),"record_type":kind,"at":r.get::<i64,_>("start_at"),"version":r.get::<i64,_>("version"),"values":values,"details":crate::apple_health::details(&kind,&payload["payload"]),"entry":payload["payload"]["entry"]}));
+        }
         let cursor = if more {
-            items.last().map(|v|json!({"platform":v["platform"],"source_id":v["source_id"],"record_id":v["record_id"]}))
+            items.last().map(|v|json!({"at":v["at"],"platform":v["platform"],"source_id":v["source_id"],"record_id":v["record_id"]}))
         } else {
             None
         };

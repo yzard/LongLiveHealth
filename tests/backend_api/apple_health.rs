@@ -1,5 +1,5 @@
 use longlivehealth::{
-    apple_health::{browse_catalog, definitions, normalize, projection},
+    apple_health::{definitions, normalize, projection},
     health::ConnectionRequest,
     wellness::measurement_chart::{HistoryRequest, Request},
 };
@@ -101,17 +101,20 @@ async fn every_apple_quantity_is_queryable_and_catalog_excludes_administrative_t
         .await
         .unwrap();
     assert_eq!(
-        sources["browse_metrics"].as_array().unwrap().len(),
+        longlivehealth::browse_catalog::assemble(sources["sources"].as_array().unwrap(), &[])["entries"].as_array().unwrap().len(),
         definitions()
             .iter()
             .filter(|d| d.family == "quantity")
-            .count()
+            .count() - 1 // two blood pressure quantities share one Browse entry
     );
-    let blocked = browse_catalog(&[
-        json!({"platform":"apple_health","record_type":"HKClinicalTypeIdentifierCoverageRecord","record_count":1}),
-        json!({"platform":"apple_health","record_type":"specimen","record_count":1}),
-    ]);
-    assert!(blocked.is_empty());
+    let blocked = longlivehealth::browse_catalog::assemble(
+        &[
+            json!({"platform":"apple_health","record_type":"HKClinicalTypeIdentifierCoverageRecord","record_count":1}),
+            json!({"platform":"apple_health","record_type":"specimen","record_count":1}),
+        ],
+        &[],
+    );
+    assert!(blocked["entries"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -294,8 +297,8 @@ async fn measurement_bounds_include_manual_weight_but_ignore_deleted_and_unrelat
             .execute(&pool).await.unwrap();
     }
     for (kind, expected) in [
-        ("body_mass", (Some(50i64), Some(250i64))),
-        ("heart_rate", (Some(150), Some(170))),
+        ("body_mass", (Some(50i64), Some(100i64))),
+        ("heart_rate", (Some(150), Some(150))),
         ("vo2_max", (None, None)),
     ] {
         let result = state

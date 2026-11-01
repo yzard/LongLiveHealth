@@ -32,9 +32,9 @@ struct AnalysisView: View {
                     }
                 }
             }
-        }.navigationTitle("Analysis").initialTask { await reload() }.refreshable { await reload() }
+        }.mobileNavigationTitle("Insights").initialTask { await reload() }.refreshable { await reload() }
     }
-    private func reload() async { do { if let client = model.client { runs = try await model.request("analysis/list", body: .object([:]))["runs"].arrayValue } } catch { model.errorMessage = error.localizedDescription } }
+    private func reload() async { do { if let client = model.client { runs = try model.cachedResponse("analysis/list", body: .object([:]))?["runs"].arrayValue ?? runs; runs = try await model.request("analysis/list", body: .object([:]))["runs"].arrayValue } } catch { model.errorMessage = error.localizedDescription } }
 }
 
 struct AnalysisDetail: View {
@@ -73,7 +73,7 @@ struct AnalysisDetail: View {
                     ForEach(run["feedback"].arrayValue, id: \.identifier) { Text($0["note"].stringValue) }
                 }
             }
-        }.navigationTitle("Lipid review").initialTask { await reload() }.refreshable { await reload() }
+        }.mobileNavigationTitle("Lipid review").initialTask { await reload() }.refreshable { await reload() }
     }
     private func lines(_ title: String, _ values: JSONValue) -> some View { VStack(alignment: .leading, spacing: 5) { Text(title).font(.headline); ForEach(Array(values.arrayValue.enumerated()), id: \.offset) { _, value in Text(value.stringValue) } } }
     private func reload() async { do { if let client = model.client { run = try await model.request("analysis/get", body: .object(["run_id": .string(runID)])) } } catch { model.errorMessage = error.localizedDescription } }

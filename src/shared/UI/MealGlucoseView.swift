@@ -52,7 +52,7 @@ struct MealGlucoseView: View {
                 NavigationLink("Correct recorded events", destination: DailyLogsView(model: model))
             }
             Section { if !result["notes"].arrayValue.isEmpty { InfoHelp(title: "Interpretation", message: result["notes"].arrayValue.map(\.stringValue).joined(separator: "\n\n")) } }
-        }.navigationTitle("Meals and glucose").initialTask(id: date) { await load() }
+        }.mobileNavigationTitle("Meals and glucose").initialTask(id: date) { await load() }
     }
     private func load() async {
         guard let client = model.client, let token = model.session?.token else { return }

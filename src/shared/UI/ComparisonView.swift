@@ -24,17 +24,14 @@ struct ComparisonView: View {
             comparison(metric: $first, source: $firstSource, label: "First measurement")
             comparison(metric: $second, source: $secondSource, label: "Second measurement")
             Section("Inspect one day") {
-                Picker("Date", selection: $selectedDate) {
-                    Text("Choose a date").tag(String?.none)
-                    ForEach(dates, id: \.self) { Text($0).tag(Optional($0)) }
-                }
+                SelectionPicker(title: "Date", selection: Binding(get: { selectedDate ?? "" }, set: { selectedDate = $0.isEmpty ? nil : $0 }), placeholder: "Choose a date", choices: dates.map { MenuChoice(id: $0, title: $0) })
                 if let selectedDate {
                     Text(value(metric: first, source: firstSource, date: selectedDate))
                     Text(value(metric: second, source: secondSource, date: selectedDate))
                 }
                 InfoHelp(title: "Missing observations", message: "Days without observations stay missing. Missing points do not become zero or connect across gaps.")
             }
-        }.navigationTitle("Compare measurements").initialTask(id: date) { await load() }
+        }.mobileNavigationTitle("Compare measurements").initialTask(id: date) { await load() }
     }
     private var dates: [String] {
         let formatter = dateFormatter
@@ -53,10 +50,7 @@ struct ComparisonView: View {
     private func comparison(metric: Binding<String>, source: Binding<String>, label: String) -> some View {
         Section(label) {
             Picker("Measurement", selection: metric) { ForEach(metrics, id: \.self) { Text($0.replacingOccurrences(of: "_", with: " ").capitalized).tag($0) } }
-            Picker("Source", selection: source) {
-                Text("Choose a source").tag("")
-                ForEach(Array(sources(metric.wrappedValue).enumerated()), id: \.offset) { _, item in Text(model.sourceLabel(item["source"].stringValue)).tag(item["source"].stringValue) }
-            }
+            SelectionPicker(title: "Source", selection: source, placeholder: "Choose a source", choices: sources(metric.wrappedValue).map { MenuChoice(id: $0["source"].stringValue, title: model.sourceLabel($0["source"].stringValue)) })
             let record = selected(metric.wrappedValue, source.wrappedValue)
             if record == .null { Text("Choose a source with observed values") }
             else {

@@ -18,6 +18,7 @@ final class AppModel {
     private(set) var isAuthenticating = false
     var privacyCovered = false
     private(set) var archive: LocalArchive?
+    private var responseCache: ResponseCache?
     var entryMutation: EntryMutation?
     var reports: [JSONValue] = []
     var jobs: [JSONValue] = []
@@ -49,12 +50,23 @@ final class AppModel {
         let key = SHA256.hash(data: Data("\(saved.server.absoluteString)|\(saved.userID)".utf8)).map { String(format: "%02x", $0) }.joined()
         let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         let cache = try LocalArchive(directory: root.appendingPathComponent(key))
-        reports = try cache.load([JSONValue].self, name: "reports.json") ?? []
+        let responses = try ResponseCache(archive: cache)
+        responseCache = responses
+        reports = []
+        var cursor: JSONValue = .null
+        repeat {
+            let page = try responses.load("reports/list", body: .object(["limit": .number(100), "after_id": cursor]))?["result"]["reports"].arrayValue ?? []
+            reports.append(contentsOf: page)
+            guard page.count == 100, let last = page.last, last["report_id"] != cursor else { break }
+            cursor = last["report_id"]
+        } while true
         drafts = try cache.load([UploadDraft].self, name: "drafts.json") ?? []
-        metrics = try cache.load([JSONValue].self, name: "metrics.json") ?? []
-        sourcePreferences = try cache.load(JSONValue.self, name: "wellness-preferences.json") ?? .null
-        sourceCatalog = try cache.load([JSONValue].self, name: "source-catalog.json") ?? []
-        lastRefresh = try cache.load(Date.self, name: "refresh.json")
+        metrics = try responses.load("metrics/list", body: .object([:]))?["result"]["metrics"].arrayValue ?? []
+        sourcePreferences = try responses.load("wellness/preferences/get", body: .object([:]))?["result"] ?? .null
+        sourceCatalog = try responses.load("wellness/sources", body: .object([:]))?["result"]["catalog"].arrayValue ?? []
+        jobs = [] // Processing failures and progress must be fetched live.
+        capabilities = try responses.load("server/status", body: .object([:]))?["result"]["capabilities"] ?? .null
+        lastRefresh = nil
         credentials?.retire()
         credentials = SessionController(saved)
         biometricUnlock = saved.biometricUnlock == true
@@ -63,17 +75,13 @@ final class AppModel {
     }
 
     private static let cachedReads: Set<String> = [
-        "wellness/day", "wellness/history", "wellness/chart", "wellness/measurements", "wellness/preferences/get", "wellness/sources", "wellness/series", "wellness/hrv",
+        "wellness/day", "wellness/history", "wellness/chart", "wellness/measurements", "wellness/preferences/get", "wellness/sources", "wellness/hrv",
         "wellness/sleep", "wellness/sleep/regularity", "wellness/review", "wellness/timeline", "wellness/report",
         "wellness/entries/list", "wellness/library", "wellness/nutrition/day", "wellness/diet", "wellness/meals",
-        "wellness/meal-glucose", "wellness/import/list", "wellness/records/list", "wellness/records/get", "trends/get", "metrics/history/get", "metrics/browse"
+        "wellness/meal-glucose", "wellness/import/list", "wellness/records/list", "wellness/records/get", "trends/get", "metrics/history/get", "browse/catalog", "analysis/list", "analysis/get", "reports/list", "reports/get", "reports/extraction/get", "metrics/list", "server/status", "exports/list", "reports/input/get", "wellness/associations/get", "wellness/associations/list", "wellness/food/lookup", "wellness/food/portion", "wellness/reminders"
     ]
     func request(_ path: String, body: JSONValue) async throws -> JSONValue {
-        guard let client, let archive, let token = session?.token else { throw APIError.invalidResponse }
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        let payload = try encoder.encode(body)
-        var keyData = Data(path.utf8); keyData.append(0); keyData.append(payload)
-        let key = "read-" + SHA256.hash(data: keyData).map { String(format: "%02x", $0) }.joined() + ".json"
+        guard let client, let responseCache, let token = session?.token else { throw APIError.invalidResponse }
         let cacheable = Self.cachedReads.contains(path)
         do {
             let result = try await client.post(path, body: body)
@@ -81,21 +89,19 @@ final class AppModel {
             if path == "wellness/preferences/get" || path == "wellness/preferences/save" {
                 if (result["version"].numberValue ?? 0) >= (sourcePreferences["version"].numberValue ?? -1) {
                     sourcePreferences = result
-                    try archive.save(result, name: "wellness-preferences.json")
+                    try await responseCache.save(result, path: "wellness/preferences/get", body: .object([:]))
                 }
             } else if path == "wellness/sources" {
                 sourceCatalog = result["catalog"].arrayValue
-                try archive.save(sourceCatalog, name: "source-catalog.json")
+
             }
             if cacheable {
-                let saved: JSONValue = .object(["saved_at": .number(Date().timeIntervalSince1970), "result": result])
-                if let bytes = try? encoder.encode(saved), bytes.count <= 2 * 1024 * 1024 {
-                    try? archive.saveBytes(bytes, name: key)
-                    try? pruneReadCache()
-                }
-            } else if ["save", "delete", "update", "review", "confirm", "sync"].contains(path.split(separator: "/").last.map(String.init) ?? "") || path.hasPrefix("wellness/import/") && !path.hasSuffix("/list") {
-                try? clearReadCache()
+                try await responseCache.save(result, path: path, body: body)
+            } else if !["jobs/list", "health/coverage", "user/get"].contains(path) {
+                try clearReadCache()
+                if path == "wellness/preferences/save" { try await responseCache.save(result, path: "wellness/preferences/get", body: .object([:])) }
             }
+            guard !Task.isCancelled, session?.token == token else { throw CancellationError() }
             if path == "wellness/entries/save" || path == "wellness/entries/delete" {
                 entryMutation = EntryMutation(recordID: result["record_id"].stringValue, record: result["record"] == .null ? nil : result["record"])
             }
@@ -103,9 +109,10 @@ final class AppModel {
         } catch {
             guard !Task.isCancelled, session?.token == token else { throw CancellationError() }
             if case APIError.status(401, _) = error { try expireLocalSession(); throw error }
+            if case APIError.status(404, _) = error { try responseCache.remove(path, body: body) }
             if cacheable, let network = error as? URLError,
                [.timedOut, .notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed].contains(network.code),
-               let snapshot = try? archive.load(JSONValue.self, name: key), let savedAt = snapshot["saved_at"].numberValue {
+               let snapshot = try responseCache.load(path, body: body), let savedAt = snapshot["saved_at"].numberValue {
                 offlineNotice = "Cached view from " + Date(timeIntervalSince1970: savedAt).formatted() + (network.code == .timedOut ? ". Timeout." : ". Server unavailable.")
                 return snapshot["result"]
             }
@@ -122,21 +129,11 @@ final class AppModel {
         sourceLabel(SourceNames.key(record), name: record["source_name"].stringValue)
     }
 
-    private func readCacheFiles() throws -> [URL] {
-        guard let archive else { return [] }
-        return try FileManager.default.contentsOfDirectory(at: archive.directory, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]).filter { $0.lastPathComponent.hasPrefix("read-") && $0.pathExtension == "json" }
+    func cachedResponse(_ path: String, body: JSONValue) throws -> JSONValue? {
+        guard Self.cachedReads.contains(path) else { return nil }
+        return try responseCache?.load(path, body: body)?["result"]
     }
-    private func clearReadCache() throws {
-        for file in try readCacheFiles() { try FileManager.default.removeItem(at: file) }
-    }
-    private func pruneReadCache() throws {
-        let files = try readCacheFiles().sorted { ((try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) > ((try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
-        var bytes = 0
-        for (index, file) in files.enumerated() {
-            bytes += (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            if index >= 64 || bytes > 32 * 1024 * 1024 { try FileManager.default.removeItem(at: file) }
-        }
-    }
+    private func clearReadCache() throws { try responseCache?.clear() }
 
     func login(server: String, username: String, password: String) async {
         await perform {
@@ -164,26 +161,25 @@ final class AppModel {
                 if var latest = try SessionVault.load() { latest.mustChangePassword = true; try SessionVault.save(latest) }
                 return
             }
-            let status = try await client.post("server/status", body: .object([:]))
+            let status = try await request("server/status", body: .object([:]))
             var loaded: [JSONValue] = []; var cursor: JSONValue = .null
             repeat {
-                let page = try await client.post("reports/list", body: .object(["limit": .number(100), "after_id": cursor]))["reports"].arrayValue
+                let page = try await request("reports/list", body: .object(["limit": .number(100), "after_id": cursor]))["reports"].arrayValue
                 loaded.append(contentsOf: page)
                 guard let last = page.last else { break }
                 cursor = last["report_id"]
                 if page.count < 100 { break }
             } while true
-            let definitions = try await client.post("metrics/list", body: .object([:]))["metrics"].arrayValue
+            let definitions = try await request("metrics/list", body: .object([:]))["metrics"].arrayValue
             _ = try await request("wellness/preferences/get", body: .object([:]))
-            let tasks = try await client.post("jobs/list", body: .object(["limit": .number(100)]))["jobs"].arrayValue
+            let tasks = try await request("jobs/list", body: .object(["limit": .number(100)]))["jobs"].arrayValue
             guard session?.token == identity else { return }
             let retained = Set(loaded.map { $0["report_id"].stringValue })
             for previous in reports where !retained.contains(previous["report_id"].stringValue) {
                 let id = previous["report_id"].stringValue
-                try archive.remove(name: "report-\(id).json"); try archive.remove(name: "source-\(id)")
+                try archive.remove(name: "source-\(id)")
             }
             offlineNotice = nil; capabilities = status["capabilities"]; reports = loaded; jobs = tasks; metrics = definitions; lastRefresh = Date()
-            try archive.save(reports, name: "reports.json"); try archive.save(metrics, name: "metrics.json"); try archive.save(lastRefresh, name: "refresh.json")
         }
     }
 
@@ -310,21 +306,10 @@ final class AppModel {
     }
 
     func report(_ id: String) async throws -> JSONValue {
-        guard let client, let archive, let currentSession = session else { throw APIError.invalidResponse }
-        do {
-            let report = try await client.post("reports/get", body: .object(["report_id": .string(id)]))
-            guard session?.token == currentSession.token else { throw APIError.invalidResponse }
-            let cachedBytes = try await Task.detached(priority: .utility) { try JSONEncoder().encode(report) }.value
-            guard session?.token == currentSession.token, !Task.isCancelled else { throw CancellationError() }
-            try archive.saveBytes(cachedBytes, name: "report-\(id).json"); return report
-        } catch {
-            guard session?.token == currentSession.token else { throw APIError.invalidResponse }
-            if case APIError.status(404, _) = error { try archive.remove(name: "report-\(id).json"); try archive.remove(name: "source-\(id)"); throw error }
-            if case APIError.status(401, _) = error { try expireLocalSession(); throw error }
-            if let network = error as? URLError,
-               [.timedOut, .notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed].contains(network.code),
-               let cached = try archive.load(JSONValue.self, name: "report-\(id).json") { return cached }
-            throw error
+        do { return try await request("reports/get", body: .object(["report_id": .string(id)])) }
+        catch APIError.status(404, let message) {
+            try archive?.remove(name: "source-\(id)")
+            throw APIError.status(404, message)
         }
     }
 
@@ -440,7 +425,7 @@ final class AppModel {
             let next = Date().addingTimeInterval(900)
             try archive.save(next, name: "health-next-automatic-sync.json")
             deferAutomaticHealthSync(until: next, identity: identity)
-            try clearReadCache()
+            // Read requests always revalidate; retain offline snapshots after sync.
         } catch {
             guard session?.token == identity else { return }
             if task.isCancelled || HealthBridge.isProtectedDataError(error) || !MobilePlatform.isActive {
@@ -471,7 +456,7 @@ final class AppModel {
             credentials.retire(); self.credentials = nil
             try MobilePlatform.cancelUploads()
             try SessionVault.clear()
-            sourcePreferences = .null; sourceCatalog = []; session = nil; archive = nil; reports = []; jobs = []; drafts = []; metrics = []; capabilities = .null
+            sourcePreferences = .null; sourceCatalog = []; session = nil; archive = nil; responseCache = nil; reports = []; jobs = []; drafts = []; metrics = []; capabilities = .null
             lastRefresh = nil; offlineNotice = nil
             MobilePlatform.clearNotifications()
         }
@@ -509,7 +494,7 @@ final class AppModel {
         try MobilePlatform.cancelUploads()
         try SessionVault.clear(); try archive?.clear()
         MobilePlatform.clearNotifications()
-        entryMutation = nil; offlineNotice = nil; sourcePreferences = .null; sourceCatalog = []; session = nil; archive = nil; reports = []; drafts = []; jobs = []; metrics = []; lastRefresh = nil; capabilities = .null; health.status = "Not connected"
+        entryMutation = nil; offlineNotice = nil; sourcePreferences = .null; sourceCatalog = []; session = nil; archive = nil; responseCache = nil; reports = []; drafts = []; jobs = []; metrics = []; lastRefresh = nil; capabilities = .null; health.status = "Not connected"
     }
 
     private func expireLocalSession() throws {
@@ -520,7 +505,7 @@ final class AppModel {
         try MobilePlatform.cancelUploads()
         try SessionVault.clear()
         // Preserve pending reports and Health checkpoints for this account's next login.
-        sourcePreferences = .null; sourceCatalog = []; session = nil; archive = nil; reports = []; drafts = []; jobs = []; metrics = []
+        sourcePreferences = .null; sourceCatalog = []; session = nil; archive = nil; responseCache = nil; reports = []; drafts = []; jobs = []; metrics = []
         capabilities = .null; lastRefresh = nil; isLocked = false; biometricUnlock = false
         MobilePlatform.clearNotifications()
     }

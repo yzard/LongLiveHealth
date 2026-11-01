@@ -44,7 +44,7 @@ struct TrainingPlannerView: View {
                     Button("Delete", role: .destructive) { Task { await remove(item) } }
                 }
             }
-        }.navigationTitle("Training planner")
+        }.mobileNavigationTitle("Training planner")
             .initialTask(id: kind + date.formatted(.iso8601)) { await load() }
             .refreshable { await load() }
             .onChange(of: model.entryMutation) { _, change in if let change { entries = change.applying(to: entries) { kind == "calendar" ? (["planned_workout", "training", "training_day"].contains($0["entry"]["kind"].stringValue) && Calendar.current.isDate(Date(timeIntervalSince1970: $0["at"].numberValue ?? 0), inSameDayAs: date)) : $0["entry"]["kind"].stringValue == kind } } }

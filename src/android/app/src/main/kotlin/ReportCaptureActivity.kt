@@ -33,21 +33,20 @@ class ReportCaptureActivity : AppCompatActivity() {
         savedInstanceState?.getStringArrayList("pages")?.mapTo(pages) { File(it) }
         index = savedInstanceState?.getInt("index") ?: 0
         pending = savedInstanceState?.getString("pending")?.let { File(it) }
-        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(20, 40, 20, 20) }
-        label = TextView(this).apply { textSize = 20f }; layout.addView(label)
-        image = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
-        layout.addView(image, LinearLayout.LayoutParams(-1, 0, 1f))
-        slider = SeekBar(this).apply { setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+        val layout = ReportPageLayout(this, "Camera report")
+        label = layout.label
+        image = layout.image
+        slider = layout.slider.apply { setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onStartTrackingTouch(seek: SeekBar?) {}
             override fun onStopTrackingTouch(seek: SeekBar?) {}
             override fun onProgressChanged(seek: SeekBar?, value: Int, user: Boolean) { if (user) { index = value; render() } }
-        }) }; layout.addView(slider)
-        controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }; layout.addView(controls)
-        fun button(title: String, action: () -> Unit) { controls.addView(Button(this).apply { text = title; setOnClickListener { action() } }, LinearLayout.LayoutParams(0, -2, 1f)) }
+        }) }
+        controls = layout.controls
+        fun button(title: String, action: () -> Unit) { layout.action(title, action) }
         button("Camera") { capture() }
         button("Delete") { if (pages.isNotEmpty()) { pages.removeAt(index).delete(); index = index.coerceAtMost(pages.lastIndex).coerceAtLeast(0); render() } }
         button("Import") { if (pages.isNotEmpty()) export() }
-        setContentView(layout); render()
+        render()
     }
     override fun onSaveInstanceState(state: Bundle) {
         state.putStringArrayList("pages", ArrayList(pages.map { it.absolutePath }))
@@ -62,6 +61,9 @@ class ReportCaptureActivity : AppCompatActivity() {
     private fun render() {
         preview?.cancel()
         label.text = if (pages.isEmpty()) "Take report photos" else "Page ${index + 1} of ${pages.size}"
+        controls.getChildAt(1).isEnabled = pages.isNotEmpty()
+        controls.getChildAt(2).isEnabled = pages.isNotEmpty()
+        slider.isEnabled = pages.size > 1
         slider.max = (pages.size - 1).coerceAtLeast(0); slider.progress = index
         val previous = (image.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
         image.setImageDrawable(null)

@@ -23,43 +23,42 @@ struct SleepSessionsView: View {
                 if loading { ProgressView("Loading selected period") }
                 InfoHelp(title: "Sleep observations", message: "Gaps do not establish wakefulness. Confirm main sleep or naps without replacing source observations.")
             }
-            ForEach(Array(result["sources"].arrayValue.enumerated()), id: \.offset) { _, source in
-                Section(model.sourceLabel(source["source"].stringValue)) {
-                    ForEach(Array(source["sessions"].arrayValue.enumerated()), id: \.offset) { _, session in
-                        DisclosureGroup(Date(timeIntervalSince1970: session["end_at"].numberValue ?? 0).formatted()) {
-                            if let seconds = session["asleep_seconds"].numberValue {
-                                Text("\(OverviewSummary.duration(seconds)) asleep").font(.headline)
-                            } else { Text(session["state"].stringValue.replacingOccurrences(of: "_", with: " ")) }
-                            if let efficiency = session["efficiency"].numberValue {
-                                Text("Observed sleep efficiency: \((efficiency * 100).formatted())%")
-                            } else { Text("Efficiency needs complete in-bed evidence.").font(.caption) }
-                            Text(session["classification"].stringValue.replacingOccurrences(of: "_", with: " "))
-                            Text(session["correction_state"].stringValue.replacingOccurrences(of: "_", with: " ")).font(.caption)
-                            if let seconds = session["user_asleep_seconds"].numberValue { Text("User estimate: \(OverviewSummary.duration(seconds))") }
-                            if session["corrections"].arrayValue.count <= 1 {
-                                Button("Confirm or correct sleep") { correction = SleepCorrectionSelection(source: source["source"].stringValue, session: session) }
-                            } else { Text("Delete duplicate corrections in Daily logs before confirming again.").font(.caption) }
-                            BrowseChart(timestamps: session["timeline"].arrayValue.flatMap { [$0["start_at"].numberValue, $0["end_at"].numberValue].compactMap { $0 } }, unit: "Sleep stage", initialPeriod: .day) { range, _ in
-                            #if os(Android)
-                            AndroidSleepPlot(records: session["timeline"].arrayValue, range: range)
-                            #else
-                            Chart {
-                                ForEach(Array(session["timeline"].arrayValue.enumerated().filter { ($0.element["end_at"].numberValue ?? 0) >= range.lowerBound && ($0.element["start_at"].numberValue ?? 0) <= range.upperBound }), id: \.offset) { _, record in
-                                    BarMark(xStart: .value("Start", Date(timeIntervalSince1970: record["start_at"].numberValue ?? 0)), xEnd: .value("End", Date(timeIntervalSince1970: record["end_at"].numberValue ?? 0)), y: .value("Stage", stage(record)))
-                                        .foregroundStyle(by: .value("Stage", stage(record)))
-                                }
-                            }
-                            #endif
-                            }
-
-                            ForEach(Array(session["timeline"].arrayValue.enumerated()), id: \.offset) { _, record in
-                                VStack(alignment: .leading) {
-                                    Text(stage(record))
-                                    Text("\(Date(timeIntervalSince1970: record["start_at"].numberValue ?? 0).formatted()) to \(Date(timeIntervalSince1970: record["end_at"].numberValue ?? 0).formatted())").font(.caption)
-                                }
-                            }
+            ForEach(HistoricalValue.sleepSessions(result["sources"].arrayValue)) { sessionRow in
+                let session = sessionRow.value
+                DisclosureGroup {
+                    if let seconds = session["asleep_seconds"].numberValue {
+                        Text("\(OverviewSummary.duration(seconds)) asleep").font(.headline)
+                    } else { Text(session["state"].stringValue.replacingOccurrences(of: "_", with: " ")) }
+                    if let efficiency = session["efficiency"].numberValue {
+                        Text("Observed sleep efficiency: \((efficiency * 100).formatted())%")
+                    } else { Text("Efficiency needs complete in-bed evidence.").font(.caption) }
+                    Text(session["classification"].stringValue.replacingOccurrences(of: "_", with: " "))
+                    Text(session["correction_state"].stringValue.replacingOccurrences(of: "_", with: " ")).font(.caption)
+                    if let seconds = session["user_asleep_seconds"].numberValue { Text("User estimate: \(OverviewSummary.duration(seconds))") }
+                    if session["corrections"].arrayValue.count <= 1 {
+                        Button("Confirm or correct sleep") { correction = SleepCorrectionSelection(source: session["source"].stringValue, session: session) }
+                    } else { Text("Delete duplicate corrections in Daily logs before confirming again.").font(.caption) }
+                    BrowseChart(timestamps: session["timeline"].arrayValue.flatMap { [$0["start_at"].numberValue, $0["end_at"].numberValue].compactMap { $0 } }, unit: "Sleep stage", initialPeriod: .day) { range, _ in
+                    #if os(Android)
+                    AndroidSleepPlot(records: session["timeline"].arrayValue, range: range)
+                    #else
+                    Chart {
+                        ForEach(Array(session["timeline"].arrayValue.enumerated().filter { ($0.element["end_at"].numberValue ?? 0) >= range.lowerBound && ($0.element["start_at"].numberValue ?? 0) <= range.upperBound }), id: \.offset) { _, record in
+                            BarMark(xStart: .value("Start", Date(timeIntervalSince1970: record["start_at"].numberValue ?? 0)), xEnd: .value("End", Date(timeIntervalSince1970: record["end_at"].numberValue ?? 0)), y: .value("Stage", stage(record)))
+                                .foregroundStyle(by: .value("Stage", stage(record)))
                         }
                     }
+                    #endif
+                    }
+
+                    ForEach(HistoricalValue.keyedRows(HistoricalValue.newestFirst(session["timeline"].arrayValue, timestamps: ["start_at"], dates: []), namespace: sessionRow.id + ":stages")) { stageRow in
+                        let record = stageRow.value
+                        HistoricalValueRow(timestamp: record["start_at"].numberValue, dateText: "",
+                            source: model.sourceLabel(session["source"].stringValue), value: stage(record))
+                    }
+                } label: {
+                    HistoricalValueRow(timestamp: session["end_at"].numberValue, dateText: "",
+                        source: model.sourceLabel(session["source"].stringValue), value: session["asleep_seconds"].numberValue.map(OverviewSummary.duration) ?? "—")
                 }
             }
             if result != .null && result["sources"].arrayValue.isEmpty { Text("No supported sleep records in this range.") }
@@ -68,7 +67,8 @@ struct SleepSessionsView: View {
             }
             Section("Seven-day sleep regularity") {
                 InfoHelp(title: "Sleep regularity", message: "Every minute needs an explicit sleep or wake state. Missing daytime intervals are unknown.")
-                ForEach(Array(regularity["sources"].arrayValue.enumerated()), id: \.offset) { _, source in
+                ForEach(HistoricalValue.keyedRows(regularity["sources"].arrayValue, namespace: "sleep-regularity")) { sourceRow in
+                    let source = sourceRow.value
                     VStack(alignment: .leading) {
                         Text(model.sourceLabel(source["source"].stringValue))
                         Text(source["value"].numberValue.map { "\($0.formatted()) SRI" } ?? "Not available").font(.headline)
@@ -140,7 +140,7 @@ struct SleepCorrectionEditor: View {
             TextField("Reason or context", text: $note, axis: .vertical)
             if let failure { Text(failure).foregroundStyle(.secondary) }
             Button("Save sleep confirmation") { Task { await save() } }.disabled(saving || note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        }.navigationTitle("Sleep confirmation")
+        }.mobileNavigationTitle("Sleep confirmation")
             .toolbar { Button("Cancel") { dismiss() } }
             .interactiveDismissDisabled()
             .onAppear {

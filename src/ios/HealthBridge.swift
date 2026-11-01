@@ -100,23 +100,6 @@ final class HealthBridge {
                 try await pending.commit(to: archive)
                 try archive.remove(name: pendingBlockName)
             }
-            // Drain checkpoints written by the previously installed app before making mixed blocks.
-            for definition in definitions {
-                let name = "pending-\(definition.kind).json"
-                if let pending = try await archive.loadAsync(SyncCheckpoint.self, name: name) {
-                    for request in pending.requests { try await send(request, client: client) }
-                    try await archive.saveAsync(pending.nextAnchor, name: "anchor-\(definition.kind).json")
-                    try archive.remove(name: name)
-                }
-            }
-            for kind in HealthSnapshots.kinds(includeSelectedRecords: true) {
-                let name = "pending-snapshot-\(kind).json"
-                if let pending = try await archive.loadAsync(HealthSnapshots.Checkpoint.self, name: name) {
-                    for request in pending.requests { try await send(request, client: client) }
-                    try await archive.saveAsync(pending.records, name: "snapshot-\(kind).json")
-                    try archive.remove(name: name)
-                }
-            }
             var builder = HealthSyncBatch(connectionID: connectionID)
             var ready: [HealthSyncBlock] = []
             var definitionIndex = 0

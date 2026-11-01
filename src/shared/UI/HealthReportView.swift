@@ -54,7 +54,7 @@ struct HealthReportView: View {
                 }
                 Section("Interpretation") { ForEach(result["notes"].arrayValue.map(\.stringValue), id: \.self) { Text($0).font(.caption) } }
             }
-        }.navigationTitle("Health report")
+        }.mobileNavigationTitle("Health report")
     }
     private var readableReport: String {
         var lines = ["Long Live Health health report", "\(result["start_date"].stringValue) to \(result["end_date"].stringValue) (\(result["timezone"].stringValue))", "Archive revision: \(result["data_revision"].numberValue?.formatted() ?? "Unknown")"]

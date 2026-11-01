@@ -11,7 +11,7 @@ public nonisolated struct EntryField: Sendable {
 }
 
 public nonisolated enum EntryDraft {
-    public static let kinds = ["meal_plan", "diet_quality", "memory", "reminder", "food", "recipe", "nutrition_goals", "exercise", "workout_template", "planned_workout", "journal", "training_day", "training", "nutrition", "body", "blood_pressure", "cycle", "cycle_prediction", "breathing"]
+    public static let kinds = ["meal_plan", "diet_quality", "memory", "reminder", "food", "recipe", "nutrition_goals", "exercise", "workout_template", "planned_workout", "journal", "training_day", "training", "nutrition", "body", "blood_pressure", "cycle", "cycle_prediction"]
     public static func fields(_ kind: String) -> [EntryField] {
         let fields: [EntryField]
         switch kind {
@@ -33,7 +33,6 @@ public nonisolated enum EntryDraft {
         case "blood_pressure": fields = [EntryField("systolic_mmhg", "Systolic (mmHg)", "required-number", []), EntryField("diastolic_mmhg", "Diastolic (mmHg)", "required-number", []), EntryField("pulse_bpm", "Pulse (bpm)", "number", []), EntryField("arm", "Arm", "choice", ["unknown", "left", "right"]), EntryField("posture", "Posture", "choice", ["unknown", "seated", "standing", "supine"])]
         case "cycle_prediction": fields = [EntryField("start_date", "Source predicted start (YYYY-MM-DD)", "required", []), EntryField("end_date", "Source predicted end (YYYY-MM-DD)", "required", []), EntryField("generated_at", "Source prediction generated at", "required-datetime", []), EntryField("source", "Prediction source and version", "required", []), EntryField("uncertainty", "Source uncertainty or accuracy statement", "required", [])]
         case "cycle": fields = [EntryField("flow", "Flow", "choice", ["none", "spotting", "light", "medium", "heavy"]), EntryField("context", "Context", "choice", ["cycle", "pregnancy", "postpartum", "perimenopause", "unknown"]), EntryField("symptoms", "Symptoms, one per line", "lines", [])]
-        case "breathing": fields = [EntryField("duration_minutes", "Duration (minutes)", "required-number", []), EntryField("breaths_per_minute", "Breaths per minute (optional)", "number", [])]
         default: return []
         }
         return fields + [EntryField("note", "Notes", "text", [])]

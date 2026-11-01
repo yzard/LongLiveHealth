@@ -50,7 +50,7 @@ struct MealPlannerView: View {
             }
         }.confirmationDialog("Delete this meal plan?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button("Delete", role: .destructive) { if let plan = deleting { Task { await remove(plan) } } }
-        }.navigationTitle("Meal planner").initialTask(id: date) { await load() }.refreshable { await load() }
+        }.mobileNavigationTitle("Meal planner").initialTask(id: date) { await load() }.refreshable { await load() }
             .onChange(of: model.entryMutation) { _, _ in Task { await load() } }
             .sheet(item: $editing) { selection in NavigationStack { LogEditor(model: model, existing: selection.existing, initialKind: "meal_plan", initialValues: selection.values, initialDate: date) } }
     }

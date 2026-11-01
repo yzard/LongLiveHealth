@@ -61,7 +61,8 @@ struct AndroidPointPlot: View {
                         HStack { Text(first.label); Spacer(); Text(last.label) }.font(.caption2).frame(width: w).offset(y: h + 5)
                     }
                 }.frame(width: geometry.size.width, height: geometry.size.height).background(Color.black.opacity(0.001))
-                    .gesture(DragGesture(minimumDistance: 0).onEnded { drag in
+                    .simultaneousGesture(DragGesture(minimumDistance: 0).onEnded { drag in
+                        guard abs(drag.translation.height) < 15 else { return }
                         let at = lower + drag.location.x / w * xSpan
                         selected = points.min { abs($0.x - at) < abs($1.x - at) }
                         if let selected { select?(selected) }

@@ -9,7 +9,6 @@ struct OverviewView: View {
     @State var date = Date()
     @State var snapshot: JSONValue = .null
     @State var preferences: JSONValue = .null
-    @State var cached = false
     @State var loading = false
     @State var failure: String?
     @State var customizing = false
@@ -27,15 +26,13 @@ struct OverviewView: View {
         preferences["preferences"]["source_priority"] == .null ? .object([:]) : preferences["preferences"]["source_priority"]
     }
     private var visibleMetrics: [JSONValue] {
-        let favorites = preferences["preferences"]["favorite_metrics"].arrayValue.map(\.stringValue)
-        return snapshot["metrics"].arrayValue.filter { favorites.isEmpty || favorites.contains($0["record_type"].stringValue) }
+        return snapshot["metrics"].arrayValue.filter { OverviewVisibility.isVisible($0["record_type"].stringValue, preferences: preferences["preferences"]) }
     }
 
     var body: some View {
         List {
             if loading { ProgressView("Loading summaries") }
             if let failure { Text(failure).foregroundStyle(.secondary) }
-            if cached { Label("Cached data · refresh when connected", systemImage: MobileSymbol.name("wifi.slash")).font(.caption) }
             Section {
                 #if os(Android)
                 VStack(spacing: 14) {
@@ -80,18 +77,16 @@ struct OverviewView: View {
                     }
                 }
                 #endif
-                if !loading && visibleMetrics.isEmpty { Text("No synced measurements yet.").foregroundStyle(.secondary) }
-            }
-            Section("Practice") {
-                NavigationLink("Breathing practice", destination: BreathingPracticeView(model: model))
+                if !loading && visibleMetrics.isEmpty { Text(snapshot["metrics"].arrayValue.isEmpty ? "No synced measurements yet." : "No metrics selected. Turn on metrics in Customize.").foregroundStyle(.secondary) }
             }
         }
-        .navigationTitle("Overview")
+        .mobileNavigationTitle("Overview")
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) { Button("Customize") { customizing = true } }
+            ToolbarItem(placement: .topBarLeading) { Button("Customize") { customizing = true }.disabled(snapshot["metrics"].arrayValue.isEmpty) }
             ToolbarItem(placement: .topBarTrailing) { NavigationLink(destination: SettingsView(model: model)) { Label("Settings", systemImage: MobileSymbol.name("gearshape")) } }
         }
-        .sheet(isPresented: $customizing) { NavigationStack { OverviewPreferencesView(model: model, preferences: $preferences) } }
+        .onChange(of: model.sourcePreferences) { _, updated in preferences = updated }
+        .sheet(isPresented: $customizing) { NavigationStack { OverviewPreferencesView(model: model, preferences: $preferences, metrics: snapshot["metrics"].arrayValue) } }
         .initialTask(id: requestKey) { await reload() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { date = Date() }
@@ -110,44 +105,37 @@ struct OverviewView: View {
         VStack(alignment: .leading, spacing: 4) {
             if let summary {
                 Text(OverviewSummary.value(summary.average, kind: kind, unit: summary.unit)).stableDigits()
-                if let met = summary.targetDays {
-                    Text(met == summary.days ? "Goal met" : "Below goal").font(.caption2).foregroundStyle(met == summary.days ? Color.green : Color.orange)
+                if let met = summary.goalMet {
+                    Text(met ? "Goal met" : "Below goal").font(.caption2).foregroundStyle(met ? Color.green : Color.orange)
                 }
             } else { Text("—").foregroundStyle(.secondary) }
         }.font(.subheadline)
     }
 
     private func reload() async {
-        guard let client = model.client, let archive = model.archive, let token = model.session?.token else { return }
+        guard model.client != nil, let token = model.session?.token else { return }
         let key = requestKey
         loading = true
         snapshot = .null
         failure = nil
-        cached = false
         defer { if key == requestKey { loading = false } }
         do {
+            preferences = try model.cachedResponse("wellness/preferences/get", body: .object([:])) ?? .null
+            snapshot = try model.cachedResponse("wellness/day", body: .object(["date": .string(dateKey), "timezone": .string(TimeZone.current.identifier), "source_priority": sourcePriorities])) ?? .null
             if model.sourceCatalog.isEmpty { _ = try await model.request("wellness/sources", body: .object([:])) }
-            preferences = try archive.load(JSONValue.self, name: "wellness-preferences.json") ?? .null
             let saved = try await model.request("wellness/preferences/get", body: .object([:]))
             guard !Task.isCancelled, model.session?.token == token, key == requestKey else { return }
             preferences = saved
-            try archive.save(saved, name: "wellness-preferences.json")
             let result = try await model.request("wellness/day", body: .object([
                 "date": .string(dateKey), "timezone": .string(TimeZone.current.identifier), "source_priority": sourcePriorities
             ]))
             guard !Task.isCancelled, model.session?.token == token, key == requestKey else { return }
             snapshot = result
-            try archive.save(result, name: "daily-overview.json")
         } catch {
             guard !Task.isCancelled, model.session?.token == token, key == requestKey else { return }
             if case APIError.status(401, _) = error { model.errorMessage = error.localizedDescription; return }
             failure = error.localizedDescription
-            if let result = try? archive.load(JSONValue.self, name: "daily-overview.json"),
-               result["date"].stringValue == dateKey, result["timezone"].stringValue == TimeZone.current.identifier,
-               result["source_priority"] == sourcePriorities {
-                snapshot = result
-                cached = true
-            }
+
         }
     }
 }
@@ -158,9 +146,11 @@ struct DailyMetricView: View {
     let metric: JSONValue
     @State var completeHistory: JSONValue = .null
     @State var selectedWindow: ChartWindow?
+    @State var loadedWindow: ChartWindow?
     @State var failure: String?
     @State var loading = true
     private var displayed: JSONValue { completeHistory == .null ? metric : completeHistory }
+    private var chartUnit: String { displayed["unit"].stringValue.isEmpty ? metric["unit"].stringValue : displayed["unit"].stringValue }
     var body: some View {
         MetricDetailScreen(title: metricTitle(metric["record_type"].stringValue)) {
             MetricChartSection {
@@ -169,7 +159,7 @@ struct DailyMetricView: View {
                 if metric["current"]["state"] == .string("query_limit_exceeded") {
                     Text("This history exceeds the daily query limit. Its records are saved, but the chart could not be loaded.").foregroundStyle(.secondary)
                 }
-                MetricChart(model: model, ranges: displayed["chart_ranges"], unit: metric["unit"].stringValue,
+                MetricChart(model: model, guidance: displayed["reference_guidance"], ranges: displayed["chart_ranges"], unit: chartUnit,
                             divisor: ["sleep", "workout"].contains(metric["record_type"].stringValue) ? 3600 : 1,
                             sourceKeys: sourceKeys, names: [:], initialPeriod: .week, showsHour: false, heartRate: metric["record_type"] == .string("resting_heart_rate"), navigationTimestamps: [completeHistory["first_record_at"].numberValue, completeHistory["last_record_at"].numberValue].compactMap { $0 }, onWindowChange: { selectedWindow = $0 })
                     .environment(\.timeZone, .gmt)
@@ -179,29 +169,28 @@ struct DailyMetricView: View {
                 MetricAboutView(id: metric["record_type"].stringValue, name: metricTitle(metric["record_type"].stringValue))
             }
             Section {
+                if metric["record_type"] == .string("sleep") {
+                    NavigationLink("Sleep Sessions") { SleepSessionsView(model: model) }
+                }
                 NavigationLink("Historical Values") {
                     List {
                         Section("Daily records") {
-                            ForEach(Array(displayed["history"].arrayValue.reversed().enumerated()), id: \.offset) { _, day in
-                                DisclosureGroup(day["date"].stringValue) {
-                                    ForEach(Array(day["alternatives"].arrayValue.enumerated()), id: \.offset) { _, source in
-                                        VStack(alignment: .leading) {
-                                            Text(metricValue(source, kind: metric["record_type"].stringValue))
-                                            Text(model.sourceLabel(source["source"].stringValue)).font(.caption)
-                                        }
-                                    }
-                                }
+                            ForEach(HistoricalValue.dailyRows(displayed["history"].arrayValue)) { row in
+                                HistoricalValueRow(timestamp: nil, dateText: row.value["date"].stringValue,
+                                    source: model.sourceLabel(row.value["source"].stringValue), value: metricValue(row.value, kind: metric["record_type"].stringValue))
                             }
                         }
-                    }.navigationTitle("Historical Values").navigationBarTitleDisplayMode(.inline)
+                    }.mobileNavigationTitle("Historical Values").navigationBarTitleDisplayMode(.inline)
                 }
             }
 
         }
-            .task(id: selectedWindow) { await loadHistory() }
-            .refreshable { await loadHistory() }
+            .task(id: selectedWindow) { await loadHistory(force: false) }
+            .onChange(of: model.sourcePreferences["preferences"]["reference_profile"]) { _, _ in Task { await loadHistory(force: true) } }
+            .refreshable { await loadHistory(force: true) }
     }
-    private func loadHistory() async {
+    private func loadHistory(force: Bool) async {
+        guard force || loadedWindow != selectedWindow || failure != nil else { return }
         guard let selectedWindow, let token = model.session?.token else { return }
         loading = true; failure = nil
         defer { loading = false }
@@ -211,6 +200,7 @@ struct DailyMetricView: View {
             let response = try await model.request("wellness/history", body: .object(["record_type": metric["record_type"], "timezone": .string(TimeZone.current.identifier), "dates": .array(dates)]))
             guard !Task.isCancelled, self.selectedWindow == selectedWindow, model.session?.token == token else { return }
             completeHistory = response
+            loadedWindow = selectedWindow
         } catch { if !Task.isCancelled { failure = "Selected period could not be loaded: " + error.localizedDescription } }
 
     }
@@ -233,10 +223,19 @@ struct DataCenterView: View {
     #if os(Android)
     @State var selected: DataPage?
     var body: some View {
-        AdaptiveDetailLayout(selected: selected != nil, back: { selected = nil }) {
+        AdaptiveDetailLayout(selected: selected != nil) {
             NavigationStack { menu }
         } detail: {
-            if let selected { NavigationStack { destination(selected) }.id(selected) }
+            if let selected {
+                NavigationStack {
+                    destination(selected).toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button { self.selected = nil } label: { Image(systemName: "chevron.left") }
+                                .accessibilityLabel(Text("Back"))
+                        }
+                    }
+                }.id(selected)
+            }
             else { EmptyContent(title: "Choose a data tool", symbol: "externaldrive") }
         }.onChange(of: model.dataPath) { _, path in
             if let last = path.last { selected = last == .reports ? .reports : .health }
@@ -252,14 +251,14 @@ struct DataCenterView: View {
                 if !model.sharedReports.isEmpty { Button("Import shared PDFs (\(model.sharedReports.count))") { model.showSharedReportImport = true } }
                 link(MobilePlatform.healthProviderName, page: .health)
                 link("Import GPX, TCX, or FIT activities", page: .training)
+                link("Manual Imports", page: .entries)
             }
-            Section("Manual entry") { link("Manual entries", page: .entries) }
-            Section("Export") { link("Export your complete archive", page: .settings) }
             Section("Sources") {
-                link("Source aliases", page: .aliases)
+                link("Source Aliases", page: .aliases)
                 link("Sources Record Count", page: .counts)
             }
-        }.navigationTitle("Data")
+            ExportSection(model: model)
+        }.mobileNavigationTitle("Data")
             .navigationDestination(for: DataDestination.self) { value in destination(value == .reports ? .reports : .health) }
             .toolbar {
                 #if os(Android)
@@ -301,58 +300,19 @@ struct DataCenterView: View {
 struct OverviewPreferencesView: View {
     var model: AppModel
     @Binding var preferences: JSONValue
-    @Environment(\.dismiss) var dismiss
-    @State var favorites: Set<String> = []
-    @State var target = ""
-    @State var snapshot: JSONValue = .null
-    @State var failure: String?
-    @State var loading = true
-    private let kinds = ["sleep", "workout", "steps", "resting_heart_rate", "heart_rate", "hrv_sdnn"]
+    let metrics: [JSONValue]
+    private var kinds: [String] { metrics.map { $0["record_type"].stringValue } }
     var body: some View {
-        Form {
-            Section("Favorite metrics") {
+        AutoSavedPreferencesForm(model: model, title: "Customize overview") { current, update in
+            Section {
                 ForEach(kinds, id: \.self) { kind in
-                    Toggle(metricTitle(kind), isOn: Binding(get: { favorites.contains(kind) }, set: { selected in
-                        if selected { favorites.insert(kind) } else { favorites.remove(kind) }
+                    Toggle(metricTitle(kind), isOn: Binding(get: {
+                        OverviewVisibility.isVisible(kind, preferences: current)
+                    }, set: { selected in
+                        update(OverviewVisibility.change(kind, visible: selected, available: kinds, preferences: current))
                     }))
                 }
-                InfoHelp(title: "Favorites", message: "No favorites shows all six metrics.")
             }
-            Section("Your daily sleep target") {
-                TextField("Minutes, optional", text: $target).keyboardType(.numberPad)
-                InfoHelp(title: "Sleep goal", message: "This is your own goal, not a calculated biological sleep need.")
-            }
-            if let failure { Section { Text(failure) } }
-            Button("Save preferences") { Task { await save() } }.disabled(loading || snapshot == .null)
-        }.disabled(loading).interactiveDismissDisabled().navigationTitle("Customize overview")
-            .toolbar { Button("Cancel") { dismiss() } }
-            .initialTask { await load() }
-    }
-    private func load() async {
-        guard let client = model.client, let token = model.session?.token else { loading = false; return }
-        do {
-            let result = try await model.request("wellness/preferences/get", body: .object([:]))
-            guard !Task.isCancelled, model.session?.token == token else { return }
-            snapshot = result
-            favorites = Set(result["preferences"]["favorite_metrics"].arrayValue.map(\.stringValue))
-            target = result["preferences"]["sleep_target_minutes"].numberValue.map { String(Int($0)) } ?? ""
-            loading = false
-        } catch { if !Task.isCancelled, model.session?.token == token { failure = error.localizedDescription; loading = false } }
-    }
-    private func save() async {
-        guard let client = model.client, let token = model.session?.token else { return }
-        let text = target.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard text.isEmpty || Int(text).map({ (1...1440).contains($0) }) == true else { failure = "Use a whole number from 1 to 1440 minutes."; return }
-        var updated = snapshot["preferences"]
-        updated["favorite_metrics"] = .array(kinds.filter { favorites.contains($0) }.map(JSONValue.string))
-        updated["sleep_target_minutes"] = text.isEmpty ? .null : .number(Double(text) ?? 0)
-        loading = true
-        do {
-            let result = try await model.request("wellness/preferences/save", body: .object(["expected_version": snapshot["version"], "batch_id": .string(UUID().uuidString), "preferences": updated]))
-            guard !Task.isCancelled, model.session?.token == token else { return }
-            preferences = result
-            try model.archive?.save(result, name: "wellness-preferences.json")
-            dismiss()
-        } catch { if !Task.isCancelled, model.session?.token == token { failure = error.localizedDescription; loading = false } }
+        }.onChange(of: model.sourcePreferences) { _, updated in preferences = updated }
     }
 }

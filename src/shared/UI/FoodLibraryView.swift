@@ -27,7 +27,7 @@ struct FoodLibraryView: View {
                     Button("Delete", role: .destructive) { Task { await remove(item) } }
                 }
             }
-        }.navigationTitle("Food library").searchable(text: $query, prompt: "Name, brand or barcode")
+        }.mobileNavigationTitle("Food library").searchable(text: $query, prompt: "Name, brand or barcode")
             .initialTask(id: kind) { await load() }.refreshable { await load() }
             .onChange(of: model.entryMutation) { _, change in if let change { entries = change.applying(to: entries) { $0["entry"]["kind"].stringValue == kind } } }
             .sheet(item: $editor) { selection in
@@ -71,7 +71,7 @@ struct FoodPortionView: View {
                 Text("Incomplete nutrients: " + result["incomplete_nutrients"].arrayValue.map(\.stringValue).joined(separator: ", ")).font(.caption)
                 EditorLink("Review and save food log") { LogEditor(model: model, existing: nil, initialKind: "nutrition", initialValues: draft(), initialDate: Date()) }
             }
-        }.navigationTitle("Food portion").onChange(of: amount) { _, _ in result = .null }.onChange(of: meal) { _, _ in result = .null }
+        }.mobileNavigationTitle("Food portion").onChange(of: amount) { _, _ in result = .null }.onChange(of: meal) { _, _ in result = .null }
     }
     private func draft() -> [String: String] {
         var values = ["food": result["food"].stringValue, "meal": result["meal"].stringValue]
@@ -106,10 +106,7 @@ struct RecipeIngredientsEditor: View {
             ForEach(Array(ingredients.enumerated()), id: \.offset) { index, item in
                 HStack { Text(item["food_name"].stringValue + " · " + (item["grams"].numberValue?.formatted() ?? "") + " g"); Spacer(); Button("Remove") { var items = ingredients; items.remove(at: index); save(items) } }
             }
-            Picker("Food", selection: $selected) {
-                Text("Select a saved food").tag("")
-                ForEach(Array(foods.enumerated()), id: \.offset) { _, food in Text(food["entry"]["content"]["name"].stringValue).tag(food["record_id"].stringValue) }
-            }
+            SelectionPicker(title: "Food", selection: $selected, placeholder: "Select a saved food", choices: foods.map { MenuChoice(id: $0["record_id"].stringValue, title: $0["entry"]["content"]["name"].stringValue) })
             TextField("Ingredient grams", text: $grams).keyboardType(.decimalPad)
             Button("Add ingredient snapshot") {
                 guard let food = foods.first(where: { $0["record_id"].stringValue == selected }), let number = Double(grams), number.isFinite, number > 0 else { failure = "Select a food and enter positive grams."; return }

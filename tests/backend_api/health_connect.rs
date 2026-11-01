@@ -76,3 +76,55 @@ fn health_connect_invalid_stage_range_is_rejected() {
         .is_err()
     );
 }
+
+#[tokio::test]
+async fn stored_health_connect_stages_reach_overview_without_midnight_truncation() {
+    use longlivehealth::health::{ConnectionRequest, HealthRecordInput, SyncRequest};
+    let (_dir, state) = crate::fixture().await;
+    let user = crate::add_user(&state, "sleep-owner").await;
+    let connection = state
+        .database
+        .create_connection(
+            &user.user_id,
+            ConnectionRequest {
+                platform: "health_connect".into(),
+                installation_id: uuid::Uuid::new_v4().to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let at = |s: &str| chrono::DateTime::parse_from_rfc3339(s).unwrap().timestamp();
+    let start = at("2026-10-30T23:00:00-04:00");
+    let end = start + 8 * 3600;
+    state
+        .database
+        .sync_health(
+            &user.user_id,
+            SyncRequest {
+                connection_id: connection.connection_id,
+                batch_id: uuid::Uuid::new_v4().to_string(),
+                record_type: "sleep".into(),
+                coverage_status: "observed".into(),
+                records: vec![HealthRecordInput {
+                    record_id: "night".into(),
+                    source_id: "watch".into(),
+                    record_type: "sleep".into(),
+                    start_at: start,
+                    end_at: end,
+                    version: 1,
+                    deleted: false,
+                    payload: json!({"stages":[{"start_at":start,"end_at":end,"stage":4}]}),
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    let date = "2026-10-31".parse().unwrap();
+    let result = state
+        .database
+        .sleep_wake_days(&user.user_id, date, date, "America/New_York")
+        .await
+        .unwrap();
+    assert_eq!(result["days"][0]["value"], 28800.);
+    assert_eq!(result["days"][0]["date"], "2026-10-31");
+}

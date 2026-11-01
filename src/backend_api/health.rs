@@ -813,7 +813,7 @@ impl Database {
     }
 }
 
-fn day_boundary(timezone: Tz, date: NaiveDate) -> Result<i64, AppError> {
+pub(crate) fn day_boundary(timezone: Tz, date: NaiveDate) -> Result<i64, AppError> {
     timezone
         .from_local_datetime(
             &date

@@ -7,7 +7,6 @@ struct ReportsView: View {
             if model.isBusy {
                 Section { ProgressView("Finishing the current operation…") }
             }
-            if let refresh = model.lastRefresh { Section { Text("Last refreshed \(refresh.formatted())").font(.caption).foregroundStyle(.secondary) } }
             if !model.drafts.isEmpty {
                 Section {
                     InfoHelp(title: "Background processing", message: "Uploads can continue in the background. After upload, OCR runs on your server even when this app is closed.")
@@ -19,22 +18,23 @@ struct ReportsView: View {
                     Button("Retry uploads") { Task { await model.sendDrafts(automatic: false) } }.disabled(model.isBusy)
                 }
             }
-            Section("Your reports") {
+            Section {
                 if model.reports.isEmpty { EmptyContent(title: "Add your first report", symbol: "doc.badge.plus") }
                 ForEach(model.reports.sorted { ($0["created_at"].numberValue ?? 0) > ($1["created_at"].numberValue ?? 0) }, id: \.identifier) { report in
                     NavigationLink { ReportView(model: model, reportID: report["report_id"].stringValue) } label: {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(report["context"]["report_title"].stringValue.isEmpty ? report["original_name"].stringValue : report["context"]["report_title"].stringValue).font(.headline)
-                            Text("\(Int(report["page_count"].numberValue ?? 0)) pages · revision \(Int(report["revision"].numberValue ?? 1))").font(.caption).foregroundStyle(.secondary)
-                            if let job = model.jobs.first(where: { $0["file_id"] == report["report_id"] }) {
-                                Text("Extraction: \(job["status"].stringValue)").font(.caption)
-                            }
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            let source = report["context"]["source_name"].stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                            Text(source.isEmpty ? "Source not set" : source).font(.headline)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(report["created_at"].numberValue.map { Date(timeIntervalSince1970: $0).formatted(date: .abbreviated, time: .shortened) } ?? "—")
+                                .font(.caption).foregroundStyle(.secondary)
+                                .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
                         }.padding(.vertical, 4)
-                    }
+                    }.accessibilityIdentifier("report-row-" + report["report_id"].stringValue)
                 }
             }
         }
-        .navigationTitle("Health Report")
+        .mobileNavigationTitle("Health Report")
         .refreshable { await model.refresh(automatic: false) }
         .toolbar { ToolbarItem(placement: .primaryAction) { ReportImportControl(model: model) } }
     }

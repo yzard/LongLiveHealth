@@ -1,0 +1,592 @@
+[
+  {
+    "metric_id": "abo_group",
+    "name": "ABO Group",
+    "unit": null
+  },
+  {
+    "metric_id": "alt",
+    "name": "Alanine Aminotransferase (ALT)",
+    "unit": "U/L"
+  },
+  {
+    "metric_id": "albumin",
+    "name": "Albumin",
+    "unit": "g/dL"
+  },
+  {
+    "metric_id": "albumin_globulin_ratio",
+    "name": "Albumin / Globulin Ratio",
+    "unit": null
+  },
+  {
+    "metric_id": "urine_albumin",
+    "name": "Albumin, Random Urine without Creatinine",
+    "unit": "mg/dL"
+  },
+  {
+    "metric_id": "alp",
+    "name": "Alkaline Phosphatase (ALP)",
+    "unit": "U/L"
+  },
+  {
+    "metric_id": "amylase",
+    "name": "Amylase",
+    "unit": "U/L"
+  },
+  {
+    "metric_id": "ana_screen",
+    "name": "Antinuclear Antibodies (ANA) Screen",
+    "unit": null
+  },
+  {
+    "metric_id": "apob",
+    "name": "Apolipoprotein B (ApoB)",
+    "unit": "mg/dL"
+  },
+  {
+    "metric_id": "urine_appearance",
+    "name": "Appearance - Urine",
+    "unit": null
+  },
+  {
+    "metric_id": "arachidonic_epa_ratio",
+    "name": "Arachidonic Acid/EPA Ratio",
+    "unit": null
+  },
+  {
+    "metric_id": "ast",
+    "name": "Aspartate Aminotransferase (AST)",
+    "unit": "U/L"
+  },
+  {
+    "metric_id": "urine_bacteria",
+    "name": "Bacteria - Urine",
+    "unit": null
+  },
+  {
+    "metric_id": "basophil_count",
+    "name": "Basophils",
+    "unit": "cells/uL"
+  },
+  {
+    "metric_id": "basophil_percent",
+    "name": "Basophils %",
+    "unit": "%"
+  },
+  {
+    "metric_id": "urine_bilirubin",
+    "name": "Bilirubin - Urine",
+    "unit": null
+  },
+  {
+    "metric_id": "bun",
+    "name": "Blood Urea Nitrogen (BUN)",
+    "unit": "mg/dL"
+  },
+  {
+    "metric_id": "calcium",
+    "name": "Calcium",
+    "unit": "mg/dL"
+  },
+  {
+    "metric_id": "carbon_dioxide",
+    "name": "Carbon Dioxide",
+    "unit": "mmol/L"
+  },
+  {
+    "metric_id": "gliadin_iga",
+    "name": "Celiac - Deamidated Gliadin (IgA)",
+    "unit": "U/mL"
+  },
+  {
+    "metric_id": "gliadin_igg",
+    "name": "Celiac - Deamidated Gliadin (IgG)",
+    "unit": "U/mL"
+  },
+  {
+    "metric_id": "ttg_iga",
+    "name": "Celiac - Tissue Transglutaminase (IgA)",
+    "unit": "U/mL"
+  },
+  {
+    "metric_id": "ttg_igg",
+    "name": "Celiac - Tissue Transglutaminase (IgG)",
+    "unit": "U/mL"
+  },
+  {
+    "metric_id": "chloride",
+    "name": "Chloride",
+    "unit": "mmol/L"
+  },
+  {
+    "metric_id": "urine_color",
+    "name": "Color - Urine",
+    "unit": null
+  },
+  {
+    "metric_id": "cortisol",
+    "name": "Cortisol",
+    "unit": "mcg/dL"
+  },
+  {
+    "metric_id": "creatinine",
+    "name": "Creatinine",
+    "unit": "mg/dL"
+  },
+  {
+    "metric_id": "egfr_creatinine_unspecified",
+    "name": "Creatinine-Based Estimated Glomerular Filtration Rate (eGFR)",
+    "unit": "mL/min/1.73m2"
+  },
+  {
+    "metric_id": "dhea_sulfate",
+    "name": "DHEA Sulfate",
+    "unit": "mcg/dL"
+  },
+  {
+    "metric_id": "eosinophil_count",
+    "name": "Eosinophils",
+    "unit": "cells/uL"
+  },
+  {
+    "metric_id": "eosinophil_percent",
+    "name": "Eosinophils %",
+    "unit": "%"
+  },
+  {
+    "metric_id": "estradiol",
+    "name": "Estradiol (E2)",
+    "unit": "pg/mL"
+  },
+  {
+    "metric_id": "ferritin",
+    "name": "Ferritin",
+    "unit": "ng/mL"
+  },
+  {
+    "metric_id": "fsh",
+    "name": "Follicle Stimulating Hormone (FSH)",
+    "unit": "mIU/mL"
+  },
+  {
+    "metric_id": "ggt",
+    "name": "Gamma-glutamyl Transferase (GGT)",
+    "unit": "U/L"
+  },
+  {
+    "metric_id": "globulin",
+    "name": "Globulin",
+    "unit": "g/dL (calc)"
+  },
+  {
+    "metric_id": "glucose",
+    "name": "Glucose",
+    "unit": "mg/dL"
+  },
+  {
+    "metric_id": "urine_glucose",
+    "name": "Glucose - Urine",
+    "unit": null
+  },
+  {
+    "metric_id": "hdl_large",
+    "name": "HDL Large",
+    "unit": "nmol/L"
+  },
+  {
+    "metric_id": "hdl_cholesterol",
+    "name": "HDL-Cholesterol",
+    "unit": "mg/dL"
+  },
+  {
+    "metric_id": "hematocrit",
+    "name": "Hematocrit",
+    "unit": "%"
+  },
+  {
+    "metric_id": "hemoglobin",
+    "name": "Hemoglobin",
+    "unit": "g/dL"
+  },
+  {
+    "metric_id": "hba1c",
+    "name": "Hemoglobin A1c (HbA1c)",
+    "unit": "%"
+  },
+  {
+    "metric_id": "hs_crp",
+    "name": "High-Sensitivity C-Reactive Protein (hs-CRP)",
+    "unit": "mg/L"
+  },
+  {
+    "metric_id": "homocysteine",
+    "name": "Homocysteine",
+    "unit": "umol/L"
+  },
+  {
+    "metric_id": "urine_hyaline_casts",
+    "name": "Hyaline Casts - Urine",
+    "unit": null
+  },
+  {
+    "metric_id": "iga",
+    "name": "Immunoglobulin A (IgA)",
+    "unit": "mg/dL"
+  },
+  {
+    "metric_id": "insulin",
+    "name": "Insulin",
+    "unit": "uIU/mL"
+  },
+  {
+    "metric_id": "iron",
+    "name": "Iron",
+    "unit": "mcg/dL"
+  },
+  {
+    "metric_id": "iron_saturation",
+    "name": "Iron % Saturation",
+    "unit": "% (calc)"
+  },
+  {
+    "metric_id": "iron_binding_capacity",
+    "name": "Iron Binding Capacity",
+    "unit": "mcg/dL (calc)"
+  },
+  {
+    "metric_id": "urine_ketones",
+    "name": "Ketones - Urine",
+    "unit": null
+  },
+  {
+    "metric_id": "ldl_medium",
+    "name": "LDL Medium",
+    "unit": "nmol/L"
+  },
+  {
+    "metric_id": "ldl_particle_number",
+    "name": "LDL Particle Number",
+    "unit": "nmol/L"
+  },
+  {
+    "metric_id": "ldl_pattern",
+    "name": "LDL Pattern",
+    "unit": null
+  },
+  {
+    "metric_id": "ldl_peak_size",
+    "name": "LDL Peak Size",
+    "unit": "Angstrom"
+  },
+  {
+    "metric_id": "ldl_small",
+    "name": "LDL Small",
+    "unit": "nmol/L"
+  },
+  {
+    "metric_id": "ldl_cholesterol",
+    "name": "LDL-Cholesterol",
+    "unit": "mg/dL"
+  },
+  {
+    "metric_id": "lead",
+    "name": "Lead",
+    "unit": "mcg/dL"
+  },
+  {
+    "metric_id": "leptin",
+    "name": "Leptin",
+    "unit": "ng/mL"
+  },
+  {
+    "metric_id": "urine_leukocyte_esterase",
+    "name": "Leukocyte Esterase - Urine",
+    "unit": null
+  },
+  {
+    "metric_id": "lipase",
+    "name": "Lipase",
+    "unit": "U/L"
+  },
+  {
+    "metric_id": "lipoprotein_a",
+    "name": "Lipoprotein (a)",
+    "unit": "nmol/L"
+  },
+  {
+    "metric_id": "lh",
+    "name": "Luteinizing Hormone (LH)",
+    "unit": "mIU/mL"
+  },
+  {
+    "metric_id": "lymphocyte_count",
+    "name": "Lymphocytes",
+    "unit": "cells/uL"
+  },
+  {
+    "metric_id": "lymphocyte_percent",
+    "name": "Lymphocytes %",
+    "unit": "%"
+  },
+  {
+    "metric_id": "rbc_magnesium",
+    "name": "Magnesium, RBC",
+    "unit": "mg/dL"
+  },
+  {
+    "metric_id": "mch",
+    "name": "Mean Corpuscular Hemoglobin (MCH)",
+    "unit": "pg"
+  },
+  {
+    "metric_id": "mchc",
+    "name": "Mean Corpuscular Hemoglobin Concentration (MCHC)",
+    "unit": "g/dL"
+  },
+  {
+    "metric_id": "mcv",
+    "name": "Mean Corpuscular Volume (MCV)",
+    "unit": "fL"
+  },
+  {
+    "metric_id": "mpv",
+    "name": "Mean Platelet Volume (MPV)",
+    "unit": "fL"
+  },
+  {
+    "metric_id": "mercury",
+    "name": "Mercury",
+    "unit": "mcg/L"
+  },
+  {
+    "metric_id": "mma",
+    "name": "Methylmalonic Acid (MMA)",
+    "unit": "nmol/L"
+  },
+  {
+    "metric_id": "monocyte_count",
+    "name": "Monocytes",
+    "unit": "cells/uL"
+  },
+  {
+    "metric_id": "monocyte_percent",
+    "name": "Monocytes %",
+    "unit": "%"
+  },
+  {
+    "metric_id": "neutrophil_count",
+    "name": "Neutrophils",
+    "unit": "cells/uL"
+  },
+  {
+    "metric_id": "neutrophil_percent",
+    "name": "Neutrophils %",
+    "unit": "%"
+  },
+  {
+    "metric_id": "urine_nitrite",
+    "name": "Nitrite - Urine",
+    "unit": null
+  },
+  {
+    "metric_id": "non_hdl_cholesterol",
+    "name": "Non-HDL Cholesterol",
+    "unit": "mg/dL"
+  },
+  {
+    "metric_id": "urine_occult_blood",
+    "name": "Occult Blood - Urine",
+    "unit": null
+  },
+  {
+    "metric_id": "omega_6_3_ratio",
+    "name": "Omega 6 / 3 Ratio",
+    "unit": null
+  },
+  {
+    "metric_id": "omega3_total",
+    "name": "Omega-3 Total",
+    "unit": "% by wt"
+  },
+  {
+    "metric_id": "omega3_total",
+    "name": "Omega-3 Total / OmegaCheck",
+    "unit": "% by wt"
+  },
+  {
+    "metric_id": "omega3_dha",
+    "name": "Omega-3: DHA",
+    "unit": "% by wt"
+  },
+  {
+    "metric_id": "omega3_dpa",
+    "name": "Omega-3: DPA",
+    "unit": "% by wt"
+  },
+  {
+    "metric_id": "omega3_epa",
+    "name": "Omega-3: EPA",
+    "unit": "% by wt"
+  },
+  {
+    "metric_id": "omega6_total",
+    "name": "Omega-6 Total",
+    "unit": "% by wt"
+  },
+  {
+    "metric_id": "omega6_arachidonic",
+    "name": "Omega-6: Arachidonic Acid",
+    "unit": "% by wt"
+  },
+  {
+    "metric_id": "omega6_linoleic",
+    "name": "Omega-6: Linoleic Acid",
+    "unit": "% by wt"
+  },
+  {
+    "metric_id": "platelets",
+    "name": "Platelet Count",
+    "unit": "Thousand/uL"
+  },
+  {
+    "metric_id": "potassium",
+    "name": "Potassium",
+    "unit": "mmol/L"
+  },
+  {
+    "metric_id": "prolactin",
+    "name": "Prolactin",
+    "unit": "ng/mL"
+  },
+  {
+    "metric_id": "psa_free_percent",
+    "name": "Prostate Specific Antigen (PSA) %, Free",
+    "unit": "% (calc)"
+  },
+  {
+    "metric_id": "psa_free",
+    "name": "Prostate Specific Antigen (PSA), Free",
+    "unit": "ng/mL"
+  },
+  {
+    "metric_id": "psa_total",
+    "name": "Prostate Specific Antigen (PSA), Total",
+    "unit": "ng/mL"
+  },
+  {
+    "metric_id": "urine_protein",
+    "name": "Protein - Urine",
+    "unit": null
+  },
+  {
+    "metric_id": "rbc",
+    "name": "Red Blood Cell (RBC) Count",
+    "unit": "Million/uL"
+  },
+  {
+    "metric_id": "rdw",
+    "name": "Red Cell Distribution Width (RDW)",
+    "unit": "%"
+  },
+  {
+    "metric_id": "rh_factor",
+    "name": "Rhesus (Rh) Factor",
+    "unit": null
+  },
+  {
+    "metric_id": "rheumatoid_factor",
+    "name": "Rheumatoid Factor (RF)",
+    "unit": "IU/mL"
+  },
+  {
+    "metric_id": "shbg",
+    "name": "Sex Hormone Binding Globulin (SHBG)",
+    "unit": "nmol/L"
+  },
+  {
+    "metric_id": "sodium",
+    "name": "Sodium",
+    "unit": "mmol/L"
+  },
+  {
+    "metric_id": "testosterone_free",
+    "name": "Testosterone, Free",
+    "unit": "pg/mL"
+  },
+  {
+    "metric_id": "testosterone_total",
+    "name": "Testosterone, Total",
+    "unit": "ng/dL"
+  },
+  {
+    "metric_id": "thyroglobulin_antibodies",
+    "name": "Thyroglobulin Antibodies (TgAb)",
+    "unit": "IU/mL"
+  },
+  {
+    "metric_id": "tpo_antibodies",
+    "name": "Thyroid Peroxidase Antibodies (TPO)",
+    "unit": "IU/mL"
+  },
+  {
+    "metric_id": "tsh",
+    "name": "Thyroid-Stimulating Hormone (TSH)",
+    "unit": "mIU/L"
+  },
+  {
+    "metric_id": "free_t4",
+    "name": "Thyroxine (T4) Free",
+    "unit": "ng/dL"
+  },
+  {
+    "metric_id": "total_bilirubin",
+    "name": "Total Bilirubin",
+    "unit": "mg/dL"
+  },
+  {
+    "metric_id": "total_cholesterol",
+    "name": "Total Cholesterol",
+    "unit": "mg/dL"
+  },
+  {
+    "metric_id": "cholesterol_hdl_ratio",
+    "name": "Total Cholesterol / HDL Ratio",
+    "unit": null
+  },
+  {
+    "metric_id": "total_protein",
+    "name": "Total Protein",
+    "unit": "g/dL"
+  },
+  {
+    "metric_id": "triglycerides",
+    "name": "Triglycerides",
+    "unit": "mg/dL"
+  },
+  {
+    "metric_id": "free_t3",
+    "name": "Triiodothyronine (T3) Free",
+    "unit": "pg/mL"
+  },
+  {
+    "metric_id": "uric_acid",
+    "name": "Uric Acid",
+    "unit": "mg/dL"
+  },
+  {
+    "metric_id": "vitamin_d_unspecified",
+    "name": "Vitamin D",
+    "unit": "ng/mL"
+  },
+  {
+    "metric_id": "wbc",
+    "name": "White Blood Cell (WBC) Count",
+    "unit": "Thousand/uL"
+  },
+  {
+    "metric_id": "zinc",
+    "name": "Zinc",
+    "unit": "mcg/dL"
+  }
+]

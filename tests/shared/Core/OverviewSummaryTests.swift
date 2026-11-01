@@ -68,3 +68,18 @@ import Testing
     #expect(week.average == 2500 && week.days == 2)
     #expect(month.average == 2000 && month.days == 3)
 }
+
+@Test func overviewSleepGoalMatchesDisplayedAverageNotEveryNight() throws {
+    let metric = try JSONDecoder().decode(JSONValue.self, from: Data(#"""
+    {"record_type":"sleep","history":[
+      {"date":"2026-10-30","alternatives":[{"source":"Watch","value":21600,"unit":"seconds"}]},
+      {"date":"2026-10-31","alternatives":[{"source":"Watch","value":28800,"unit":"seconds"}]}
+    ]}
+    """#.utf8))
+    let week = try #require(OverviewSummary.comparison(metric: metric, endDate: "2026-10-31", days: 7, names: [:], sleepTargetMinutes: 420))
+    #expect(week.average == 25200 && week.targetDays == 1 && week.goalMet == true)
+    let today = try #require(OverviewSummary.comparison(metric: metric, endDate: "2026-10-31", days: 1, names: [:], sleepTargetMinutes: 420))
+    #expect(today.average == 28800 && today.goalMet == true)
+    let higher = try #require(OverviewSummary.comparison(metric: metric, endDate: "2026-10-31", days: 7, names: [:], sleepTargetMinutes: 480))
+    #expect(higher.goalMet == false)
+}

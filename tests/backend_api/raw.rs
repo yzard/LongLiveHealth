@@ -100,12 +100,12 @@ async fn raw_health_is_indexed_replayable_exported_isolated_and_deleted() {
         assert_eq!(
             crate::request(
                 &app,
-                "/api/v1/health/raw/list",
+                "/api/v1/health/coverage",
                 Some(&other_token),
-                json!({"limit":100})
+                json!({})
             )
             .await
-            .1["files"],
+            .1["coverage"],
             json!([])
         );
         let export = state.database.request_export(&user.user_id).await.unwrap();

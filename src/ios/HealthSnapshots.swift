@@ -12,11 +12,6 @@ import Foundation
     }
 
     struct Value: Sendable { let id: String; let payload: JSONValue }
-    nonisolated struct Checkpoint: Codable, Sendable {
-        let requests: [JSONValue]
-        let records: [JSONValue]
-    }
-
     static func kinds(includeSelectedRecords: Bool) -> [String] {
         var kinds = characteristics.map(\.rawValue) + ["activity_summary", "cda_document"]
         if #available(iOS 26.0, *), includeSelectedRecords { kinds.append("user_annotated_medications") }
@@ -72,7 +67,11 @@ import Foundation
                 let date = summary.dateComponents(for: calendar)
                 guard let year = date.year, let month = date.month, let day = date.day else { throw APIError.invalidResponse }
                 let dayID = String(format: "%04d-%02d-%02d", year, month, day)
-                return Value(id: dayID, payload: .object(["date": .string(dayID), "timezone": .string(calendar.timeZone.identifier), "raw_archive": try archive(summary)]))
+                return Value(id: dayID, payload: .object(["date": .string(dayID), "timezone": .string(calendar.timeZone.identifier),
+                    "active_energy_kcal": .number(summary.activeEnergyBurned.doubleValue(for: .kilocalorie())),
+                    "exercise_minutes": .number(summary.appleExerciseTime.doubleValue(for: .minute())),
+                    "stand_hours": .number(summary.appleStandHours.doubleValue(for: .count())),
+                    "move_minutes": .number(summary.appleMoveTime.doubleValue(for: .minute())), "raw_archive": try archive(summary)]))
             }
         case "cda_document":
             return try await HealthSeriesReader.documents(store: store).map { document in

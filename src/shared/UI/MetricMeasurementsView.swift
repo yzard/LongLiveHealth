@@ -4,19 +4,28 @@ struct MetricMeasurementsView: View {
     var model: AppModel
     let kind: String
     let definition: JSONValue
-    private var title: String { definition["title"].stringValue.isEmpty ? (Self.kinds.first { $0.0 == kind }?.1 ?? HealthSyncProgress.name(kind)) : definition["title"].stringValue }
+    private var title: String { definition["title"].stringValue.isEmpty ? HealthSyncProgress.name(kind) : definition["title"].stringValue }
     @State var result: JSONValue = .null
     @State var failure: String?
     @State var loading = false
     @State var selectedWindow: ChartWindow?
-    static let kinds = [("heart_rate", "Heart rate"), ("blood_glucose", "Blood glucose"), ("vo2_max", "VO₂ Max"), ("body_mass", "Weight"), ("body_fat", "Body fat"), ("oxygen_saturation", "Oxygen saturation"), ("respiratory_rate", "Respiratory rate"), ("hrv_rmssd", "HRV RMSSD"), ("HKQuantityTypeIdentifierHeartRateVariabilityRMSSD", "Recovery HRV"), ("height", "Height"), ("body_temperature", "Body temperature")]
+    @State var selectedUnit = ""
+    @State var loadedWindow: ChartWindow?
+    private var units: [String] { CombinedChartData.units(result) }
+    private var displayUnit: String { units.contains(selectedUnit) ? selectedUnit : units.first ?? result["unit"].stringValue }
+    private var chartRanges: JSONValue { result["components"] == .null ? result["chart_ranges"] : CombinedChartData.ranges(result, unit: displayUnit) }
     private var bounds: [Double] { [result["first_at"].numberValue, result["last_at"].numberValue].compactMap { $0 } }
     var body: some View {
         MetricDetailScreen(title: title) {
             if loading { Section { ProgressView("Loading selected period") } }
             if let failure { Section { Text(failure).foregroundStyle(.secondary) } }
             MetricChartSection {
-                MetricChart(model: model, ranges: result["chart_ranges"], unit: result["unit"].stringValue,
+                if units.count > 1 {
+                    Picker("Measurement unit", selection: Binding(get: { displayUnit }, set: { selectedUnit = $0 })) {
+                        ForEach(units, id: \.self) { Text($0).tag($0) }
+                    }
+                }
+                MetricChart(model: model, guidance: result["reference_guidance"], ranges: chartRanges, unit: displayUnit,
                     divisor: 1, sourceKeys: result["sources"].arrayValue.map(\.stringValue), names: [:],
                     initialPeriod: kind == "heart_rate" ? .day : .week, showsHour: true, heartRate: kind == "heart_rate",
                     navigationTimestamps: bounds, onWindowChange: { selectedWindow = $0 })
@@ -34,17 +43,25 @@ struct MetricMeasurementsView: View {
             if let selectedWindow {
                 Section {
                     NavigationLink("Historical Values") {
-                        MeasurementValuesView(model: model, kind: kind, window: selectedWindow)
+                        if definition["family"] != .string("quantity") {
+                            HealthRecordHistoryView(model: model, definition: definition, historicalOnly: true)
+                        } else {
+                            MeasurementValuesView(model: model, kind: kind, window: selectedWindow)
+                        }
                     }
                 }
             }
         }
-                .task(id: selectedWindow) { if let selectedWindow { await reload(selectedWindow) } }
+                .task(id: selectedWindow) { if let selectedWindow { await reload(selectedWindow, force: false) } }
+            .onChange(of: model.sourcePreferences["preferences"]["reference_profile"]) { _, _ in
+                if let selectedWindow { Task { await reload(selectedWindow, force: true) } }
+            }
             .onChange(of: model.entryMutation) { _, _ in
-                if kind == "body_mass", let selectedWindow { Task { await reload(selectedWindow) } }
+                if kind == "body_mass", let selectedWindow { Task { await reload(selectedWindow, force: true) } }
             }
     }
-    private func reload(_ window: ChartWindow) async {
+    private func reload(_ window: ChartWindow, force: Bool) async {
+        guard force || loadedWindow != window || failure != nil else { return }
         guard let token = model.session?.token else { return }
         loading = true; failure = nil
         defer { if selectedWindow == window { loading = false } }
@@ -56,6 +73,7 @@ struct MetricMeasurementsView: View {
             ]))
             guard !Task.isCancelled, model.session?.token == token, selectedWindow == window else { return }
             result = response
+            loadedWindow = window
         } catch {
             guard !Task.isCancelled, model.session?.token == token, selectedWindow == window else { return }
             failure = error.localizedDescription
@@ -74,18 +92,16 @@ struct MeasurementValuesView: View {
     @State var failure: String?
     var body: some View {
         List {
-            ForEach(Array(points.enumerated()), id: \.offset) { _, point in
-                VStack(alignment: .leading) {
-                    Text(point["value"].numberValue.map { "\($0.formatted()) \(point["unit"].stringValue)" } ?? "\(point["raw_value"].numberValue?.formatted() ?? "Unavailable") \(point["raw_unit"].stringValue)")
-                    if let at = point["at"].numberValue { Text(Date(timeIntervalSince1970: at).formatted()).font(.caption) }
-                    Text(model.sourceLabel(point["source"].stringValue)).font(.caption)
-                }
+            ForEach(Array(HistoricalValue.newestFirst(points, timestamps: ["at"], dates: []).enumerated()), id: \.offset) { _, point in
+                HistoricalValueRow(timestamp: point["at"].numberValue, dateText: "",
+                    source: model.sourceLabel(point["source"].stringValue),
+                    value: HistoricalValue.quantity(point["value"] == .null ? point["raw_value"] : point["value"], unit: HistoricalValue.displayUnit(point["unit"].stringValue.isEmpty ? point["raw_unit"].stringValue : point["unit"].stringValue, kind: kind)))
             }
             if let failure { Text(failure).foregroundStyle(.secondary) }
             if loading { ProgressView() }
             if nextOffset != nil { Button("Load more") { Task { await load() } }.disabled(loading) }
             if !loading && points.isEmpty && failure == nil { Text("No measurements in this period.") }
-        }.navigationTitle("Historical Values").navigationBarTitleDisplayMode(.inline)
+        }.mobileNavigationTitle("Historical Values").navigationBarTitleDisplayMode(.inline)
             .initialTask { await load() }
     }
     private func load() async {

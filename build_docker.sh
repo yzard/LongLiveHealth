@@ -11,6 +11,7 @@ if [[ ! "$IMAGE_TAG" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
     exit 2
 fi
 python3 "$PROJECT_ROOT/tests/tools/test_apple_catalog.py"
+python3 "$PROJECT_ROOT/tests/tools/test_mobile_api_contract.py"
 python3 "$PROJECT_ROOT/tests/development/playground.py"
 python3 -m unittest discover -s "$PROJECT_ROOT/tests/development" -p 'data_roots.py'
 python3 "$PROJECT_ROOT/tests/run_playground.py"

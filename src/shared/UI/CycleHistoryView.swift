@@ -43,7 +43,7 @@ struct CycleHistoryView: View {
                 }
             }
             NavigationLink("Manage recorded entries", destination: DailyLogsView(model: model))
-        }.navigationTitle("Cycle and life stages").initialTask(id: date) { await load() }
+        }.mobileNavigationTitle("Cycle and life stages").initialTask(id: date) { await load() }
             .sheet(item: $editing) { selection in NavigationStack { LogEditor(model: model, existing: selection.existing, initialKind: selection.kind, initialValues: [:], initialDate: date) } }
     }
     private func load() async {

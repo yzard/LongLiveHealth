@@ -1,0 +1,362 @@
+{
+  "categories": [
+    {
+      "id": "activity",
+      "title": "Activity",
+      "symbol": "flame.fill",
+      "color": "orange",
+      "section": "Health Categories"
+    },
+    {
+      "id": "body",
+      "title": "Body Measurements",
+      "symbol": "figure.stand",
+      "color": "purple",
+      "section": "Health Categories"
+    },
+    {
+      "id": "cycle",
+      "title": "Cycle Tracking",
+      "symbol": "circle.dotted",
+      "color": "purple",
+      "section": "Health Categories"
+    },
+    {
+      "id": "hearing",
+      "title": "Hearing",
+      "symbol": "ear.fill",
+      "color": "blue",
+      "section": "Health Categories"
+    },
+    {
+      "id": "heart",
+      "title": "Heart",
+      "symbol": "heart.fill",
+      "color": "pink",
+      "section": "Health Categories"
+    },
+    {
+      "id": "medications",
+      "title": "Medications",
+      "symbol": "pills.fill",
+      "color": "teal",
+      "section": "Health Categories"
+    },
+    {
+      "id": "wellbeing",
+      "title": "Mental Wellbeing",
+      "symbol": "brain.head.profile",
+      "color": "teal",
+      "section": "Health Categories"
+    },
+    {
+      "id": "mobility",
+      "title": "Mobility",
+      "symbol": "figure.walk",
+      "color": "orange",
+      "section": "Health Categories"
+    },
+    {
+      "id": "nutrition",
+      "title": "Nutrition",
+      "symbol": "carrot.fill",
+      "color": "green",
+      "section": "Health Categories"
+    },
+    {
+      "id": "respiratory",
+      "title": "Respiratory",
+      "symbol": "lungs.fill",
+      "color": "blue",
+      "section": "Health Categories"
+    },
+    {
+      "id": "sleep",
+      "title": "Sleep",
+      "symbol": "bed.double.fill",
+      "color": "indigo",
+      "section": "Health Categories"
+    },
+    {
+      "id": "symptoms",
+      "title": "Symptoms",
+      "symbol": "figure",
+      "color": "blue",
+      "section": "Health Categories"
+    },
+    {
+      "id": "vitals",
+      "title": "Vitals",
+      "symbol": "waveform.path.ecg",
+      "color": "pink",
+      "section": "Health Categories"
+    },
+    {
+      "id": "bloodWork",
+      "title": "Blood Work",
+      "symbol": "drop.fill",
+      "color": "pink",
+      "section": "Health Categories"
+    },
+    {
+      "id": "vision",
+      "title": "Vision",
+      "symbol": "eye.fill",
+      "color": "indigo",
+      "section": "Health Categories"
+    },
+    {
+      "id": "other",
+      "title": "Other Data",
+      "symbol": "cross.fill",
+      "color": "blue",
+      "section": "Health Categories"
+    },
+    {
+      "id": "allergies",
+      "title": "Allergies",
+      "symbol": "allergens",
+      "color": "blue",
+      "section": "Health Records"
+    },
+    {
+      "id": "notes",
+      "title": "Clinical Notes",
+      "symbol": "doc.text.fill",
+      "color": "blue",
+      "section": "Health Records"
+    },
+    {
+      "id": "conditions",
+      "title": "Conditions",
+      "symbol": "stethoscope",
+      "color": "blue",
+      "section": "Health Records"
+    },
+    {
+      "id": "immunizations",
+      "title": "Immunizations",
+      "symbol": "syringe.fill",
+      "color": "blue",
+      "section": "Health Records"
+    },
+    {
+      "id": "procedures",
+      "title": "Procedures",
+      "symbol": "cross.case.fill",
+      "color": "blue",
+      "section": "Health Records"
+    }
+  ],
+  "rules": [
+    {
+      "terms": [
+        "dietary",
+        "correlationtypeidentifierfood"
+      ],
+      "category": "nutrition"
+    },
+    {
+      "terms": [
+        "heartrate",
+        "heartbeat",
+        "heartrhythm",
+        "hrv",
+        "cardio",
+        "vo2",
+        "electrocardiogram",
+        "bloodpressure",
+        "atrialfibrillation",
+        "hypertension",
+        "peripheralperfusion"
+      ],
+      "category": "heart"
+    },
+    {
+      "terms": [
+        "allergyrecord"
+      ],
+      "category": "allergies"
+    },
+    {
+      "terms": [
+        "clinicalnote",
+        "cdadocument"
+      ],
+      "category": "notes"
+    },
+    {
+      "terms": [
+        "conditionrecord"
+      ],
+      "category": "conditions"
+    },
+    {
+      "terms": [
+        "immunization"
+      ],
+      "category": "immunizations"
+    },
+    {
+      "terms": [
+        "procedure"
+      ],
+      "category": "procedures"
+    },
+    {
+      "terms": [
+        "labresult",
+        "bloodtype",
+        "bloodglucose",
+        "bloodalcohol"
+      ],
+      "category": "bloodWork"
+    },
+    {
+      "terms": [
+        "medication",
+        "insulindelivery",
+        "inhalerusage"
+      ],
+      "category": "medications"
+    },
+    {
+      "terms": [
+        "sleep"
+      ],
+      "category": "sleep"
+    },
+    {
+      "terms": [
+        "menstr",
+        "menopaus",
+        "pregnan",
+        "ovulation",
+        "progesterone",
+        "cervicalmucus",
+        "contraceptive",
+        "lactation",
+        "sexualactivity",
+        "basalbodytemperature",
+        "vaginaldryness"
+      ],
+      "category": "cycle"
+    },
+    {
+      "terms": [
+        "audio",
+        "audiogram",
+        "hearing",
+        "soundreduction"
+      ],
+      "category": "hearing"
+    },
+    {
+      "terms": [
+        "vision"
+      ],
+      "category": "vision"
+    },
+    {
+      "terms": [
+        "mindful",
+        "stateofmind",
+        "mood",
+        "electrodermal"
+      ],
+      "category": "wellbeing"
+    },
+    {
+      "terms": [
+        "respiratory",
+        "oxygensaturation",
+        "forcedexpiratory",
+        "forcedvital",
+        "peakexpiratory"
+      ],
+      "category": "respiratory"
+    },
+    {
+      "terms": [
+        "bodymass",
+        "bodyfat",
+        "height",
+        "waist",
+        "biologicalsex",
+        "dateofbirth",
+        "skintype"
+      ],
+      "category": "body"
+    },
+    {
+      "terms": [
+        "bodytemperature",
+        "vitalsign"
+      ],
+      "category": "vitals"
+    },
+    {
+      "terms": [
+        "walkingsteadiness",
+        "walkingasymmetry",
+        "walkingdouble",
+        "walkingstep",
+        "walkingspeed",
+        "stairascent",
+        "stairdescent",
+        "sixminutewalk",
+        "timesfallen",
+        "wheelchairuse"
+      ],
+      "category": "mobility"
+    },
+    {
+      "terms": [
+        "alcoholicbeverages"
+      ],
+      "category": "nutrition"
+    },
+    {
+      "terms": [
+        "workout",
+        "activity",
+        "energy",
+        "exercise",
+        "standhour",
+        "standtime",
+        "movetime",
+        "steps",
+        "stepcount",
+        "flights",
+        "distance",
+        "cycling",
+        "running",
+        "swimming",
+        "rowing",
+        "paddle",
+        "skiing",
+        "physicaleffort",
+        "pushcount",
+        "nikefuel"
+      ],
+      "category": "activity"
+    }
+  ],
+  "titles": {
+    "heart_rate": "Heart rate",
+    "body_mass": "Weight",
+    "body_fat": "Body fat",
+    "blood_glucose": "Blood glucose",
+    "vo2_max": "VO\u2082 Max",
+    "oxygen_saturation": "Oxygen saturation",
+    "respiratory_rate": "Respiratory rate",
+    "height": "Height",
+    "body_temperature": "Body temperature",
+    "sleep": "Sleep sessions",
+    "active_energy": "Active Energy",
+    "basal_energy": "Resting Energy",
+    "steps": "Steps",
+    "resting_heart_rate": "Resting heart rate",
+    "hrv_sdnn": "HRV SDNN"
+  }
+}

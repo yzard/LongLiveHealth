@@ -123,6 +123,72 @@ pub struct Observation {
     pub payload: ObservationPayload,
     pub interpretation: crate::laboratory::Interpretation,
     pub resolved_metric_id: Option<String>,
+    pub browse_issues: Vec<BrowseIssue>,
+}
+
+#[derive(Serialize)]
+pub struct BrowseIssue {
+    pub code: &'static str,
+    pub scope: &'static str,
+    pub message: String,
+}
+
+fn browse_issues(
+    payload: &ObservationPayload,
+    interpretation: &crate::laboratory::Interpretation,
+    metric: Option<&str>,
+) -> Vec<BrowseIssue> {
+    let mut issues = Vec::new();
+    if metric.is_none_or(|id| {
+        !crate::laboratory::metrics()
+            .iter()
+            .any(|definition| definition.metric_id == id)
+    }) {
+        let known_name =
+            metric.is_none() && crate::laboratory::infer_metric(&payload.raw_name, None).is_some();
+        issues.push(BrowseIssue {
+            code: if known_name { "unsupported_unit" } else { "unmapped_metric" }, scope: "browse",
+            message: if known_name {
+                format!("Cannot appear in Browse: unit ‘{}’ is not supported for this test. Check the original report and edit the result.", payload.raw_unit.as_deref().unwrap_or("not provided"))
+            } else { "Cannot appear in Browse: this test has no recognized metric mapping. Check its name and selected metric against the original report.".into() },
+        });
+    } else if ["missing_unit", "unsupported_unit", "overflow"]
+        .contains(&interpretation.result.status)
+    {
+        issues.push(BrowseIssue {
+            code: interpretation.result.status,
+            scope: "chart",
+            message: format!(
+                "Historical values only; cannot plot: {}",
+                interpretation.result.reason
+            ),
+        });
+    }
+    match payload
+        .sampled_at
+        .as_deref()
+        .filter(|date| !date.trim().is_empty())
+    {
+        None => issues.push(BrowseIssue {
+            code: "missing_date",
+            scope: "chart",
+            message: "Historical values only; cannot plot without a collection date.".into(),
+        }),
+        Some(date) if parse_time(date).is_err() => issues.push(BrowseIssue {
+            code: "invalid_date",
+            scope: "chart",
+            message: "Historical values only; the collection date is invalid.".into(),
+        }),
+        _ => {}
+    }
+    if payload.raw_result.trim().is_empty() {
+        issues.push(BrowseIssue {
+            code: "missing_result",
+            scope: "chart",
+            message: "Historical values only; no result value was provided.".into(),
+        });
+    }
+    issues
 }
 
 #[derive(sqlx::FromRow)]
@@ -138,7 +204,9 @@ impl StoredObservation {
         let payload: ObservationPayload = serde_json::from_str(&self.payload_json)?;
         let interpretation = crate::laboratory::interpret(&payload);
         let resolved_metric_id = crate::laboratory::resolved_metric(&payload).map(str::to_owned);
+        let browse_issues = browse_issues(&payload, &interpretation, resolved_metric_id.as_deref());
         Ok(Observation {
+            browse_issues,
             observation_id: self.observation_id,
             report_id: self.report_id,
             revision: self.revision,
@@ -181,6 +249,66 @@ pub fn parse_time(input: &str) -> Result<i64, AppError> {
 }
 
 impl Database {
+    pub async fn rescan_report(
+        &self,
+        user_id: &str,
+        report_id: &str,
+        revision: i64,
+    ) -> Result<crate::models::Job, AppError> {
+        self.report_summary(user_id, report_id).await?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let active: i64 = sqlx::query_scalar(queries::REPORT_ACTIVE_JOB)
+            .bind(user_id)
+            .bind(report_id)
+            .fetch_one(&mut *transaction)
+            .await?;
+        if active != 0 {
+            return Err(AppError::Conflict(
+                "Report extraction is already in progress",
+            ));
+        }
+        let updated = sqlx::query(queries::UPDATE_REPORT)
+            .bind(Option::<String>::None)
+            .bind(user_id)
+            .bind(report_id)
+            .bind(revision)
+            .execute(&mut *transaction)
+            .await?;
+        if updated.rows_affected() != 1 {
+            return Err(AppError::Conflict(
+                "Report changed; reload before rescanning",
+            ));
+        }
+        for query in queries::RESCAN_CLEAR {
+            sqlx::query(query)
+                .bind(user_id)
+                .bind(report_id)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        let job_id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(queries::INSERT_JOB)
+            .bind(&job_id)
+            .bind(user_id)
+            .bind(report_id)
+            .bind(now()?)
+            .execute(&mut *transaction)
+            .await?;
+        for query in [
+            queries::TOUCH_USER_DATA,
+            queries::INVALIDATE_ANALYSES,
+            queries::PURGE_FEEDBACK,
+            queries::INVALIDATE_EXPORTS,
+        ] {
+            sqlx::query(query)
+                .bind(user_id)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
+        self.job(user_id, &job_id).await
+    }
+
     pub async fn report_summary(
         &self,
         user_id: &str,

@@ -199,6 +199,9 @@ async fn steps_daily_view_reads_device_names_and_replaces_old_cached_algorithm()
         .wellness_day(&user.user_id, request())
         .await
         .unwrap();
-    assert_eq!(refreshed["algorithm_version"], "wellness-day-v6");
+    assert_eq!(
+        refreshed["algorithm_version"],
+        longlivehealth::wellness::VERSION
+    );
     assert_eq!(refreshed["metrics"], first["metrics"]);
 }

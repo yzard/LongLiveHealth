@@ -21,10 +21,7 @@ struct BehaviorAssociationsView: View {
             Section("Declare an analysis") {
                 InfoHelp(title: "Associations", message: "Exploratory statistics, not causal effects. Declare all comparisons before inspecting results. Repeated searches are not covered by the correction.")
                 Picker("Outcome", selection: $outcome) { ForEach(outcomes, id: \.self) { Text($0.replacingOccurrences(of: "_", with: " ")).tag($0) } }
-                Picker("One source", selection: $source) {
-                    Text("Select a source").tag("")
-                    ForEach(choices, id: \.self) { Text(model.sourceLabel($0)).tag($0) }
-                }
+                SelectionPicker(title: "One source", selection: $source, placeholder: "Select a source", choices: choices.map { MenuChoice(id: $0, title: model.sourceLabel($0)) })
                 DatePicker("Last completed date", selection: Binding(get: { endDate }, set: { endDate = min($0, Date()) }), displayedComponents: .date)
                 TextField("Behavior names, one per line (up to 8)", text: $behaviors, axis: .vertical).lineLimit(8)
                 TextField("Covariate names, one per line (up to 3)", text: $covariates, axis: .vertical).lineLimit(3)
@@ -70,7 +67,7 @@ struct BehaviorAssociationsView: View {
                     Button(item["parameters"]["outcome"].stringValue + " · " + item["parameters"]["end_date"].stringValue) { Task { await open(item["result_id"].stringValue) } }.disabled(loading)
                 }
             }
-        }.navigationTitle("Behavior associations")
+        }.mobileNavigationTitle("Behavior associations")
             .initialTask { await load() }
             .onChange(of: outcome) { _, _ in source = choices.first ?? ""; acknowledged = false }
             .onChange(of: behaviors) { _, _ in acknowledged = false }

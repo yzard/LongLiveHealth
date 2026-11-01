@@ -287,7 +287,14 @@ def audit(path, max_bytes):
                     require(isinstance(original, dict), 'Invalid original JSON')
                     require(tuple(original.get(k) for k in ('source_id', 'record_id')) == key[1:], 'Original identity differs')
                     if health[key].get('raw_id') == raw_id:
-                        require(health_projection(original) == parse_json(health[key]['payload_json']), 'Current original differs from projection')
+                        expected = health_projection(original)
+                        stored = parse_json(health[key]['payload_json'])
+                        # These values are rebuildable chart indexes, not source payload.
+                        # The manifest still verifies the complete exported database bytes.
+                        for field in ('chart_components', 'chart_at'):
+                            if field not in expected.get('payload', {}):
+                                stored.get('payload', {}).pop(field, None)
+                        require(expected == stored, 'Current original differs from projection')
                 require(not stream.read(1), 'Unindexed bytes in original archive')
         require(all(row.get('deleted') == 1 or row.get('raw_id') in original_ids for row in health.values()), 'Current original is missing')
         require(

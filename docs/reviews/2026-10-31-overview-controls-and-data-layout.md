@@ -1,0 +1,9 @@
+# Overview controls and Data/Settings layout
+
+Both mobile clients use the same Swift implementation. Manual Imports is part of Data → Import, Source Aliases uses title capitalization, the account address is labeled Server URL, and Reference Settings orders Biological Sex, Date of Birth, then Sleep Goal.
+
+The previous Overview interpreted an empty favorite list as all metrics while Customize interpreted it as none. Customize also used a separate six-item list, omitting active and resting energy. Controls now come from the full Overview response and share `OverviewVisibility` with the actual table. Default all, an explicit subset, and explicit none are separate states. `overview_show_all` makes an empty selection unambiguous while existing saved selections retain their meaning. Two layout fields save atomically through the shared auto-save form. All-off displays a selection message rather than claiming no synced data exists.
+
+Coverage includes default-all toggle state, each row switched off, all-off persisted and reopened, one energy row restored, source/default compatibility, backend all/none/subset persistence, and Settings/Data labels and ordering. Sleep Goal and Reference Settings callers were updated to the same atomic field-update interface.
+
+Validation and rollout: 56 shared core tests, 28 iOS native tests, and both targeted UI tests passed. Backend checks passed with 221 tests and 2 existing ignored; Android unit/lint/build checks passed. NAS now serves image `overview-controls-20261031` and Android Build 32. The public APK matches the local SHA-256 `f1579bd0c9a4a5eebb8795b2a08dae1abcdc8b1de4124f0185acc087ebe66e46`. Server status is OK. No Android device was attached for installation. iOS Build 85 completed signing and was successfully installed on the iPhone through devicectl, retaining the existing application data.

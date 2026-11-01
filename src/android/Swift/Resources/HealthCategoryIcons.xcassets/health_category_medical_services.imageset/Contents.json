@@ -1,0 +1,13 @@
+{
+  "images": [
+    {
+      "filename": "health_category_medical_services.png",
+      "idiom": "universal",
+      "scale": "3x"
+    }
+  ],
+  "info": {
+    "author": "longlivehealth",
+    "version": 1
+  }
+}

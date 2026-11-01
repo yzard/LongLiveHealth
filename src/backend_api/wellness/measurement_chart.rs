@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::Row;
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
     pub record_type: String,
@@ -56,6 +56,9 @@ fn validate(start: i64, end: i64) -> Result<(), AppError> {
 impl Database {
     pub async fn measurement_chart(&self, user: &str, r: Request) -> Result<Value, AppError> {
         validate(r.start_at, r.end_at)?;
+        if super::combined_chart::supports(&r.record_type) {
+            return self.combined_chart(user, &r).await;
+        }
         let unit = unit(&r.record_type)?;
         let tz = r
             .timezone
@@ -63,6 +66,7 @@ impl Database {
             .map_err(|_| AppError::Invalid("Unknown IANA timezone"))?;
         let mut ranges = crate::chart::PeriodRanges::new(&r.period, tz)
             .ok_or(AppError::Invalid("Unknown chart period"))?;
+        let mut daily = crate::chart::PeriodRanges::new("M", tz).ok_or(AppError::Internal)?;
         let revision = self.data_revision(user).await?;
         let bounds: (Option<i64>, Option<i64>) = sqlx::query_as(queries::MEASUREMENT_BOUNDS)
             .bind(user)
@@ -89,6 +93,7 @@ impl Database {
                 valid += 1;
                 let source = format!("{}:{}", platform, row.try_get::<String, _>("source_id")?);
                 sources.insert(source.clone());
+                daily.add(source.clone(), unit.into(), row.try_get("at")?, value);
                 ranges.add(source, unit.into(), row.try_get("at")?, value);
             }
         }
@@ -96,8 +101,10 @@ impl Database {
         if revision != self.data_revision(user).await? {
             return Err(AppError::Conflict("Archive changed; refresh the chart"));
         }
+        let mut chart_ranges = ranges.finish();
+        chart_ranges["reference_days"] = daily.finish()["M"].take();
         Ok(
-            json!({"chart_ranges":ranges.finish(),"unit":unit,"first_at":bounds.0,"last_at":bounds.1,"sources":sources,"samples_read":read,"valid_samples":valid,"excluded_samples":read-valid,"complete":true,"data_revision":revision}),
+            json!({"chart_ranges":chart_ranges,"unit":unit,"first_at":bounds.0,"last_at":bounds.1,"sources":sources,"samples_read":read,"valid_samples":valid,"excluded_samples":read-valid,"complete":true,"data_revision":revision}),
         )
     }
     pub async fn measurement_history(

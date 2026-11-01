@@ -4,7 +4,14 @@ struct ReportImportControl: View {
     let model: AppModel
     @State var choosing = false
     var body: some View {
-        Button { choosing = true } label: { Image(systemName: MobileSymbol.name("square.and.arrow.up")) }
+        Button { choosing = true } label: {
+            Path { path in
+                path.move(to: CGPoint(x: 12, y: 16)); path.addLine(to: CGPoint(x: 12, y: 3))
+                path.move(to: CGPoint(x: 7, y: 8)); path.addLine(to: CGPoint(x: 12, y: 3)); path.addLine(to: CGPoint(x: 17, y: 8))
+                path.move(to: CGPoint(x: 3, y: 14)); path.addLine(to: CGPoint(x: 3, y: 21)); path.addLine(to: CGPoint(x: 21, y: 21)); path.addLine(to: CGPoint(x: 21, y: 14))
+            }.stroke(Color.accentColor, style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                .frame(width: 24, height: 24).frame(width: 44, height: 44)
+        }.accessibilityLabel(Text("Import Health Report"))
             .disabled(model.isBusy)
             .confirmationDialog("Import Health Report", isPresented: $choosing) {
                 Button("Import PDF") { importDocument("pdf") }
@@ -43,7 +50,7 @@ struct DocumentPreview: View {
             VStack(spacing: 16) {
                 if let failure { Text(failure) }
                 Button("Open original report") { Task { await open() } }
-            }.navigationTitle("Original · page \(location.page)")
+            }.mobileNavigationTitle("Original · page \(location.page)")
                 .toolbar { Button("Done") { dismiss() } }
                 .task { await open() }
         }

@@ -31,7 +31,7 @@ struct NutritionDayView: View {
                 }
             }
             if !result["notes"].arrayValue.isEmpty { InfoHelp(title: "Method", message: result["notes"].arrayValue.map(\.stringValue).joined(separator: "\n\n")) }
-        }.navigationTitle("Nutrition").initialTask(id: date) { await load() }.refreshable { await load() }
+        }.mobileNavigationTitle("Nutrition").initialTask(id: date) { await load() }.refreshable { await load() }
     }
     private func load() async {
         guard let client = model.client, let token = model.session?.token else { return }

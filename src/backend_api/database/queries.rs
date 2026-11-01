@@ -125,7 +125,9 @@ SELECT platform
            'unit', CASE WHEN json_extract(payload_json, '$.payload.unit') IN ('count', 'ms', 'count/min', 'kcal')
                         THEN json_extract(payload_json, '$.payload.unit') ELSE NULL END,
            'category', CASE WHEN json_type(payload_json, '$.payload.category') = 'integer'
-                            THEN json_extract(payload_json, '$.payload.category') ELSE NULL END
+                            THEN json_extract(payload_json, '$.payload.category') ELSE NULL END,
+           'stages', CASE WHEN platform = 'health_connect' AND record_type = 'sleep'
+                         THEN json_extract(payload_json, '$.payload.stages') ELSE NULL END
        )) AS payload_json
   FROM health_records
  WHERE user_id = ?
@@ -525,7 +527,7 @@ WITH events AS (
            'record_start' AS time_semantics
       FROM health_records
      WHERE user_id=? AND start_at>=? AND start_at<? AND deleted=0
-       AND record_type IN ('sleep','workout','training','training_day','sleep_correction','journal','nutrition','cycle','body','blood_pressure','breathing')
+       AND record_type IN ('sleep','workout','training','training_day','sleep_correction','journal','nutrition','cycle','body','blood_pressure')
     UNION ALL
     SELECT created_at, json_array('report',report_id), report_id, 'report', 'report_upload', revision, 'upload'
       FROM reports WHERE user_id=? AND created_at>=? AND created_at<?
@@ -558,7 +560,9 @@ pub const HRV_WINDOWS: &str = "SELECT platform, source_id, record_id, record_typ
 pub const WELLNESS_LIBRARY: &str = "SELECT platform, source_id, record_id, record_type, start_at, end_at, version, payload_json FROM health_records WHERE user_id = ? AND platform = 'manual' AND source_id = 'longlivehealth' AND record_type = ? AND deleted = 0 ORDER BY start_at DESC, record_id LIMIT 1001";
 pub const FOOD_PORTION: &str = "SELECT platform, source_id, record_id, record_type, start_at, end_at, version, payload_json FROM health_records WHERE user_id = ? AND platform = 'manual' AND source_id = 'longlivehealth' AND record_id = ? AND record_type IN ('food', 'recipe') AND deleted = 0";
 
-pub const SPECIALTY_LIST: &str = "SELECT platform,source_id,record_id,record_type,start_at,version FROM health_records WHERE user_id=? AND deleted=0 AND ((?='ecg' AND record_type='electrocardiogram') OR (?='clinical' AND json_type(payload_json,'$.payload.fhir')='object') OR (?='blood_pressure' AND record_type='HKCorrelationTypeIdentifierBloodPressure') OR record_type=?) AND (? IS NULL OR (platform,source_id,record_id)>(?,?,?)) ORDER BY platform,source_id,record_id LIMIT 51";
+pub const SPECIALTY_LIST: &str = "SELECT platform,source_id,record_id,record_type,start_at,version,payload_json, (SELECT json_group_array(json_object('id',c.record_type,'value',json_extract(c.payload_json,'$.payload.value'),'unit',json_extract(c.payload_json,'$.payload.unit'))) FROM json_each(h.payload_json,'$.payload.related_sample_ids') ids CROSS JOIN health_records c ON c.user_id=h.user_id AND c.platform=h.platform AND c.source_id=h.source_id AND c.record_id=ids.value AND c.deleted=0) AS related_values FROM health_records h WHERE user_id=?1 AND deleted=0 AND record_type=?2 AND (?3 IS NULL OR (start_at,platform,source_id,record_id)<(?4,?5,?6,?7)) ORDER BY start_at DESC,platform DESC,source_id DESC,record_id DESC LIMIT 51";
+pub const SPECIALTY_CLINICAL_LIST: &str = "SELECT platform,source_id,record_id,record_type,start_at,version,payload_json, (SELECT json_group_array(json_object('id',c.record_type,'value',json_extract(c.payload_json,'$.payload.value'),'unit',json_extract(c.payload_json,'$.payload.unit'))) FROM json_each(h.payload_json,'$.payload.related_sample_ids') ids CROSS JOIN health_records c ON c.user_id=h.user_id AND c.platform=h.platform AND c.source_id=h.source_id AND c.record_id=ids.value AND c.deleted=0) AS related_values FROM health_records h WHERE user_id=?1 AND deleted=0 AND ?2 IS NOT NULL AND json_type(payload_json,'$.payload.fhir')='object' AND (?3 IS NULL OR (start_at,platform,source_id,record_id)<(?4,?5,?6,?7)) ORDER BY start_at DESC,platform DESC,source_id DESC,record_id DESC LIMIT 51";
+pub const SPECIALTY_BLOOD_PRESSURE_LIST: &str = "SELECT platform,source_id,record_id,record_type,start_at,version,payload_json, (SELECT json_group_array(json_object('id',c.record_type,'value',json_extract(c.payload_json,'$.payload.value'),'unit',json_extract(c.payload_json,'$.payload.unit'))) FROM json_each(h.payload_json,'$.payload.related_sample_ids') ids CROSS JOIN health_records c ON c.user_id=h.user_id AND c.platform=h.platform AND c.source_id=h.source_id AND c.record_id=ids.value AND c.deleted=0) AS related_values FROM health_records h WHERE user_id=?1 AND deleted=0 AND ?2 IS NOT NULL AND record_type IN ('HKCorrelationTypeIdentifierBloodPressure','blood_pressure','blood_pressure_systolic','blood_pressure_diastolic') AND (record_type IN ('HKCorrelationTypeIdentifierBloodPressure','blood_pressure') OR NOT EXISTS (SELECT 1 FROM health_records p,json_each(p.payload_json,'$.payload.related_sample_ids') ids WHERE p.user_id=h.user_id AND p.platform=h.platform AND p.source_id=h.source_id AND p.record_type='HKCorrelationTypeIdentifierBloodPressure' AND p.deleted=0 AND ids.value=h.record_id)) AND (?3 IS NULL OR (start_at,platform,source_id,record_id)<(?4,?5,?6,?7)) ORDER BY start_at DESC,platform DESC,source_id DESC,record_id DESC LIMIT 51";
 pub const SPECIALTY_GET: &str = "SELECT platform,source_id,record_id,record_type,start_at,end_at,version,payload_json FROM health_records WHERE user_id=? AND platform=? AND source_id=? AND record_id=? AND deleted=0";
 pub const RELATED_RECORDS: &str = "SELECT record_type,version,start_at,CASE WHEN json_type(payload_json,'$.payload.value') IN ('real','integer') THEN CAST(json_extract(payload_json,'$.payload.value') AS REAL) END AS value,json_extract(payload_json,'$.payload.unit') AS unit FROM health_records WHERE user_id=? AND platform=? AND source_id=? AND record_id=? AND deleted=0 LIMIT 1";
 
@@ -642,23 +646,32 @@ WITH records AS (
 )
 SELECT * FROM samples WHERE at>=?3 AND at<?4
 "#;
+// Bounds use plotted sample timestamps, not the enclosing record's end date.
 pub const MEASUREMENT_BOUNDS: &str = r#"
-SELECT MIN(first_at),MAX(last_at) FROM (
+WITH latest_start AS (
+    SELECT start_at FROM health_records INDEXED BY health_records_range
+     WHERE user_id=?1 AND record_type=?2 AND deleted=0 ORDER BY start_at DESC LIMIT 1
+)
+SELECT MIN(first_at),CAST(MAX(last_at) AS INTEGER) FROM (
     SELECT
       (SELECT start_at FROM health_records INDEXED BY health_records_range
         WHERE user_id=?1 AND record_type=?2 AND deleted=0 ORDER BY start_at LIMIT 1) AS first_at,
-      (SELECT end_at FROM health_records INDEXED BY health_records_end
-        WHERE user_id=?1 AND record_type=?2 AND deleted=0 ORDER BY end_at DESC LIMIT 1) AS last_at
+      (SELECT MAX(CASE WHEN json_array_length(payload_json,'$.payload.quantity_samples') IS NULL THEN start_at
+                  ELSE (SELECT MAX(CAST(json_extract(j.value,'$.at') AS REAL))
+                          FROM json_each(payload_json,'$.payload.quantity_samples') j) END)
+         FROM health_records INDEXED BY health_records_end
+        WHERE user_id=?1 AND record_type=?2 AND deleted=0
+          AND end_at>=(SELECT start_at FROM latest_start)) AS last_at
     UNION ALL
     SELECT
       (SELECT start_at FROM health_records INDEXED BY health_records_range
         WHERE ?2='body_mass' AND user_id=?1 AND record_type='body' AND platform='manual' AND deleted=0
           AND json_type(payload_json,'$.payload.entry.content.weight_kg') IN ('integer','real')
         ORDER BY start_at LIMIT 1) AS first_at,
-      (SELECT end_at FROM health_records INDEXED BY health_records_end
+      (SELECT start_at FROM health_records INDEXED BY health_records_range
         WHERE ?2='body_mass' AND user_id=?1 AND record_type='body' AND platform='manual' AND deleted=0
           AND json_type(payload_json,'$.payload.entry.content.weight_kg') IN ('integer','real')
-        ORDER BY end_at DESC LIMIT 1) AS last_at
+        ORDER BY start_at DESC LIMIT 1) AS last_at
 )
 "#;
 
@@ -708,3 +721,69 @@ SELECT ?1, 'apple_health'
 pub const EXTRACTION_VALIDATION_CONTENT: &str = "SELECT page_number, content FROM extraction_outputs WHERE user_id = ?1 AND report_id = ?2 AND run_id = (SELECT run_id FROM extraction_outputs WHERE user_id = ?1 AND report_id = ?2 ORDER BY created_at DESC, run_id LIMIT 1) ORDER BY page_number";
 
 pub const APPLE_QUANTITY_REINDEX: &str = "SELECT h.rowid AS archive_row,h.user_id,h.platform,h.source_id,h.record_id,h.raw_id,h.record_type,h.payload_json,o.raw_path,o.raw_offset,o.raw_length FROM health_records h JOIN health_originals o ON o.user_id=h.user_id AND o.raw_id=h.raw_id WHERE h.rowid>? AND h.platform='apple_health' AND h.deleted=0 AND ((h.record_type GLOB 'HKQuantityTypeIdentifier*' AND json_type(h.payload_json,'$.payload.value') IS NULL) OR (json_extract(h.payload_json,'$.payload.quantity_count')>1 AND json_type(h.payload_json,'$.payload.quantity_samples') IS NULL)) ORDER BY h.rowid LIMIT 500";
+
+// A rescan replaces report results, never the original file or user-entered report info.
+pub const REPORT_ACTIVE_JOB: &str =
+    "SELECT COUNT(*) FROM jobs WHERE user_id=? AND file_id=? AND status IN ('queued','running')";
+pub const RESCAN_CLEAR: &[&str] = &[
+    "DELETE FROM main.observations WHERE user_id=? AND report_id=?",
+    "DELETE FROM draft.observations WHERE user_id=? AND report_id=?",
+    "DELETE FROM extraction_pages WHERE user_id=? AND report_id=?",
+    "DELETE FROM extraction_inputs WHERE user_id=? AND report_id=?",
+    "DELETE FROM extraction_outputs WHERE user_id=? AND report_id=?",
+    "DELETE FROM jobs WHERE user_id=? AND file_id=?",
+];
+
+/// Ordered complete scalar history used to resolve measurement-time reference context.
+pub fn reference_context_history_query() -> String {
+    format!("{MEASUREMENT_SAMPLES} ORDER BY at,platform,source_id,record_id")
+}
+
+// The explicit relationship, account, platform and source form a measurement pair.
+pub const COMBINED_SAMPLES: &str = r#"
+SELECT p.platform,p.source_id,p.record_id,COALESCE(json_extract(p.payload_json,'$.payload.chart_at'),p.start_at) AS at,c.record_type AS component,c.record_id AS component_record,NULL AS title,
+       CASE WHEN json_type(c.payload_json,'$.payload.value') IN ('integer','real')
+            THEN CAST(json_extract(c.payload_json,'$.payload.value') AS REAL) END AS value,
+       json_extract(c.payload_json,'$.payload.unit') AS unit
+  FROM health_records p
+  LEFT JOIN json_each(p.payload_json,'$.payload.related_sample_ids') ids ON TRUE
+  LEFT JOIN health_records c ON c.user_id=p.user_id AND c.platform=p.platform
+       AND c.source_id=p.source_id AND c.record_id=ids.value AND c.deleted=0
+ WHERE p.user_id=?1 AND p.record_type=?2 AND p.deleted=0 AND COALESCE(json_extract(p.payload_json,'$.payload.chart_at'),p.start_at)>=?3 AND COALESCE(json_extract(p.payload_json,'$.payload.chart_at'),p.start_at)<?4
+   AND json_type(p.payload_json,'$.payload.related_sample_ids')='array'
+ UNION ALL
+SELECT p.platform,p.source_id,p.record_id,COALESCE(json_extract(p.payload_json,'$.payload.chart_at'),p.start_at),json_extract(j.value,'$.id'),json_extract(j.value,'$.id'),
+       json_extract(j.value,'$.title'),CASE WHEN json_type(j.value,'$.value') IN ('integer','real') THEN CAST(json_extract(j.value,'$.value') AS REAL) END,json_extract(j.value,'$.unit')
+  FROM health_records p LEFT JOIN json_each(p.payload_json,'$.payload.chart_components') j ON TRUE
+ WHERE p.user_id=?1 AND p.record_type=?2 AND p.deleted=0 AND COALESCE(json_extract(p.payload_json,'$.payload.chart_at'),p.start_at)>=?3 AND COALESCE(json_extract(p.payload_json,'$.payload.chart_at'),p.start_at)<?4
+   AND json_type(p.payload_json,'$.payload.related_sample_ids') IS NULL
+ UNION ALL
+SELECT s.platform,s.source_id,s.record_id,s.start_at,s.record_type,s.record_id,NULL,
+       CASE WHEN json_type(s.payload_json,'$.payload.value') IN ('integer','real') THEN CAST(json_extract(s.payload_json,'$.payload.value') AS REAL) END,
+       json_extract(s.payload_json,'$.payload.unit')
+ FROM health_records s
+ WHERE ?2='HKCorrelationTypeIdentifierBloodPressure' AND s.user_id=?1 AND s.deleted=0
+   AND s.record_type IN ('blood_pressure_systolic','blood_pressure_diastolic') AND s.start_at>=?3 AND s.start_at<?4
+   AND NOT EXISTS (SELECT 1 FROM health_records p,json_each(p.payload_json,'$.payload.related_sample_ids') ids
+       WHERE p.user_id=s.user_id AND p.platform=s.platform AND p.source_id=s.source_id AND p.deleted=0
+         AND p.record_type=?2 AND ids.value=s.record_id)
+ UNION ALL
+SELECT p.platform,p.source_id,p.record_id,p.start_at,
+       CASE f.value WHEN 'systolic_mmhg' THEN 'blood_pressure_systolic' ELSE 'blood_pressure_diastolic' END,f.value,NULL,
+       CAST(json_extract(p.payload_json,'$.payload.entry.content.'||f.value) AS REAL),'mmHg'
+ FROM health_records p,json_each('["systolic_mmhg","diastolic_mmhg"]') f
+ WHERE ?2='HKCorrelationTypeIdentifierBloodPressure' AND p.user_id=?1 AND p.deleted=0 AND p.platform='manual' AND p.record_type='blood_pressure'
+   AND p.start_at>=?3 AND p.start_at<?4
+"#;
+
+pub const COMPONENT_REINDEX: &str = r#"
+SELECT h.rowid AS archive_row,h.user_id,h.platform,h.source_id,h.record_id,h.record_type,
+       h.start_at,h.end_at,h.raw_id,h.payload_json,o.raw_path,o.raw_offset,o.raw_length
+  FROM health_records h JOIN health_originals o ON o.user_id=h.user_id AND o.raw_id=h.raw_id
+ WHERE h.rowid>? AND h.deleted=0 AND json_type(h.payload_json,'$.payload.chart_components') IS NULL
+   AND (h.record_type LIKE 'HKCategoryTypeIdentifier%' OR h.record_type IN
+       ('mindful_session','activity_summary','state_of_mind','vision_prescription','electrocardiogram','heartbeat_series','workout','medication_dose_event'))
+ ORDER BY h.rowid LIMIT 100
+"#;
+
+pub const COMBINED_BOUNDS: &str = "SELECT MIN(COALESCE(json_extract(payload_json,'$.payload.chart_at'),start_at)), MAX(COALESCE(json_extract(payload_json,'$.payload.chart_at'),start_at)) FROM health_records WHERE user_id=?1 AND (record_type=?2 OR (?2='HKCorrelationTypeIdentifierBloodPressure' AND record_type IN ('blood_pressure_systolic','blood_pressure_diastolic','blood_pressure'))) AND deleted=0";

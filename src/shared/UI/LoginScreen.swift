@@ -24,7 +24,7 @@ struct LoginScreen: View {
                 } label: { if isBusy { ProgressView() } else { Text("Sign in") } }
                 .disabled(isBusy || server.isEmpty || username.isEmpty || password.isEmpty)
                 Section { InfoHelp(title: "Accounts and processing", message: "Accounts are created by your server administrator. Reports and AI processing use the services configured on that server.") }
-            }.navigationTitle("Long Live Health")
+            }.mobileNavigationTitle("Long Live Health")
         }
     }
 }

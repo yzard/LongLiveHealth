@@ -4,6 +4,7 @@ mod app;
 mod authentication;
 mod chart;
 mod cli;
+mod combined_chart;
 mod config;
 mod database;
 mod documents;
@@ -208,3 +209,7 @@ mod client_download;
 mod recovery_hrv;
 
 mod apple_health;
+
+mod reference_guides;
+
+mod browse_catalog;

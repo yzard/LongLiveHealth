@@ -286,7 +286,7 @@ async fn reserved_connections_cannot_bypass_domain_validation() {
     for endpoint in [
         "wellness/day",
         "wellness/sources",
-        "wellness/series",
+        "wellness/chart",
         "wellness/timeline",
         "wellness/review",
         "wellness/preferences/get",
@@ -608,7 +608,7 @@ async fn preferences_are_versioned_isolated_and_preserve_source_fallbacks() {
             .unwrap()["version"],
         0
     );
-    let input = json!({"expected_version":0,"batch_id":uuid::Uuid::new_v4(),"preferences":{"source_aliases":{"apple_health:watch":"My Watch"},"source_priority":{"sleep":["apple_health:watch","health_connect:ring"]},"favorite_metrics":["sleep"],"sleep_target_minutes":480}});
+    let input = json!({"expected_version":0,"batch_id":uuid::Uuid::new_v4(),"preferences":{"reference_profile":{"birth_date":null,"reference_sex":null},"source_aliases":{"apple_health:watch":"My Watch"},"source_priority":{"sleep":["apple_health:watch","health_connect:ring"]},"favorite_metrics":["sleep"],"overview_show_all":false,"sleep_target_minutes":480}});
     let result = state
         .database
         .save_wellness_preferences(
@@ -2011,7 +2011,11 @@ async fn specialty_views_page_samples_decode_fhir_and_never_resolve_another_sour
             .await
             .is_err()
     );
-    for kind in ["ecg", "clinical", "blood_pressure"] {
+    for kind in [
+        "ecg",
+        "clinical",
+        "HKCorrelationTypeIdentifierBloodPressure",
+    ] {
         let list = state
             .database
             .specialty_records(
@@ -3176,4 +3180,321 @@ async fn period_measurements_stream_all_samples_and_paginate_history() {
             .is_err()
     );
     pool.close().await;
+}
+
+#[test]
+fn overview_sleep_uses_complete_wake_date_sessions_and_excludes_awake_duplicates() {
+    use longlivehealth::{
+        health::StoredHealthRecord,
+        wellness::sleep::{summarize, wake_days},
+    };
+    let at = |s: &str| chrono::DateTime::parse_from_rfc3339(s).unwrap().timestamp();
+    let from = at("2026-10-30T23:00:00-04:00");
+    let to = at("2026-10-31T07:30:00-04:00");
+    let row = |id: &str, source: &str, start, end, category| StoredHealthRecord {
+        platform: "apple_health".into(),
+        source_id: source.into(),
+        record_id: id.into(),
+        record_type: "sleep".into(),
+        start_at: start,
+        end_at: end,
+        version: 1,
+        payload_json: json!({"payload":{"category":category}}).to_string(),
+    };
+    let rows = vec![
+        row("bed", "watch", from, to, 0),
+        row("a", "watch", from, from + 4 * 3600, 3),
+        row("duplicate", "watch", from, from + 4 * 3600, 1),
+        row("awake", "watch", from + 4 * 3600, from + 4 * 3600 + 1800, 2),
+        row("b", "watch", from + 4 * 3600 + 1800, to, 5),
+        row("phone", "phone", from, to, 0),
+    ];
+    let end = at("2026-11-01T00:00:00-04:00");
+    let sessions = summarize(rows, from - 86400, end, chrono_tz::America::New_York).unwrap();
+    let day = "2026-10-31".parse().unwrap();
+    let result = wake_days(&sessions, day, day);
+    let watch = result["days"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["source"] == "apple_health:watch")
+        .unwrap();
+    assert_eq!(watch["value"], 28800.);
+    assert_eq!(watch["date"], "2026-10-31");
+    assert!(
+        result["days"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["source"] == "apple_health:phone")
+            .all(|d| d["value"].is_null())
+    );
+    // The repeated DST hour is real elapsed sleep, not a fixed local-clock subtraction.
+    let fall_start = at("2026-10-31T23:00:00-04:00");
+    let fall_end = at("2026-11-01T07:00:00-05:00");
+    let dst = summarize(
+        vec![row("dst", "watch", fall_start, fall_end, 1)],
+        fall_start - 86400,
+        fall_end + 86400,
+        chrono_tz::America::New_York,
+    )
+    .unwrap();
+    let day = "2026-11-01".parse().unwrap();
+    assert_eq!(wake_days(&dst, day, day)["days"][0]["value"], 32400.);
+    let partial = summarize(
+        vec![row("partial", "watch", from, to, 1)],
+        from + 3600,
+        end,
+        chrono_tz::America::New_York,
+    )
+    .unwrap();
+    let day = "2026-10-31".parse().unwrap();
+    assert!(wake_days(&partial, day, day)["days"][0]["value"].is_null());
+}
+
+#[tokio::test]
+async fn measurement_bounds_follow_plotted_samples_not_record_end_dates() {
+    use longlivehealth::wellness::measurement_chart::Request;
+    let (_directory, state) = crate::fixture().await;
+    let user = crate::add_user(&state, "sample-bounds").await;
+    let pool = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}",
+        state.config.data_dir.join("database.sqlite").display()
+    ))
+    .await
+    .unwrap();
+    for (id, start, end, payload) in [
+        (
+            "long-scalar",
+            100,
+            1000000,
+            json!({"value":60,"unit":"count/min"}),
+        ),
+        (
+            "series",
+            200,
+            900,
+            json!({"quantity_samples":[{"at":250.5,"value":70},{"at":700.5,"value":80}],"unit":"count/min"}),
+        ),
+        (
+            "last-scalar",
+            300,
+            400,
+            json!({"value":65,"unit":"count/min"}),
+        ),
+    ] {
+        sqlx::query("INSERT INTO health_records(user_id,platform,source_id,record_id,record_type,start_at,end_at,version,deleted,payload_json) VALUES (?,'apple_health','watch',?,'heart_rate',?,?,1,0,?)")
+            .bind(&user.user_id).bind(id).bind(start).bind(end).bind(json!({"payload":payload}).to_string()).execute(&pool).await.unwrap();
+    }
+    let result = state
+        .database
+        .measurement_chart(
+            &user.user_id,
+            Request {
+                record_type: "heart_rate".into(),
+                timezone: "UTC".into(),
+                period: "H".into(),
+                start_at: 0,
+                end_at: 3600,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["first_at"], 100);
+    assert_eq!(result["last_at"], 700);
+    assert_eq!(result["valid_samples"], 4);
+    sqlx::query("DELETE FROM health_records WHERE user_id=? AND record_id='series'")
+        .bind(&user.user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let result = state
+        .database
+        .measurement_chart(
+            &user.user_id,
+            Request {
+                record_type: "heart_rate".into(),
+                timezone: "UTC".into(),
+                period: "H".into(),
+                start_at: 0,
+                end_at: 3600,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["last_at"], 300);
+}
+
+#[tokio::test]
+async fn browse_sleep_history_matches_overview_wake_date_totals() {
+    use longlivehealth::wellness::history::HistoryRequest;
+    let (_directory, state) = crate::fixture().await;
+    let user = crate::add_user(&state, "sleep-wake-history").await;
+    let pool = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}",
+        state.config.data_dir.join("database.sqlite").display()
+    ))
+    .await
+    .unwrap();
+    let from = chrono::DateTime::parse_from_rfc3339("2026-10-30T23:00:00-04:00")
+        .unwrap()
+        .timestamp();
+    let to = from + 8 * 3600;
+    sqlx::query("INSERT INTO health_records(user_id,platform,source_id,record_id,record_type,start_at,end_at,version,deleted,payload_json) VALUES (?,'apple_health','watch','night','sleep',?,?,1,0,?)")
+        .bind(&user.user_id).bind(from).bind(to).bind(json!({"payload":{"category":1}}).to_string()).execute(&pool).await.unwrap();
+    let date = "2026-10-31".parse().unwrap();
+    let overview = state
+        .database
+        .sleep_wake_days(&user.user_id, date, date, "America/New_York")
+        .await
+        .unwrap();
+    assert_eq!(overview["days"][0]["value"], 28800.);
+    // Exercise a single day and a year, crossing the internal bounded query chunks.
+    for start in ["2026-10-31", "2026-01-01"] {
+        let history = state
+            .database
+            .daily_history(
+                &user.user_id,
+                HistoryRequest {
+                    record_type: "sleep".into(),
+                    timezone: "America/New_York".into(),
+                    dates: Some([start.into(), "2026-10-31".into()]),
+                },
+            )
+            .await
+            .unwrap();
+        let bars = history["chart_ranges"]["D"].as_array().unwrap();
+        assert_eq!(bars.len(), 1);
+        assert_eq!(bars[0]["latest_value"], 28800.);
+        assert_eq!(history["history"][0]["date"], "2026-10-31");
+    }
+}
+
+#[test]
+fn retired_practice_cannot_be_saved_but_respiratory_metrics_remain() {
+    use longlivehealth::wellness::entries::Entry;
+    assert!(serde_json::from_value::<Entry>(json!({"kind":"breathing","content":{"duration_minutes":5,"breaths_per_minute":null,"note":""}})).is_err());
+    assert!(longlivehealth::apple_health::definition("respiratory_rate").is_some());
+    assert!(
+        longlivehealth::apple_health::definition(
+            "HKQuantityTypeIdentifierAppleSleepingBreathingDisturbances"
+        )
+        .is_some()
+    );
+}
+
+#[tokio::test]
+async fn overview_can_persist_all_none_and_individual_rows() {
+    let (_directory, state) = crate::fixture().await;
+    let user = crate::add_user(&state, "layout-owner").await;
+    let mut saved = state
+        .database
+        .wellness_preferences(&user.user_id)
+        .await
+        .unwrap();
+    assert_eq!(saved["preferences"]["overview_show_all"], true);
+    for (all, metrics) in [
+        (false, vec![]),
+        (false, vec!["active_energy", "basal_energy"]),
+        (true, vec![]),
+    ] {
+        let mut preferences = saved["preferences"].clone();
+        preferences["overview_show_all"] = json!(all);
+        preferences["favorite_metrics"] = json!(metrics);
+        saved = state.database.save_wellness_preferences(&user.user_id, serde_json::from_value(json!({"expected_version":saved["version"],"batch_id":uuid::Uuid::new_v4(),"preferences":preferences})).unwrap()).await.unwrap();
+        let reloaded = state
+            .database
+            .wellness_preferences(&user.user_id)
+            .await
+            .unwrap();
+        assert_eq!(reloaded["preferences"]["overview_show_all"], all);
+        assert_eq!(reloaded["preferences"]["favorite_metrics"], json!(metrics));
+    }
+}
+
+#[tokio::test]
+async fn historical_records_are_newest_first_across_source_and_page_boundaries() {
+    use longlivehealth::wellness::records::ListRequest;
+    let (_directory, state) = crate::fixture().await;
+    let user = crate::add_user(&state, "history-order").await;
+    use longlivehealth::health::{ConnectionRequest, HealthRecordInput, SyncRequest};
+    let connection = state
+        .database
+        .create_connection(
+            &user.user_id,
+            ConnectionRequest {
+                platform: "apple_health".into(),
+                installation_id: uuid::Uuid::new_v4().to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    state
+        .database
+        .sync_health(
+            &user.user_id,
+            SyncRequest {
+                connection_id: connection.connection_id,
+                batch_id: uuid::Uuid::new_v4().to_string(),
+                record_type: "HKCategoryTypeIdentifierAppleStandHour".into(),
+                coverage_status: "observed".into(),
+                records: (0..63)
+                    .map(|i| HealthRecordInput {
+                        record_id: format!("reverse-{:03}", 62 - i),
+                        source_id: format!("source-{}", i % 3),
+                        record_type: "HKCategoryTypeIdentifierAppleStandHour".into(),
+                        start_at: 100 + i / 2,
+                        end_at: 101 + i / 2,
+                        version: 1,
+                        deleted: false,
+                        payload: json!({"category":1}),
+                    })
+                    .collect(),
+            },
+        )
+        .await
+        .unwrap();
+    let first = state
+        .database
+        .specialty_records(
+            &user.user_id,
+            ListRequest {
+                kind: "HKCategoryTypeIdentifierAppleStandHour".into(),
+                after: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(first["records"].as_array().unwrap().len(), 50);
+    let after = serde_json::from_value(first["next_cursor"].clone()).unwrap();
+    let second = state
+        .database
+        .specialty_records(
+            &user.user_id,
+            ListRequest {
+                kind: "HKCategoryTypeIdentifierAppleStandHour".into(),
+                after: Some(after),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(second["next_cursor"].is_null());
+    let rows: Vec<_> = first["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(second["records"].as_array().unwrap())
+        .collect();
+    assert_eq!(rows.len(), 63);
+    assert!(
+        rows.windows(2)
+            .all(|pair| pair[0]["at"].as_i64() >= pair[1]["at"].as_i64())
+    );
+    assert_eq!(
+        rows.iter()
+            .map(|r| r["record_id"].as_str().unwrap())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        63
+    );
 }

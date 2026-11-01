@@ -9,6 +9,7 @@ import secrets
 import shutil
 import socket
 import ssl
+import sqlite3
 import struct
 import subprocess
 import threading
@@ -30,7 +31,7 @@ parser.add_argument('--webgui', type=Path, help='Run browser checks with the giv
 parser.add_argument(
     '--load',
     action='store_true',
-    help='Measure concurrent synthetic 32/40 MiB Health sync, limits and server responsiveness',
+    help='Measure large synthetic Health sync and concurrent server responsiveness',
 )
 options = parser.parse_args()
 
@@ -83,9 +84,12 @@ compose = ['docker', 'compose', '-p', PROJECT, '-f', str(ROOT / 'docker/docker-c
 
 
 def command(args, **kwargs):
-    return subprocess.run(
-        args, cwd=ROOT, env=environment, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs
-    ).stdout
+    result = subprocess.run(
+        args, cwd=ROOT, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs
+    )
+    if result.returncode:
+        raise RuntimeError(f"Command failed: {args!r}\n{result.stderr.decode(errors='replace')}")
+    return result.stdout
 
 
 class TerminalJobError(RuntimeError):
@@ -138,8 +142,31 @@ def download(path):
         return response.read()
 
 
+def job_status(identifier):
+    return next(job for job in api('jobs/list', {'limit': 100})['jobs'] if job['job_id'] == identifier)
+
+
+def raw_originals():
+    # Inspect only this isolated test volume, never add an unused production API for tests.
+    with sqlite3.connect(f'file:{api_root / "database.sqlite"}?mode=ro', uri=True) as connection:
+        connection.row_factory = sqlite3.Row
+        return [dict(row) for row in connection.execute('SELECT raw_id,record_id,raw_path,raw_offset,raw_length FROM health_originals')]
+
+
+def raw_original_bytes(row):
+    with (api_root / row['raw_path']).open('rb') as source:
+        if row['raw_offset'] is None:
+            return source.read()
+        source.seek(row['raw_offset'])
+        length = struct.unpack('<Q', source.read(8))[0]
+        assert length == row['raw_length']
+        value = source.read(length)
+        assert len(value) == length
+        return value
+
+
 def completed_report(upload, label):
-    job = api('jobs/get', {'job_id': upload['job']['job_id']})
+    job = job_status(upload['job']['job_id'])
     if job['status'] == 'failed':
         report_id = upload['file']['file_id']
         report = api('reports/get', {'report_id': report_id})
@@ -264,7 +291,7 @@ def scanned_and_mixed_pdf():
 
 def health_load():
     connection = api('health/connect', {'platform': 'apple_health', 'installation_id': str(uuid.uuid4())})
-    existing_raw_ids = {item['raw_id'] for item in api('health/raw/list', {'limit': 100})['files']}
+    existing_raw_ids = {item['raw_id'] for item in raw_originals()}
 
     def record(identifier, character, payload_bytes):
         payload = {'blob': '', 'synthetic': True, 'printed_unit': 'mg/dL'}
@@ -323,21 +350,22 @@ def health_load():
     assert latencies and max(latencies) < 1000, latencies
     # Lost response retry must retain the same digest and create no duplicate originals.
     assert api('health/sync', payload=bodies[0])['replayed'] is True
-    all_originals = api('health/raw/list', {'limit': 100})['files']
+    all_originals = raw_originals()
     originals = [item for item in all_originals if item['raw_id'] not in existing_raw_ids]
     assert {item['raw_id'] for item in all_originals} >= existing_raw_ids
     assert len(originals) == 3
     expected = {row['record_id']: row for input_batch in [first, second] for row in input_batch['records']}
     for original in originals:
-        assert json.loads(download(f"health/raw/{original['raw_id']}/download")) == expected[original['record_id']]
-    invalid = batch([record('too-large', 'D', 32 * 1024 * 1024 + 1)])
-    for body in [encoded(invalid), b' ' * (40 * 1024 * 1024 + 1)]:
-        try:
-            api('health/sync', payload=body)
-            raise AssertionError('Oversize Health request was accepted')
-        except urllib.error.HTTPError as error:
-            assert error.code == 413
-    assert {item['raw_id'] for item in api('health/raw/list', {'limit': 100})['files']} == {item['raw_id'] for item in all_originals}
+        assert json.loads(raw_original_bytes(original)) == expected[original['record_id']]
+    large = batch([record('above-former-limit', 'D', 32 * 1024 * 1024 + 1)])
+    assert api('health/sync', payload=encoded(large))['replayed'] is False
+    before_invalid = {item['raw_id'] for item in raw_originals()}
+    try:
+        api('health/sync', payload=b' ' * (40 * 1024 * 1024 + 1))
+        raise AssertionError('Invalid JSON was accepted')
+    except urllib.error.HTTPError as error:
+        assert error.code == 400
+    assert {item['raw_id'] for item in raw_originals()} == before_invalid
     summary = {
         'synthetic_only': True,
         'concurrent_requests': 2,
@@ -347,8 +375,8 @@ def health_load():
         'status_samples': len(latencies),
         'status_latency_p95_ms': round(sorted(latencies)[min(len(latencies) - 1, int(len(latencies) * 0.95))], 2),
         'status_latency_max_ms': round(max(latencies), 2),
-        'exact_payload_limit_and_batch_limit_accepted': True,
-        'oversize_rejected_atomically': True,
+        'large_payloads_and_batches_accepted': True,
+        'invalid_json_rejected_atomically': True,
         'raw_payload_and_replay_preserved': True,
     }
     (OUTPUT / 'load-result.json').write_text(json.dumps(summary, indent=2) + '\n')
@@ -461,7 +489,7 @@ try:
     if not options.ocr:
 
         def failed_during_outage():
-            job = api('jobs/get', {'job_id': archive['job']['job_id']})
+            job = job_status(archive['job']['job_id'])
             assert job['status'] == 'failed', job['status']
             return job
 

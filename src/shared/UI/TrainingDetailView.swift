@@ -55,7 +55,7 @@ struct TrainingDetailView: View {
                     }
                 }
             }
-        }.navigationTitle("Training details").initialTask(id: offset) { await load() }
+        }.mobileNavigationTitle("Training details").initialTask(id: offset) { await load() }
     }
     private func load() async {
         guard let client = model.client, let token = model.session?.token else { return }

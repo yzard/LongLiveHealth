@@ -22,7 +22,7 @@ struct SourceRecordCountsView: View {
                     Text("\(Int(source["record_count"].numberValue ?? 0).formatted()) records").font(.caption)
                 }
             }
-        }.navigationTitle("Sources Record Count").navigationBarTitleDisplayMode(.inline)
+        }.mobileNavigationTitle("Sources Record Count").navigationBarTitleDisplayMode(.inline)
             .initialTask { await reload() }.refreshable { await reload() }
     }
 

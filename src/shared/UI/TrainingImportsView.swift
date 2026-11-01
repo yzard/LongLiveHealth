@@ -37,7 +37,7 @@ struct TrainingImportsView: View {
                 NavigationLink("Export originals and revisions", destination: SettingsView(model: model))
                 InfoHelp(title: "Activity calculations", message: "GPX distance uses coordinates within segments. TCX distance uses source lap totals. Elapsed duration can include pauses.")
             }
-        }.navigationTitle("Training imports")
+        }.mobileNavigationTitle("Training imports")
             .initialTask { await load(reset: true) }.refreshable { await load(reset: true) }
             #if os(Android)
             .onChange(of: importing) { _, value in

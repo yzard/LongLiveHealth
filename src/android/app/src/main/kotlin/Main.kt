@@ -46,7 +46,9 @@ open class AndroidAppMain: Application {
         logger.info("starting app")
         NativeServices.context = applicationContext
         ProcessInfo.launch(applicationContext)
-        AppDelegate.shared.onInit()
+        check(AppDelegate.shared.onInit(temporaryDirectory = cacheDir.absolutePath)) {
+            "Could not configure the private download directory"
+        }
     }
 
     companion object {
@@ -240,11 +242,13 @@ internal fun SyncSystemBarsWithTheme() {
 @Composable
 internal fun PresentationRootView(context: ComposeContext) {
     val colorScheme = if (isSystemInDarkTheme()) ColorScheme.dark else ColorScheme.light
-    PresentationRoot(defaultColorScheme = colorScheme, context = context) { ctx ->
-        SyncSystemBarsWithTheme()
-        val contentContext = ctx.content()
-        Box(modifier = ctx.modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            AppRootView().Compose(context = contentContext)
+    HealthDesignTheme {
+        PresentationRoot(defaultColorScheme = colorScheme, context = context) { ctx ->
+            SyncSystemBarsWithTheme()
+            val contentContext = ctx.content()
+            Box(modifier = ctx.modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                AppRootView().healthDesign().Compose(context = contentContext)
+            }
         }
     }
 }

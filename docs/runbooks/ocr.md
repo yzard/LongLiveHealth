@@ -36,7 +36,7 @@ POST `/api/v1/documents/extract`，`Authorization: Bearer <service-key>`，JSON 
 
 文本提取 30 秒，原始 XML 上限 2 MiB、可用文字上限 32 KiB、最多 4096 词。available/empty/unavailable/limit_exceeded 状态显式记录；失败/超限不会发送部分文字冒充成功，继续视觉并标记需要核对。文本层是非可信证据，可能只有页眉或与图像冲突，不能当作指令或替代整页视觉。每次 run/page 的证据存 extraction_inputs，通过鉴权接口读取并随导出/删除生命周期管理。
 
-成功回复包含 `model`、`engine=ninfer`、`prompt_version=laboratory-page-v2`、`content`、`raw_response_body`、`observations` 和 `warnings`。坐标为 null 或归一化 [left,top,right,bottom] 数组，与 API 一致。每项保留原名、原结果（包括比较符/文本）、单位、参考范围、异常标记、采样日期、页码和原文引文，`metric_id` 必须为 null。API 二次校验后保存为 pending，人工复核才可确认和映射指标。有效结构中的 warnings 保留完整证据，并使该页 needs_review；不会把已经有效提取的候选判成执行失败。真正的 HTTP、结构或字段错误仍明确失败。
+成功回复包含 `model`、`engine=ninfer`、`prompt_version=laboratory-page-v5`、`content`、`raw_response_body`、`observations` 和 `warnings`。坐标为 null 或归一化 [left,top,right,bottom] 数组，与 API 一致。每项保留原名、原结果（包括比较符/文本）、单位、参考范围、异常标记、采样日期、页码和原文引文，`metric_id` 必须为 null。API 二次校验后保存为 pending，人工复核才可确认和映射指标。有效结构中的 warnings 保留完整证据，并使该页 needs_review；不会把已经有效提取的候选判成执行失败。真正的 HTTP、结构或字段错误仍明确失败。
 
 完整原生回复含模型正文、reasoning 和 usage 等实际返回字段。原生响应上限 3 MiB，API 服务回复上限 8 MiB；超过上限显式失败，不截断后冒充完整。结构不合法、页码错误或 `finish_reason` 非 stop 返回 422 `invalid_structured_output`，同时附原始正文及完整原生回复供 API 归档。鉴权 401、请求超限 413、队列满 429、引擎不可用 503、整体超时 504 都是明确失败。
 
@@ -56,3 +56,25 @@ Docker 构建关口运行 Rust fmt/Clippy/75 项测试、Python isort/Black/10 �
 所有 background service 配置凭据直接内嵌到 config.toml，禁止凭据文件与环境/CLI 密钥覆盖。示例与验收见[内嵌凭据审查](../reviews/2026-10-03-embedded-credentials.md)。模板的空 OCR 密钥必须配置后才可启动 OCR；Playground 初始化会生成匹配的有效密钥。OCR 配置对象隐藏密钥表示，非法配置错误不输出原值。
 
 OCR 是 API 的必要服务：[ocr] 没有 enabled，所有上传在归档事务内直接排队，worker 始终尝试提取；原件和人工复核在 OCR 临时故障时继续可用。有效 URL 与内嵌密钥必须在启动时校验，不能通过开关跳过。详见[必要 OCR 服务审查](../reviews/2026-10-03-required-ocr.md)。
+
+## 2026-10-30 Function Health 采集日期核查
+
+历史 `laboratory-page-v3` 提取在第 3、4、6、9 页遗漏 47 个 sampled_at；原始 PDF 右侧有日期，部分旧 source.quote 也包含日期。用当前 v4 重跑这四页，47 项日期均恢复。v5 进一步要求按完整视觉行关联右侧日期，不依赖 PDF 文本层顺序；返回前复核空日期与引文，并明确警告真正没有日期的项目，禁止借用生日、报告生成日期或相邻项目日期。
+
+真实 11 页报告隔离复测共 126 项，全部日期匹配页面。原件和测试输出仅存于忽略的 build/ocr/function-date-audit/，不提交个人健康数据。测试不覆盖生产已确认结果；旧提取不会因为更新提示词而自动改写。
+
+可重复的合成 GPU 回归检查（需要运行中的 OCR 服务及其配置目录）：
+
+```bash
+python tests/docker/collection_dates.py --url http://127.0.0.1:8000 --data-dir /data
+```
+
+样本含两个不同采集日期、生日、报告生成日期及一个真正无日期的项目；必须正确区分前两项、保留第三项空日期并给出警告。服务凭据只从配置读取，不通过命令行传递。
+
+## Report rescan
+
+Health Report shows View Original, Add Result, Rescan and Delete in one action row on both mobile platforms. Rescan asks for confirmation because it replaces confirmed results, pending drafts and manual edits. The original file and report context remain. New extraction results are pending and require Confirm All before appearing in charts.
+
+`POST /api/v1/reports/rescan` accepts `report_id` and `expected_revision`, authenticates the owner and rejects queued/running extraction or stale revisions with 409. One database transaction clears old results and extraction evidence, increments the report revision, invalidates derived analyses/exports and queues a new extraction job. Failed rescans keep the original file and can use the normal failed-job retry; they do not restore the overwritten results. Other reports and Apple Health records are unaffected. The mobile page follows the new job identity so it starts polling even when opened before a rescan.
+
+Rescan release verification (2026-10-30): API image `report-rescan-20261030` deployed on NAS; Android Build 15 installed and packaged at `/longlivehealth.apk`; iOS Build 69 signed and installed. Rust checks passed with 199 tests and 2 pre-existing ignored tests. Both dedicated mobile action-row/cancel checks passed; no real report was rescanned during acceptance. The longer iOS `testLargeReportCountAndSourceEditing` passed the new action-row checks, report editing/confirmation and long scrolling, but failed at its final marker-editor tap (Cancel was absent); that broader editor check is not counted as passed. APK SHA256: `be5a2e91052d4d90b41f0d8af2979446da5f42a85955daa9f78ed2f7d2480c64`.

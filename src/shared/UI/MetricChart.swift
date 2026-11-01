@@ -6,6 +6,7 @@ import Charts
 /// Shared presentation of server-computed ranges. No raw-sample aggregation occurs here.
 struct MetricChart: View {
     let model: AppModel
+    let guidance: JSONValue
     let ranges: JSONValue
     let unit: String
     let divisor: Double
@@ -20,7 +21,14 @@ struct MetricChart: View {
     @State var emptyAnchor = Date().timeIntervalSince1970
     @State var window: ChartWindow?
     @State var selected: JSONValue?
+    @State var selectedLevelID: String?
+    @State var referenceSelection: ReferenceGuideSelection?
     @State var hiddenSources: Set<String> = []
+    @State var hiddenComponents: Set<String> = []
+    private var components: [JSONValue] { ranges["components"].arrayValue }
+    private func componentName(_ row: JSONValue) -> String {
+        components.first { $0["id"] == row["component"] }?["title"].stringValue ?? ""
+    }
 
     private var calendar: Calendar {
         var value = Calendar(identifier: .gregorian)
@@ -35,13 +43,30 @@ struct MetricChart: View {
     private var active: ChartWindow { window ?? ChartWindow(timestamps: timestamps, period: initialPeriod, calendar: calendar) }
     private var rows: [JSONValue] {
         ranges[active.period.rawValue].arrayValue.filter {
-            !hiddenSources.contains($0["source"].stringValue) && $0["unit"].stringValue == unit && ($0["end_at"].numberValue ?? 0) > active.start && ($0["start_at"].numberValue ?? 0) < active.start + active.length
+            !hiddenSources.contains($0["source"].stringValue) && !hiddenComponents.contains($0["component"].stringValue) && $0["unit"].stringValue == unit && ($0["end_at"].numberValue ?? 0) > active.start && ($0["start_at"].numberValue ?? 0) < active.start + active.length
         }
     }
-    private var yDomain: ClosedRange<Double> {
-        ChartValueScale.domain(values: rows.flatMap { row in
-            [row["min"].numberValue, row["max"].numberValue].compactMap { $0 }.map { $0 / divisor }
+    private var referenceLevels: [JSONValue] {
+        if !components.isEmpty { return [] }
+        let days = ranges["reference_days"].arrayValue.filter {
+            !hiddenSources.contains($0["source"].stringValue) && !hiddenComponents.contains($0["component"].stringValue) && $0["unit"].stringValue == unit &&
+            ($0["last_at"].numberValue ?? 0) >= active.start && ($0["last_at"].numberValue ?? 0) < active.start + active.length
+        }
+        let deviceNames = Dictionary(uniqueKeysWithValues: sourceKeys.map { key in
+            (key, SourceNames.label(key: key, fallback: names[key] ?? key, aliases: .null, catalog: model.sourceCatalog))
         })
+        return ReferenceLevels.levels(days: days, names: deviceNames)
+    }
+    private var referenceBand: JSONValue {
+        referenceLevels.first { $0["id"].stringValue == selectedLevelID } ??
+        referenceLevels.filter { ($0["days"].numberValue ?? 0) > 0 }.max { ($0["days"].numberValue ?? 0) < ($1["days"].numberValue ?? 0) } ?? .null
+    }
+    private var yDomain: ClosedRange<Double> {
+        let values = rows.flatMap { row in
+            [row["min"].numberValue, row["max"].numberValue].compactMap { $0 }.map { $0 / divisor }
+        }
+        let bounds = [referenceBand["lower"].numberValue, referenceBand["upper"].numberValue].compactMap { $0 }.map { $0 / divisor }
+        return ChartValueScale.domain(values: values + bounds)
     }
     private var summary: JSONValue? {
         // Display the envelope of the visible server-computed ranges, not raw samples.
@@ -59,6 +84,9 @@ struct MetricChart: View {
         sourceKeys.enumerated().map { heartRate && $0.offset == 0 ? .pink : SourceLegend.colors[$0.offset % SourceLegend.colors.count] }
     }
     private func color(_ row: JSONValue) -> Color {
+        if let index = components.firstIndex(where: { $0["id"] == row["component"] }) {
+            return SourceLegend.colors[index % SourceLegend.colors.count]
+        }
         guard let index = sourceKeys.firstIndex(of: row["source"].stringValue) else { return .primary }
         return colors[index]
     }
@@ -96,7 +124,7 @@ struct MetricChart: View {
     private func exposedEnd(_ row: JSONValue, lower: Bool) -> Bool {
         let edge = row[lower ? "display_min" : "display_max"]
         return !segments.contains { other in
-            other["start_at"] == row["start_at"] && other["end_at"] == row["end_at"] &&
+            other["component"] == row["component"] && other["start_at"] == row["start_at"] && other["end_at"] == row["end_at"] &&
             other["display_min"] != other["display_max"] &&
             other[lower ? "display_max" : "display_min"] == edge
         }
@@ -159,17 +187,31 @@ struct MetricChart: View {
             }.pickerStyle(.segmented)
             VStack(alignment: .leading, spacing: 3) {
                 Text(selected == nil ? "RANGE" : "SELECTED RANGE").font(.caption).foregroundStyle(.secondary)
+                if !components.isEmpty && selected == nil {
+                    ForEach(Array(components.filter { !hiddenComponents.contains($0["id"].stringValue) }.enumerated()), id: \.offset) { _, component in
+                        let values = rows.filter { $0["component"] == component["id"] }
+                        HStack {
+                            Text(component["title"].stringValue).font(.subheadline)
+                            Spacer()
+                            if let low = values.compactMap({ $0["min"].numberValue }).min(), let high = values.compactMap({ $0["max"].numberValue }).max() {
+                                Text("\(number(low))–\(number(high)) \(displayUnit)").font(.headline)
+                            } else { Text("—") }
+                        }
+                    }
+                } else {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text((selected ?? summary).map(valueLabel) ?? (hiddenSources.count == sourceKeys.count && !sourceKeys.isEmpty ? "No sources selected" : "No data"))
                         .font(.system(size: 34, weight: .regular, design: .rounded)).minimumScaleFactor(0.6)
                         .accessibilityIdentifier("chart-range-value")
                     Text(displayUnit).font(.headline).foregroundStyle(.secondary)
                 }
+                }
                 Text(intervalLabel(selected)).font(.subheadline).foregroundStyle(.secondary)
                     .accessibilityIdentifier("chart-date-range")
                 if let selected {
                     HStack(spacing: 5) {
                         Circle().fill(color(selected)).frame(width: 7, height: 7)
+                        if !components.isEmpty { Text(componentName(selected)).font(.caption) }
                         Text(model.sourceLabel(selected["source"].stringValue, name: names[selected["source"].stringValue] ?? selected["source"].stringValue)).font(.caption)
                     }
                 }
@@ -180,11 +222,23 @@ struct MetricChart: View {
             GeometryReader { geometry in
                 let width = barWidth(plotWidth: max(1, geometry.size.width - 36))
                 #if os(Android)
-                AndroidRangePlot(rows: segments, domain: yDomain, start: active.start, length: active.length,
+                AndroidRangePlot(rows: segments, referenceBand: referenceBand, domain: yDomain, start: active.start, length: active.length,
                     divisor: divisor, width: width, ticks: tickDates.map { ($0.timeIntervalSince1970, tickLabel($0)) },
                     color: color, exposedEnd: exposedEnd, selected: $selected, move: move)
                 #else
                 Chart {
+                    if referenceBand != .null {
+                        RectangleMark(xStart: .value("Start", Date(timeIntervalSince1970: active.start)),
+                            xEnd: .value("End", Date(timeIntervalSince1970: active.start + active.length)),
+                            yStart: .value("Lower", referenceBand["lower"].numberValue.map { $0 / divisor } ?? yDomain.lowerBound),
+                            yEnd: .value("Upper", referenceBand["upper"].numberValue.map { $0 / divisor } ?? yDomain.upperBound))
+                            .foregroundStyle(Color.pink.opacity(0.18))
+                        ForEach([referenceBand["lower"].numberValue, referenceBand["upper"].numberValue].compactMap { $0 }, id: \.self) { value in
+                            RuleMark(y: .value("Threshold", value / divisor))
+                                .foregroundStyle(Color.pink).lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                                .annotation(position: .top, alignment: .trailing) { Text(number(value)).font(.caption2).foregroundStyle(Color.pink) }
+                        }
+                    }
                     ForEach(Array(segments.enumerated()), id: \.offset) { _, row in
                         let lower = (row["display_min"].numberValue ?? 0) / divisor
                         let upper = (row["display_max"].numberValue ?? 0) / divisor
@@ -254,12 +308,68 @@ struct MetricChart: View {
                 .accessibilityAdjustableAction { move($0 == .increment ? 1 : -1) }
                 #endif
             }.frame(height: 250)
-            if let latest, let at = latest["last_at"].numberValue, let value = latest["latest_value"].numberValue {
+            if components.isEmpty, let latest, let at = latest["last_at"].numberValue, let value = latest["latest_value"].numberValue {
                 HStack {
                     Text("Latest: \(Date(timeIntervalSince1970: at).formatted(date: calendar.isDateInToday(Date(timeIntervalSince1970: at)) ? .omitted : .abbreviated, time: .shortened))")
                     Spacer()
                     Text("\(number(value)) \(displayUnit)")
                 }.font(.subheadline).padding(12).background(Color.secondary.opacity(0.16), in: Capsule())
+            }
+            if !components.isEmpty {
+                ForEach(Array(components.enumerated()), id: \.offset) { index, component in
+                    Button {
+                        let key = component["id"].stringValue
+                        if hiddenComponents.contains(key) { hiddenComponents.remove(key) } else { hiddenComponents.insert(key) }
+                        selected = nil
+                    } label: {
+                        HStack {
+                            Circle().fill(hiddenComponents.contains(component["id"].stringValue) ? Color.secondary : SourceLegend.colors[index % SourceLegend.colors.count]).frame(width: 10, height: 10)
+                            Text(component["title"].stringValue)
+                            Spacer()
+                            let reading = ranges["latest_reading"]
+                            if !hiddenSources.contains(reading["source"].stringValue), let value = reading["values"][component["id"].stringValue].numberValue {
+                                Text("\(number(value)) \(displayUnit)")
+                            } else { Text("—") }
+                        }.frame(minHeight: 44)
+                    }.buttonStyle(.plain)
+                    let days = ReferenceLevels.visibleDays(component["chart_ranges"]["reference_days"].arrayValue, start: active.start, end: active.start + active.length, unit: unit, hiddenSources: hiddenSources)
+                    let levels = ReferenceLevels.levels(days: days, names: names)
+                    if !levels.isEmpty {
+                        HStack {
+                            Text("\(component["title"].stringValue) · Reference Levels").font(.subheadline)
+                            ReferenceGuideButton {
+                                referenceSelection = ReferenceGuideSelection(guidance: component["reference_guidance"], assessment: ReferenceLevels.latestAssessment(days))
+                            }
+                        }
+                        ForEach(Array(levels.enumerated()), id: \.offset) { _, level in
+                            HStack { Text(level["label"].stringValue); Spacer(); let count = Int(level["days"].numberValue ?? 0); Text(count == 0 ? "—" : "\(count) \(count == 1 ? "day" : "days")") }.font(.caption)
+                        }
+                    } else { Text("No reference level").font(.caption).foregroundStyle(.secondary) }
+                }
+                if !hiddenSources.contains(ranges["latest_reading"]["source"].stringValue), let at = ranges["latest_reading"]["at"].numberValue {
+                    Text("Latest record: \(Date(timeIntervalSince1970: at).formatted())").font(.caption).foregroundStyle(.secondary)
+                }
+            } else if !referenceLevels.isEmpty {
+                HStack(spacing: 4) {
+                    Text("Reference Levels").font(.subheadline)
+                    ReferenceGuideButton {
+                        referenceSelection = ReferenceGuideSelection(guidance: guidance, assessment: (selected ?? rows.max { ($0["last_at"].numberValue ?? 0) < ($1["last_at"].numberValue ?? 0) })?["reference_assessment"] ?? .null)
+                    }
+                }
+                ForEach(Array(referenceLevels.enumerated()), id: \.offset) { _, level in
+                    Button { selectedLevelID = level["id"].stringValue } label: {
+                        HStack {
+                            Text(level["label"].stringValue)
+                            Spacer()
+                            let count = Int(level["days"].numberValue ?? 0)
+                            Text(count == 0 ? "—" : "\(count) \(count == 1 ? "day" : "days")")
+                        }.font(.subheadline).padding(12)
+                            .foregroundStyle(.primary)
+                            .background(level["id"] == referenceBand["id"] ? Color.pink.opacity(0.25) : Color.secondary.opacity(0.12), in: Capsule())
+                    }.buttonStyle(.plain)
+                }
+            } else {
+                Text("No reference level").font(.subheadline).foregroundStyle(.secondary)
             }
             ForEach(Array(sourceKeys.enumerated()), id: \.element) { index, key in
                 Button {
@@ -272,11 +382,11 @@ struct MetricChart: View {
                         if hiddenSources.contains(key) {
                             Circle().stroke(Color.secondary, lineWidth: 1.5).frame(width: 17, height: 17)
                         } else {
-                            Image(systemName: "checkmark.circle.fill").foregroundStyle(colors[index])
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(components.isEmpty ? colors[index] : Color.secondary)
                         }
                         #else
                         Image(systemName: hiddenSources.contains(key) ? "circle" : "checkmark.circle.fill")
-                            .foregroundStyle(hiddenSources.contains(key) ? Color.secondary : colors[index])
+                            .foregroundStyle(hiddenSources.contains(key) || !components.isEmpty ? Color.secondary : colors[index])
                         #endif
                         Text(model.sourceLabel(key, name: names[key] ?? key))
                             .foregroundStyle(hiddenSources.contains(key) ? .secondary : .primary)
@@ -293,6 +403,8 @@ struct MetricChart: View {
                     #endif
             }
 
+        }.navigationDestination(item: $referenceSelection) { selection in
+            ReferenceGuidePage(model: model, guidance: selection.guidance, assessment: selection.assessment)
         }.task(id: active) { onWindowChange?(active) }
         .onChange(of: timestamps) { _, _ in
             window = ChartWindow(timestamps: timestamps, period: active.period, calendar: calendar); selected = nil

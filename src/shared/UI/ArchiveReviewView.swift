@@ -62,7 +62,7 @@ struct ArchiveReviewView: View {
                     ShareLink("Share review and input references", item: text)
                 }
             }
-        }.navigationTitle("Log review").initialTask { await reload() }.refreshable { await reload() }
+        }.mobileNavigationTitle("Log review").initialTask { await reload() }.refreshable { await reload() }
     }
     private func reload() async {
         guard let client = model.client, let token = model.session?.token else { return }

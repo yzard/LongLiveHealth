@@ -32,7 +32,7 @@ struct FoodLookupView: View {
                     Link("Open Food Facts database license", destination: URL(string: "https://world.openfoodfacts.org/terms-of-use")!)
                 }
             }
-        }.navigationTitle("Find food by barcode")
+        }.mobileNavigationTitle("Find food by barcode")
     }
     private func values() -> [String: String] {
         var candidate = result["candidate"]

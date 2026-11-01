@@ -21,7 +21,7 @@ struct PasswordChangeView: View {
             }.disabled(model.isBusy || model.isHealthSyncRunning || current.isEmpty || replacement.utf8.count < 12 || replacement.utf8.count > 1024 || replacement != confirmation || current == replacement)
             if required { Button("Sign out") { Task { await model.logout() } }.disabled(model.isBusy) }
         }
-        .navigationTitle("Change password")
+        .mobileNavigationTitle("Change password")
         .interactiveDismissDisabled(required || !current.isEmpty || !replacement.isEmpty || !confirmation.isEmpty)
         .toolbar { if !required { Button("Cancel", role: .cancel) { dismiss() }.disabled(model.isBusy) } }
     }
@@ -46,7 +46,7 @@ struct UserManagementView: View {
                     else { Button("Delete", role: .destructive) { deleting = user } }
                 }
             }
-        }.navigationTitle("Users")
+        }.mobileNavigationTitle("Users")
             .task { if !loaded { await load() } }
             .refreshable { await load() }
             .toolbar {
@@ -92,7 +92,7 @@ struct CreateUserView: View {
             SecureField("Password (at least 12 characters)", text: $password).textContentType(.newPassword)
             if let failure { Text(failure).foregroundStyle(.red) }
             Button("Create user") { Task { await save() } }.disabled(saving || username.isEmpty || password.utf8.count < 12)
-        }.navigationTitle("Add user").disabled(saving)
+        }.mobileNavigationTitle("Add user").disabled(saving)
             .interactiveDismissDisabled(saving || !username.isEmpty || !password.isEmpty)
             .toolbar { Button("Cancel", role: .cancel) { dismiss() }.disabled(saving) }
     }

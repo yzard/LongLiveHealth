@@ -64,6 +64,7 @@ struct Range {
     max: f64,
     latest: f64,
     count: usize,
+    mean: f64,
 }
 impl Range {
     fn add(&mut self, at: f64, value: f64) {
@@ -75,11 +76,12 @@ impl Range {
         self.min = self.min.min(value);
         self.max = self.max.max(value);
         self.count += 1;
+        self.mean += (value - self.mean) / self.count as f64;
     }
     fn json(&self, source: &str, unit: &str, start: i64) -> Value {
         json!({"source":source,"unit":unit,"at":(start as f64+self.end as f64)/2.0,
             "start_at":start,"end_at":self.end,"first_at":self.first,"last_at":self.last,
-            "min":self.min,"max":self.max,"latest_value":self.latest,"count":self.count})
+            "min":self.min,"max":self.max,"latest_value":self.latest,"mean":self.mean,"count":self.count})
     }
 }
 
@@ -112,6 +114,7 @@ pub fn ranges(
                         max: value,
                         latest: value,
                         count: 0,
+                        mean: 0.0,
                     });
                 entry.add(at, value);
             }
@@ -146,6 +149,7 @@ pub fn ranges(
             .unwrap()
             .push(entry.json("", &unit, start));
     }
+    output["reference_days"] = output["W"].clone();
     output
 }
 
@@ -180,6 +184,7 @@ impl PeriodRanges {
                     max: value,
                     latest: value,
                     count: 0,
+                    mean: 0.0,
                 })
                 .add(at, value);
         }

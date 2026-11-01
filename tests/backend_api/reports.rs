@@ -531,3 +531,237 @@ async fn startup_relocates_old_pending_rows_and_recovers_an_interrupted_draft_cl
     assert_eq!(database.confirmed(&user.user_id).await.unwrap().len(), 1);
     database.close().await;
 }
+
+#[tokio::test]
+async fn rescan_replaces_results_preserves_original_and_rejects_stale_or_active_requests() {
+    let (_directory, state) = fixture().await;
+    let alice = add_user(&state, "alice").await;
+    let bob = add_user(&state, "bob").await;
+    let report = archive(&state, "alice").await;
+    confirm(&state, &alice.user_id, &report).await;
+    let original = state.database.file(&alice.user_id, &report).await.unwrap();
+    let summary = state
+        .database
+        .report_summary(&alice.user_id, &report)
+        .await
+        .unwrap();
+    assert!(
+        state
+            .database
+            .rescan_report(&alice.user_id, &report, summary.revision)
+            .await
+            .is_err()
+    );
+    let job = state
+        .database
+        .claim_job(2_000_000_000, 600, 3)
+        .await
+        .unwrap()
+        .unwrap();
+    state
+        .database
+        .finish_job(&job, 2_000_000_001, None)
+        .await
+        .unwrap();
+    assert!(
+        state
+            .database
+            .rescan_report(&bob.user_id, &report, summary.revision)
+            .await
+            .is_err()
+    );
+    assert!(
+        state
+            .database
+            .rescan_report(&alice.user_id, &report, summary.revision - 1)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        state
+            .database
+            .observations(&alice.user_id, &report)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    state
+        .database
+        .review(
+            &alice.user_id,
+            ReviewRequest {
+                report_id: report.clone(),
+                expected_revision: summary.revision,
+                context: None,
+                observations: vec![ReviewItem {
+                    observation_id: None,
+                    expected_revision: None,
+                    status: "pending".into(),
+                    payload: observation_payload(),
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    let revision = summary.revision + 1;
+    let queued = state
+        .database
+        .rescan_report(&alice.user_id, &report, revision)
+        .await
+        .unwrap();
+    assert_eq!(queued.status, "queued");
+    assert!(
+        state
+            .database
+            .observations(&alice.user_id, &report)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        state
+            .database
+            .confirmed(&alice.user_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        state
+            .database
+            .file(&alice.user_id, &report)
+            .await
+            .unwrap()
+            .relative_path,
+        original.relative_path
+    );
+    assert_eq!(
+        state
+            .database
+            .report_summary(&alice.user_id, &report)
+            .await
+            .unwrap()
+            .revision,
+        revision + 1
+    );
+    assert!(
+        state
+            .database
+            .rescan_report(&alice.user_id, &report, revision + 1)
+            .await
+            .is_err()
+    );
+    assert!(
+        state
+            .database
+            .rescan_report(&alice.user_id, &report, revision)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues() {
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "review-flags").await;
+    let report = archive(&state, "review-flags").await;
+    let mut unsupported = observation_payload();
+    unsupported.raw_name = "Globulin".into();
+    unsupported.raw_unit = Some("invalid-unit".into());
+    unsupported.metric_id = None;
+    let mut mapped = unsupported.clone();
+    mapped.metric_id = Some("globulin".into());
+    let mut unknown = observation_payload();
+    unknown.raw_name = "Unknown test".into();
+    unknown.metric_id = None;
+    let mut undated = observation_payload();
+    undated.sampled_at = None;
+    let mut qualitative = observation_payload();
+    qualitative.raw_name = "ABO Group".into();
+    qualitative.raw_unit = None;
+    qualitative.raw_result = "O".into();
+    qualitative.metric_id = None;
+    let response = state
+        .database
+        .review(
+            &user.user_id,
+            ReviewRequest {
+                report_id: report,
+                expected_revision: 1,
+                context: None,
+                observations: vec![unsupported, mapped, unknown, undated, qualitative]
+                    .into_iter()
+                    .map(|payload| ReviewItem {
+                        observation_id: None,
+                        expected_revision: None,
+                        status: "pending".into(),
+                        payload,
+                    })
+                    .collect(),
+            },
+        )
+        .await
+        .unwrap();
+    let rows = response["observations"].as_array().unwrap();
+    let find = |name: &str, mapped: bool| {
+        rows.iter()
+            .find(|r| {
+                r["payload"]["raw_name"] == name && r["payload"]["metric_id"].is_string() == mapped
+            })
+            .unwrap()
+    };
+    let bad = find("Globulin", false);
+    assert_eq!(bad["browse_issues"][0]["code"], "unsupported_unit");
+    assert_eq!(bad["browse_issues"][0]["scope"], "browse");
+    assert!(
+        bad["browse_issues"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("invalid-unit")
+    );
+    assert_eq!(find("Globulin", true)["browse_issues"][0]["scope"], "chart");
+    assert_eq!(
+        find("Unknown test", false)["browse_issues"][0]["code"],
+        "unmapped_metric"
+    );
+    assert_eq!(
+        find("LDL Cholesterol", true)["browse_issues"][0]["code"],
+        "missing_date"
+    );
+    assert!(
+        find("ABO Group", false)["browse_issues"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let mut corrected: longlivehealth::reports::ObservationPayload =
+        serde_json::from_value(bad["payload"].clone()).unwrap();
+    corrected.raw_unit = Some("g/dL (calc)".into());
+    let fixed = state
+        .database
+        .review(
+            &user.user_id,
+            ReviewRequest {
+                report_id: bad["report_id"].as_str().unwrap().into(),
+                expected_revision: 2,
+                context: None,
+                observations: vec![ReviewItem {
+                    observation_id: Some(bad["observation_id"].as_str().unwrap().into()),
+                    expected_revision: Some(1),
+                    status: "confirmed".into(),
+                    payload: corrected,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    let fixed = fixed["observations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["observation_id"] == bad["observation_id"])
+        .unwrap();
+    assert!(fixed["browse_issues"].as_array().unwrap().is_empty());
+    assert_eq!(fixed["resolved_metric_id"], "globulin");
+}

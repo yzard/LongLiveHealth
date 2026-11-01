@@ -234,6 +234,12 @@ pub(crate) fn project_json(text: &str) -> Result<String, AppError> {
     if record.as_object().is_some_and(|r| r.is_empty()) {
         return Ok("{}".into());
     }
+    let components = crate::wellness::component_projection::project(
+        record["record_type"].as_str().unwrap_or(""),
+        &record["payload"],
+        record["start_at"].as_f64().unwrap_or(0.0),
+        record["end_at"].as_f64().unwrap_or(0.0),
+    );
     let payload = record
         .get_mut("payload")
         .and_then(Value::as_object_mut)
@@ -250,6 +256,15 @@ pub(crate) fn project_json(text: &str) -> Result<String, AppError> {
     hash_value(&record, &mut hash)?;
     let content_hash = hex::encode(hash.finalize());
     let mut payload = record["payload"].clone();
+    if let Some(at) = crate::wellness::component_projection::timestamp(
+        record["record_type"].as_str().unwrap_or(""),
+        &payload,
+    ) {
+        payload["chart_at"] = json!(at);
+    }
+    if components.as_array().is_some_and(|v| !v.is_empty()) {
+        payload["chart_components"] = components;
+    }
     if apple
         && record["record_type"] == "heart_rate"
         && let Some(samples) = heart_samples(&payload)

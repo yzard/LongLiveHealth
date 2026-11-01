@@ -97,7 +97,7 @@ async fn viewer_does_not_swallow_unknown_assets_or_api_paths_and_keeps_data_auth
                 .contains("application/json")
         );
     }
-    for path in ["reports/list", "health/list", "analysis/list"] {
+    for path in ["reports/list", "health/coverage", "analysis/list"] {
         assert_eq!(
             request(&router, &format!("/api/v1/{path}"), None, json!({}))
                 .await
@@ -119,9 +119,9 @@ async fn viewer_does_not_swallow_unknown_assets_or_api_paths_and_keeps_data_auth
     assert_eq!(
         request(
             &router,
-            "/api/v1/health/list",
+            "/api/v1/wellness/records/list",
             Some(&session),
-            json!({"limit":50,"offset":0})
+            json!({"kind":"electrocardiogram","after":null})
         )
         .await
         .1["records"],
