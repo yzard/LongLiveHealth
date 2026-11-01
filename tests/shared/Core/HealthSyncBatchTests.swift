@@ -90,3 +90,27 @@ private func sample(_ kind: String, _ index: Int) -> JSONValue {
     #expect(tail?.request["records"].arrayValue.count == 1)
     #expect(tail?.writes["anchor"] == .string("end"))
 }
+
+@Test func escapedJSONBytesTriggerChunksAndSurviveReplayWithoutLosingRecords() async throws {
+    var builder = HealthSyncBatch(connectionID: "设备/one")
+    // Escaping doubles these bytes. Counting characters or unescaped UTF-8 would
+    // incorrectly keep both records in one buffering block.
+    let text = String(repeating: "\n\"\\", count: HealthSyncBatch.targetBytes / 10)
+    let records: [JSONValue] = (0..<2).map { index in
+        .object(["record_id": .string("记录/\(index)"), "payload": .string(text)])
+    }
+    let blocks = try await builder.append(recordType: "quoted-record", status: "observed", records: records,
+        writes: ["anchor": .string("next")])
+    let first = try #require(blocks.first)
+    #expect(blocks.count == 1)
+    #expect(first.writes.isEmpty)
+    let tail = builder.finish()
+    let last = try #require(tail)
+    #expect(first.request["records"].arrayValue.count == 1)
+    #expect(last.request["records"].arrayValue.count == 1)
+    #expect(last.writes["anchor"] == .string("next"))
+    let encoded = try [first, last].map { try JSONEncoder().encode($0) }
+    let replayed = try encoded.map { try JSONDecoder().decode(HealthSyncBlock.self, from: $0) }
+    #expect(replayed.flatMap { $0.request["records"].arrayValue } == records)
+    #expect(replayed[0].request["batch_id"] != replayed[1].request["batch_id"])
+}
