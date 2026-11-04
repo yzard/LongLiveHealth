@@ -11,3 +11,14 @@ import Testing
         #expect(throws: (any Error).self) { try APIClient.serverURL(input) }
     }
 }
+
+@Test func interruptedBrowseResponseRecognizesAndroidPartialTransfers() {
+    let message = "transfer closed with outstanding read data remaining"
+    #expect(APIClient.isInterruptedRead(NSError(domain: NSURLErrorDomain, code: -1,
+        userInfo: [NSLocalizedDescriptionKey: message])))
+    #expect(APIClient.isInterruptedRead(URLError(.networkConnectionLost)))
+    #expect(!APIClient.isInterruptedRead(URLError(.cancelled)))
+    #expect(!APIClient.isInterruptedRead(URLError(.secureConnectionFailed)))
+    #expect(!APIClient.isInterruptedRead(NSError(domain: "Other", code: -1,
+        userInfo: [NSLocalizedDescriptionKey: message])))
+}

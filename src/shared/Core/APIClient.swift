@@ -74,10 +74,31 @@ public nonisolated final class APIClient: Sendable {
             (bytes, response) = try await uploadTransport(request, encoded, body["batch_id"].stringValue)
         } else {
             request.httpBody = encoded
-            (bytes, response) = try await session.data(for: request)
+            (bytes, response) = try await readResponse(for: request, retryInterruptedRead: path == "browse/catalog")
         }
         try check(response, bytes: bytes)
         return try await Self.decodeResponse(bytes)
+    }
+
+    private func readResponse(for request: URLRequest, retryInterruptedRead: Bool) async throws -> (Data, URLResponse) {
+        do {
+            return try await session.data(for: request)
+        } catch where retryInterruptedRead && Self.isInterruptedRead(error) {
+            try Task.checkCancellation()
+            do {
+                return try await session.data(for: request)
+            } catch where Self.isInterruptedRead(error) {
+                throw URLError(.networkConnectionLost)
+            }
+        }
+    }
+
+    static func isInterruptedRead(_ error: Error) -> Bool {
+        let network = error as NSError
+        guard network.domain == NSURLErrorDomain else { return false }
+        let description = network.localizedDescription.lowercased()
+        return network.code == URLError.networkConnectionLost.rawValue ||
+            (description.contains("transfer closed") && description.contains("outstanding read data remaining"))
     }
 
     @concurrent private static func encodeRequest(_ body: JSONValue) async throws -> Data {
