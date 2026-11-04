@@ -1,10 +1,10 @@
 package health.app
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -15,11 +15,15 @@ import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
@@ -96,26 +100,41 @@ internal fun View.healthDesign(): View = this
         )
     }
     .material3SegmentedButton { options ->
+        val trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+            .compositeOver(MaterialTheme.colorScheme.background)
+        val trackShape = RoundedCornerShape(
+            topStart = if (options.index == 0) 50.dp else 0.dp,
+            bottomStart = if (options.index == 0) 50.dp else 0.dp,
+            topEnd = if (options.index == options.count - 1) 50.dp else 0.dp,
+            bottomEnd = if (options.index == options.count - 1) 50.dp else 0.dp
+        )
         options.copy(
-            // Adjacent segments paint one continuous track. Only its outside ends
-            // are rounded; the selected indicator is inset and independently rounded.
-            modifier = options.modifier.background(
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f),
-                RoundedCornerShape(
-                    topStart = if (options.index == 0) 11.dp else 0.dp,
-                    bottomStart = if (options.index == 0) 11.dp else 0.dp,
-                    topEnd = if (options.index == options.count - 1) 11.dp else 0.dp,
-                    bottomEnd = if (options.index == options.count - 1) 11.dp else 0.dp
-                )
-            ).padding(2.dp),
-            shape = RoundedCornerShape(8.dp),
+            modifier = options.modifier.drawWithCache {
+                // Match the native 40 dp button surface inside its 48 dp touch target.
+                val height = if (size.height <= 48.dp.roundToPx()) {
+                    minOf(size.height, 40.dp.toPx())
+                } else {
+                    size.height
+                }
+                val outline = trackShape.createOutline(Size(size.width, height), layoutDirection, this)
+                onDrawBehind {
+                    translate(top = (size.height - height) / 2f) {
+                        drawOutline(outline, trackColor)
+                    }
+                }
+            },
+            shape = CircleShape,
             border = BorderStroke(0.dp, Color.Transparent),
             icon = {},
             colors = SegmentedButtonDefaults.colors(
                 activeContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.20f),
                 activeContentColor = MaterialTheme.colorScheme.onSurface,
                 inactiveContainerColor = Color.Transparent,
-                inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                inactiveContentColor = MaterialTheme.colorScheme.onSurface,
+                activeBorderColor = Color.Transparent,
+                inactiveBorderColor = Color.Transparent,
+                disabledActiveBorderColor = Color.Transparent,
+                disabledInactiveBorderColor = Color.Transparent
             )
         )
     }

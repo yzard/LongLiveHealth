@@ -159,7 +159,7 @@ struct DailyMetricView: View {
                 if metric["current"]["state"] == .string("query_limit_exceeded") {
                     Text("This history exceeds the daily query limit. Its records are saved, but the chart could not be loaded.").foregroundStyle(.secondary)
                 }
-                MetricChart(model: model, guidance: displayed["reference_guidance"], ranges: displayed["chart_ranges"], unit: chartUnit,
+                MetricChart(model: model, guidance: displayed["reference_guidance"], ranges: displayed["chart_ranges"], unit: chartUnit, metricKind: metric["record_type"].stringValue,
                             divisor: ["sleep", "workout"].contains(metric["record_type"].stringValue) ? 3600 : 1,
                             sourceKeys: sourceKeys, names: [:], initialPeriod: .week, showsHour: false, heartRate: metric["record_type"] == .string("resting_heart_rate"), navigationTimestamps: [completeHistory["first_record_at"].numberValue, completeHistory["last_record_at"].numberValue].compactMap { $0 }, onWindowChange: { selectedWindow = $0 })
                     .environment(\.timeZone, .gmt)

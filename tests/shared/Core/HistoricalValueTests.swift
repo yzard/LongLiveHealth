@@ -52,3 +52,38 @@ import Testing
     #expect(rows.map { $0.value["source"].stringValue } == ["first","second","first"])
     #expect(Set(rows.map(\.id)).count == 3)
 }
+
+@Test func unitLabelsDistinguishVolumeFromCellConcentration() {
+    #expect(HistoricalValue.displayUnit("Not reported", kind: "") == "Unit Not Specified")
+    #expect(HistoricalValue.quantity(.number(35), unit: "degC") == "35 °C")
+    #expect(HistoricalValue.displayUnit("10^-6L", kind: "") == "µL")
+    #expect(HistoricalValue.displayUnit("10^9/L", kind: "") == "×10⁹ cells/L")
+    #expect(HistoricalValue.displayUnit("10^12/L", kind: "") == "×10¹² cells/L")
+    #expect(HistoricalValue.displayUnit("mg/dL", kind: "") == "mg/dL")
+}
+
+@Test func browseLabelsPreserveMetricMeaningAndOriginalScale() {
+    for (unit, kind, label) in [
+        ("count/min", "respiratory_rate", "breaths/min"),
+        ("count/min", "HKQuantityTypeIdentifierCyclingCadence", "rpm"),
+        ("count/min", "heart_rate", "BPM"),
+        ("count", "HKQuantityTypeIdentifierBodyMassIndex", "kg/m²"),
+        ("count", "HKQuantityTypeIdentifierNikeFuel", "points"),
+        ("count", "steps", "count"),
+        ("K/uL", "", "×10³ cells/µL"),
+        ("x 10(6)/uL", "", "×10⁶ cells/µL"),
+        ("count/mL", "", "cells/mL"),
+        ("/100 WBC's", "", "per 100 white blood cells"),
+        ("NG/ML", "", "ng/mL"),
+        ("mcg/dL (calc)", "", "µg/dL (calculated)"),
+        ("mL/min/1.73m2", "", "mL/min per 1.73 m²"),
+        ("dBASPL", "", "dB(A) SPL"),
+        ("kcal/(kg*hr)", "", "kcal/(kg·h)"),
+        ("10*-12.L", "", "pL"),
+        ("1", "", "unitless"),
+        ("unsupported-original", "", "unsupported-original")
+    ] {
+        #expect(HistoricalValue.displayUnit(unit, kind: kind) == label)
+    }
+    #expect(HistoricalValue.quantity(.number(0.04), unit: "x 10(3)/uL") == "0.04 ×10³ cells/µL")
+}

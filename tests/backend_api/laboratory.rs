@@ -20,7 +20,11 @@ fn analyte_specific_conversions_and_aliases_retain_printed_payload() {
         ("wbc", "5", "x10(3)/uL", "5", "10^9/L"),
         ("wbc", "5", "10*3/uL", "5", "10^9/L"),
         ("wbc", "5", "10*9/L", "5", "10^9/L"),
+        ("wbc", "5000000000", "cells/L", "5", "10^9/L"),
+        ("wbc", "5000000", "count/mL", "5", "10^9/L"),
+        ("wbc", "0.005", "10*12{cells}/L", "5", "10^9/L"),
         ("mcv", "90", "fL", "90", "fL"),
+        ("mcv", "0.09", "10*-12.L", "90", "fL"),
         ("alp", "60", "IU/L", "60", "U/L"),
     ] {
         let mut input = observation_payload();
@@ -144,6 +148,7 @@ fn clinical_spelling_aliases_keep_prefix_magnitudes_distinct() {
             assert_eq!(canonical_unit(alias), Some(expected), "{alias}");
         }
     }
+    assert_eq!(canonical_unit("/100 WBC’s"), Some("/100 WBC's"));
     assert_ne!(canonical_unit("M/uL"), canonical_unit("K/uL"));
     assert_ne!(canonical_unit("ng/L"), canonical_unit("ng/mL"));
     assert_eq!(canonical_unit("Mmol/L"), None);
@@ -257,4 +262,14 @@ fn administrative_fields_cannot_be_saved_even_with_a_forged_metric_id() {
         payload.metric_id = None;
         assert!(payload.validate(1).is_ok(), "{name}");
     }
+}
+
+#[test]
+fn apple_volume_prefixes_do_not_accept_count_concentrations() {
+    use longlivehealth::apple_health::normalize;
+    assert_eq!(normalize(2.0, "10*-3.L", "mL"), Some(2.0));
+    assert_eq!(normalize(2000.0, "10⁻⁶L", "mL"), Some(2.0));
+    assert_eq!(normalize(2.0, "10⁻⁹L", "nL"), Some(2.0));
+    assert_eq!(normalize(2.0, "10⁻¹²L", "pL"), Some(2.0));
+    assert_eq!(normalize(2.0, "10^9/L", "mL"), None);
 }

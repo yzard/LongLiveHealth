@@ -9,6 +9,7 @@ struct MetricChart: View {
     let guidance: JSONValue
     let ranges: JSONValue
     let unit: String
+    var metricKind: String = ""
     let divisor: Double
     let sourceKeys: [String]
     let names: [String: String]
@@ -79,7 +80,7 @@ struct MetricChart: View {
             $0["unit"].stringValue == unit && !hiddenSources.contains($0["source"].stringValue)
         }.max { ($0["last_at"].numberValue ?? 0) < ($1["last_at"].numberValue ?? 0) }
     }
-    private var displayUnit: String { heartRate ? "BPM" : divisor == 3600 ? "Hours" : unit }
+    private var displayUnit: String { heartRate ? "BPM" : divisor == 3600 ? "Hours" : HistoricalValue.displayUnit(unit.isEmpty ? "Unit Not Specified" : unit, kind: metricKind) }
     private var colors: [Color] {
         sourceKeys.enumerated().map { heartRate && $0.offset == 0 ? .pink : SourceLegend.colors[$0.offset % SourceLegend.colors.count] }
     }

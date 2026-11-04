@@ -20,7 +20,7 @@ import Testing
             #expect(HistoricalValue.displayUnit(unit, kind: kind) == "BPM")
         }
     }
-    #expect(HistoricalValue.displayUnit("count/min", kind: "respiratory_rate") == "count/min")
+    #expect(HistoricalValue.displayUnit("count/min", kind: "respiratory_rate") == "breaths/min")
     #expect(HistoricalValue.displayUnit("ms", kind: "heart_rate_variability") == "ms")
     let record: JSONValue = .object(["record_type":.string("HKQuantityTypeIdentifierHeartRate"),"values":.array([.object(["value":.number(70),"unit":.string("count/min")])])])
     #expect(HistoricalValue.record(record) == "70 BPM")

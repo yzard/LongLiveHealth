@@ -78,7 +78,7 @@ companion object {
             "notifications.clear" -> { context.getSystemService(NotificationManager::class.java).cancelAll(); "" }
             "background.schedule" -> { HealthSyncWorker.schedule(context); "" }
             "lease.begin" -> if (HealthSyncWorker.running) "worker" else TransferService.acquire(context, input)
-            "lease.end" -> { if (input != "worker") TransferService.release(context, input); "" }
+            "lease.end" -> { if (input != "worker") TransferService.release(input); "" }
             "start" -> {
                 val request = JSONObject(input)
                 val id = UUID.randomUUID().toString()

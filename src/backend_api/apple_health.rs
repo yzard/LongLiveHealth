@@ -28,6 +28,18 @@ pub fn unit(kind: &str) -> Option<&'static str> {
         .filter(|d| d.family == "quantity")
         .map(|d| d.unit.as_str())
 }
+/// Canonical SI volume and its power of ten relative to a liter.
+pub(crate) fn volume_unit(unit: &str) -> Option<(&'static str, i32)> {
+    Some(match unit {
+        "L" | "l" => ("L", 0),
+        "mL" | "ml" | "ML" | "10^-3L" | "10*-3.L" | "10⁻³L" => ("mL", -3),
+        "µL" | "uL" | "ul" | "μL" | "10^-6L" | "10*-6.L" | "10⁻⁶L" => ("µL", -6),
+        "nL" | "nl" | "10^-9L" | "10*-9.L" | "10⁻⁹L" => ("nL", -9),
+        "pL" | "pl" | "10^-12L" | "10*-12.L" | "10⁻¹²L" => ("pL", -12),
+        "fL" | "fl" | "10^-15L" | "10*-15.L" | "10⁻¹⁵L" => ("fL", -15),
+        _ => return None,
+    })
+}
 /// HKQuantity descriptions already express percent as 0–100, unlike doubleValue(.percent()).
 /// Only dimensionally compatible units are converted; invalid records remain in history.
 pub fn normalize(value: f64, from: &str, to: &str) -> Option<f64> {
@@ -35,11 +47,14 @@ pub fn normalize(value: f64, from: &str, to: &str) -> Option<f64> {
         return None;
     }
     fn alias(u: &str) -> &str {
+        if let Some((unit, _)) = volume_unit(u) {
+            return unit;
+        }
         match u {
             "kcal/hr·kg" => "kcal/(kg*hr)",
             "ml/kg*min" | "ml/min·kg" | "mL/kg/min" => "ml/(kg*min)",
             "bpm" => "count/min",
-            "ml" => "mL",
+            "Cel" | "[degC]" | "°C" => "degC",
             _ => u,
         }
     }
@@ -62,8 +77,6 @@ pub fn normalize(value: f64, from: &str, to: &str) -> Option<f64> {
         "min" => Some(("time", 60.0)),
         "s" => Some(("time", 1.0)),
         "ms" => Some(("time", 0.001)),
-        "L" => Some(("volume", 1000.0)),
-        "mL" => Some(("volume", 1.0)),
         "m/s" => Some(("speed", 1.0)),
         "km/hr" | "km/h" => Some(("speed", 1.0 / 3.6)),
         "mi/hr" | "mph" => Some(("speed", 0.44704)),
@@ -72,7 +85,7 @@ pub fn normalize(value: f64, from: &str, to: &str) -> Option<f64> {
         "kcal" => Some(("energy", 1.0)),
         "kJ" => Some(("energy", 1.0 / 4.184)),
         "J" => Some(("energy", 1.0 / 4184.0)),
-        _ => None,
+        _ => volume_unit(u).map(|(_, exponent)| ("volume", 10_f64.powi(exponent))),
     };
     let result = if from == to {
         value

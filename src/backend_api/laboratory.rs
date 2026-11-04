@@ -4,7 +4,7 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 use std::str::FromStr;
 
-pub const CONVERSION_VERSION: &str = "lab-units-v6";
+pub const CONVERSION_VERSION: &str = "lab-units-v7";
 pub const CANONICAL_UNITS: &[&str] = &[
     "mg/dL",
     "mg/L",
@@ -18,10 +18,17 @@ pub const CANONICAL_UNITS: &[&str] = &[
     "ng/L",
     "%",
     "mmol/mol",
+    "L",
+    "mL",
+    "µL",
+    "nL",
+    "pL",
     "fL",
     "U/L",
     "10^9/L",
     "10^12/L",
+    "cells/L",
+    "cells/mL",
     "cells/µL",
     "pg",
     "pg/mL",
@@ -203,7 +210,9 @@ pub fn canonical_unit(raw: &str) -> Option<&'static str> {
         "nmol/L" | "nmol/l" => Some("nmol/L"),
         "mcg/dL" | "ug/dL" | "ug/dl" | "ug/dL(calc)" | "mcg/dL(calc)" => Some("µg/dL"),
         "mcg/L" => Some("µg/L"),
-        "cells/uL" | "cell/uL" | "#/uL" => Some("cells/µL"),
+        "cells/L" | "cell/L" | "count/L" | "{cells}/L" | "{count}/L" => Some("cells/L"),
+        "cells/mL" | "cells/ml" | "cell/mL" | "count/mL" | "{cells}/mL" => Some("cells/mL"),
+        "cells/uL" | "cell/uL" | "#/uL" | "count/uL" | "{cells}/uL" => Some("cells/µL"),
         "mIU/mL" | "mIU/ml" => Some("mIU/mL"),
         "IU/mL" | "IU/ml" => Some("IU/mL"),
         "U/mL" | "U/ml" => Some("U/mL"),
@@ -222,17 +231,17 @@ pub fn canonical_unit(raw: &str) -> Option<&'static str> {
         "pg" | "PG" => Some("pg"),
         "mIU/L" | "mIU/l" | "uIU/mL" | "uIU/ml" => Some("mIU/L"),
         "mL/min/1.73m2" | "ml/min/1.73m2" | "mL/min/{1.73_m2}" => Some("mL/min/1.73m2"),
-        "s" | "sec" | "second(s)" => Some("s"),
+        "s" | "sec" | "seconds" | "second(s)" => Some("s"),
+        "/100WBC's" | "/100WBC’s" | "/100WBC" => Some("/100 WBC's"),
         "10^12/L" | "10*12/L" | "10¹²/L" | "10^6/uL" | "10*6/uL" | "x10(6)/uL" | "M/uL"
-        | "Million/uL" => Some("10^12/L"),
+        | "Million/uL" | "10^12{cells}/L" | "10*12{cells}/L" => Some("10^12/L"),
         "%" | "%(calc)" | "%NGSP" | "NGSP%" => Some("%"),
         "mmol/mol" | "MMOL/MOL" => Some("mmol/mol"),
-        "fL" | "fl" => Some("fL"),
         "U/L" | "IU/L" => Some("U/L"),
         "10^9/L" | "10⁹/L" | "10^3/uL" | "10³/uL" | "10*9/L" | "10*3/uL" | "K/uL" | "x10(3)/uL"
         | "x10^3/uL" | "×10^3/uL" | "×10³/uL" | "x10^9/L" | "x10(9)/L" | "×10^9/L" | "×10⁹/L"
-        | "Thousand/uL" => Some("10^9/L"),
-        _ => None,
+        | "Thousand/uL" | "10^9{cells}/L" | "10*9{cells}/L" => Some("10^9/L"),
+        _ => crate::apple_health::volume_unit(&compact).map(|(unit, _)| unit),
     }
 }
 
@@ -254,9 +263,38 @@ fn conversion(metric: &str, standard: &str, unit: &str) -> Option<Conversion> {
     if standard == unit {
         return Some(rule);
     }
-    if standard == "10^9/L" && unit == "cells/µL" {
-        rule.scale = Decimal::new(1, 3);
+    if let Some(exponent) = match standard {
+        "10^9/L" => Some(9),
+        "10^12/L" => Some(12),
+        _ => None,
+    } {
+        let input_exponent = match unit {
+            "cells/L" => 0,
+            "cells/mL" => 3,
+            "cells/µL" => 6,
+            "10^9/L" => 9,
+            "10^12/L" => 12,
+            _ => return None,
+        };
+        if input_exponent < exponent {
+            rule.scale = Decimal::new(1, exponent - input_exponent);
+        } else {
+            rule.scale = Decimal::from(10_i64.pow(input_exponent - exponent));
+        }
         rule.rule = "cell-count-volume";
+        return Some(rule);
+    }
+    if let (Some((_, target)), Some((_, input))) = (
+        crate::apple_health::volume_unit(standard),
+        crate::apple_health::volume_unit(unit),
+    ) {
+        let exponent = input - target;
+        if exponent < 0 {
+            rule.scale = Decimal::new(1, exponent.unsigned_abs());
+        } else {
+            rule.scale = Decimal::from(10_i64.pow(exponent as u32));
+        }
+        rule.rule = "si-volume";
         return Some(rule);
     }
     if metric == "hba1c" {

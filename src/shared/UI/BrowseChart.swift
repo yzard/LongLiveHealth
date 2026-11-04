@@ -44,7 +44,7 @@ struct BrowseChart<Content: View>: View {
                 Text(dateRange).font(.subheadline.weight(.semibold))
                     .accessibilityIdentifier("chart-date-range")
                 Spacer()
-                Text(unit.isEmpty ? "Unit unavailable" : unit).font(.caption).foregroundStyle(.secondary)
+                Text(unit.isEmpty ? "Unit Not Specified" : HistoricalValue.displayUnit(unit, kind: "")).font(.caption).foregroundStyle(.secondary)
             }
             chart(window.start...(window.start + window.length), window.period)
                 #if !os(Android)

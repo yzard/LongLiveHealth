@@ -11,7 +11,7 @@ struct ReferenceGuideView: View {
     }
     private func interval(_ rule: JSONValue) -> String {
         let unit = assessment["unit"].stringValue.isEmpty ? guidance["unit"].stringValue : assessment["unit"].stringValue
-        return ReferenceIntervalText.interval(rule,unit:unit,sleepDuration:guidance["metric_id"] == .string("sleep") && ["s", "seconds"].contains(unit))
+        return ReferenceIntervalText.interval(rule,unit:HistoricalValue.displayUnit(unit, kind: guidance["metric_id"].stringValue),sleepDuration:guidance["metric_id"] == .string("sleep") && ["s", "seconds"].contains(unit))
     }
     private func population(_ rule: JSONValue) -> String {
         if rule["kind"] == .string("report_reference") { return "Original result reference interval" }

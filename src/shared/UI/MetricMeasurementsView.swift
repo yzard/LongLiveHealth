@@ -22,10 +22,10 @@ struct MetricMeasurementsView: View {
             MetricChartSection {
                 if units.count > 1 {
                     Picker("Measurement unit", selection: Binding(get: { displayUnit }, set: { selectedUnit = $0 })) {
-                        ForEach(units, id: \.self) { Text($0).tag($0) }
+                        ForEach(units, id: \.self) { Text(HistoricalValue.displayUnit($0, kind: kind)).tag($0) }
                     }
                 }
-                MetricChart(model: model, guidance: result["reference_guidance"], ranges: chartRanges, unit: displayUnit,
+                MetricChart(model: model, guidance: result["reference_guidance"], ranges: chartRanges, unit: displayUnit, metricKind: kind,
                     divisor: 1, sourceKeys: result["sources"].arrayValue.map(\.stringValue), names: [:],
                     initialPeriod: kind == "heart_rate" ? .day : .week, showsHour: true, heartRate: kind == "heart_rate",
                     navigationTimestamps: bounds, onWindowChange: { selectedWindow = $0 })
@@ -93,9 +93,12 @@ struct MeasurementValuesView: View {
     var body: some View {
         List {
             ForEach(Array(HistoricalValue.newestFirst(points, timestamps: ["at"], dates: []).enumerated()), id: \.offset) { _, point in
+                let converted = point["value"] != .null
+                let unit = point[converted ? "unit" : "raw_unit"].stringValue
                 HistoricalValueRow(timestamp: point["at"].numberValue, dateText: "",
                     source: model.sourceLabel(point["source"].stringValue),
-                    value: HistoricalValue.quantity(point["value"] == .null ? point["raw_value"] : point["value"], unit: HistoricalValue.displayUnit(point["unit"].stringValue.isEmpty ? point["raw_unit"].stringValue : point["unit"].stringValue, kind: kind)))
+                    value: HistoricalValue.quantity(point[converted ? "value" : "raw_value"],
+                        unit: HistoricalValue.displayUnit(unit.isEmpty ? "Unit Not Specified" : unit, kind: kind)))
             }
             if let failure { Text(failure).foregroundStyle(.secondary) }
             if loading { ProgressView() }

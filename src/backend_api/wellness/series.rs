@@ -193,7 +193,12 @@ pub(crate) fn convert(
     value: Option<f64>,
 ) -> Option<f64> {
     let value = value.filter(|v| v.is_finite())?;
-    let (value, valid) = match (kind, unit?) {
+    let unit = unit.filter(|unit| !unit.trim().is_empty()).or_else(|| {
+        // A closed catalog defines these measurements as plain counts.
+        // Missing concentrations, rates and other units remain unknown.
+        crate::apple_health::unit(kind).filter(|unit| *unit == "count")
+    })?;
+    let (value, valid) = match (kind, unit) {
         ("heart_rate", "count/min" | "bpm") => (value, value > 0.0 && value <= 300.0),
         ("blood_glucose", "mg/dL") => (value, value > 0.0 && value <= 2000.0),
         ("blood_glucose", "mmol/L") => {
@@ -209,7 +214,7 @@ pub(crate) fn convert(
         }
         ("body_fat" | "oxygen_saturation", "%") => (value, (0.0..=100.0).contains(&value)),
         ("respiratory_rate", "count/min") => (value, value > 0.0 && value <= 200.0),
-        _ => return crate::apple_health::normalize(value, unit?, crate::apple_health::unit(kind)?),
+        _ => return crate::apple_health::normalize(value, unit, crate::apple_health::unit(kind)?),
     };
     valid.then_some(value)
 }

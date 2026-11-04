@@ -108,7 +108,7 @@ struct SpecialtyRecordView: View {
                 Section("Related source measurement") {
                     Text(relation["state"].stringValue)
                     ForEach(Array(relation["records"].arrayValue.enumerated()), id: \.offset) { _, record in
-                        Text(record["record_type"].stringValue + " · " + (record["value"].numberValue?.formatted() ?? "Missing") + " " + record["unit"].stringValue)
+                        Text(record["record_type"].stringValue + " · " + HistoricalValue.quantity(record["value"], unit: HistoricalValue.displayUnit(record["unit"].stringValue, kind: record["record_type"].stringValue)))
                     }
                 }
             }

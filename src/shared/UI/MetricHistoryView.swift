@@ -27,7 +27,7 @@ struct MetricHistoryView: View {
                 if !loading && points.isEmpty && !records.isEmpty { Text("Open Historical Values to see the results. A chart requires an exact numeric result, unit and collection date.").font(.caption).foregroundStyle(.secondary) }
                 if !points.isEmpty {
                     ForEach(chartUnits, id: \.self) { unit in
-                    MetricChart(model: model, guidance: history["reference_guidance"], ranges: history["chart_ranges"], unit: unit,
+                    MetricChart(model: model, guidance: history["reference_guidance"], ranges: history["chart_ranges"], unit: unit, metricKind: metric["metric_id"].stringValue,
                                 divisor: 1, sourceKeys: sourceKeys, names: sourceNames,
                                 initialPeriod: .week, showsHour: false, heartRate: false, navigationTimestamps: nil, onWindowChange: nil)
                         .environment(\.timeZone, .gmt)
@@ -95,7 +95,8 @@ struct MetricHistoricalValuesView: View {
                             DisclosureGroup("Original results (\(record["original_records"].arrayValue.count))") {
                                 ForEach(Array(record["original_records"].arrayValue.enumerated()), id: \.offset) { _, item in
                                     let quantity = item["observation"]["valueQuantity"]
-                                    Text("\(quantity["comparator"].stringValue)\(quantity["value"].numberValue?.formatted() ?? record["display_value"].stringValue) \(quantity["unit"].stringValue.isEmpty ? quantity["code"].stringValue : quantity["unit"].stringValue)").font(.caption)
+                                    let unit = quantity["unit"].stringValue.isEmpty ? quantity["code"].stringValue : quantity["unit"].stringValue
+                                    Text("\(quantity["comparator"].stringValue)\(quantity["value"].numberValue?.formatted() ?? record["display_value"].stringValue) \(HistoricalValue.displayUnit(unit, kind: ""))").font(.caption)
                                 }
                             }
                         }
@@ -105,8 +106,11 @@ struct MetricHistoricalValuesView: View {
                         }
                         if !record["status"].stringValue.isEmpty { Text(record["status"].stringValue.capitalized).font(.caption) }
                     } label: {
+                        let value = record["display_value"] == .null ? record["value"] : record["display_value"]
+                        let unit = record["unit"].stringValue
+                        let numeric = value.numberValue != nil
                         HistoricalValueRow(timestamp: nil, dateText: record["sampled_at"].stringValue,
-                            source: model.sourceLabel(record: record), value: HistoricalValue.quantity(record["display_value"] == .null ? record["value"] : record["display_value"], unit: record["unit"].stringValue))
+                            source: model.sourceLabel(record: record), value: HistoricalValue.quantity(value, unit: unit.isEmpty && numeric ? "Unit Not Specified" : unit))
                     }
                 }
             }
