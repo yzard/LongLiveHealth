@@ -31,7 +31,7 @@ struct ReportImportControl: View {
                         Button("Camera", systemImage: "camera") { importAction = "scan"; choosingImport = false }
                             .disabled(!VNDocumentCameraViewController.isSupported)
                     }
-                }.navigationTitle("Import Health Report").toolbar { Button("Cancel") { choosingImport = false } }
+                }.navigationTitle("Import Blood Work").toolbar { Button("Cancel") { choosingImport = false } }
             }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { result in

@@ -96,8 +96,8 @@ def navigation():
     adb("shell", "wm", "density", "320")
     wait_for("Heart Rate")
     assert "RANGE" in labels(), "Fold transition lost the detail"
-    tap("Data"); wait_for("Health Report")
-    tap("Health Report"); wait_for("Example Laboratory")
+    tap("Data"); wait_for("Blood Work")
+    tap("Blood Work"); wait_for("Example Laboratory")
     tap("Example Laboratory"); wait_for("Total Markers")
     assert "126" in labels()
     for _ in range(4):
@@ -121,14 +121,12 @@ def selectors():
     adb("shell", "am", "force-stop", "dev.longlivehealth.android")
     adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
     wait_for("Overview")
-    tap("Trends"); tap("Compare measurements"); wait_for("Choose a source")
-    tap("Choose a source"); wait_for("Choose a source")
-    adb("shell", "input", "keyevent", "KEYCODE_BACK")
-    tap("Back")
+    tap("Trends"); wait_for("Recorded trends")
+    assert "Compare measurements" not in labels()
     tap("Insights"); tap("Behavior associations"); wait_for("DECLARE AN ANALYSIS")
     assert "Run declared analysis" in labels()
     tap("Back")
-    print("PASS: comparison and association selectors render without native crash")
+    print("PASS: Trends and association selectors render without native crash")
 
 
 def browse_switch():
@@ -166,7 +164,7 @@ def browse_switch():
             wait_for("RANGE")
         requests_before_tab_switch = catalog_requests()
         tap("Data")
-        wait_for("Health Report")
+        wait_for("Blood Work")
         tap("Browse")
         metric_node("Heart rate", sidebar=False)
         metric_node("HRV SDNN", sidebar=True)
@@ -209,7 +207,7 @@ def fixture_state():
 
 def camera_import():
     before = len(fixture_state()["upload_ids"])
-    tap("Data"); tap("Health Report"); tap("Import Health Report"); tap("Camera")
+    tap("Data"); tap("Blood Work"); tap("Import Blood Work"); tap("Camera")
     wait_for("Take report photos")
     nodes = list(tree().iter("node"))
     heading = next(n for n in nodes if n.get("text") == "Camera report")
@@ -237,7 +235,7 @@ def original_preview():
     adb("shell", "am", "force-stop", "dev.longlivehealth.android")
     adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
     wait_for("Overview")
-    tap("Data"); tap("Health Report"); wait_for("Example Laboratory"); tap("Example Laboratory")
+    tap("Data"); tap("Blood Work"); wait_for("Example Laboratory"); tap("Example Laboratory")
     tap("View original report")
     wait_for("Original report")
     time.sleep(1)
@@ -254,7 +252,7 @@ def rescan_confirmation():
     adb("shell", "am", "force-stop", "dev.longlivehealth.android")
     adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
     wait_for("Overview")
-    tap("Data"); tap("Health Report"); wait_for("Example Laboratory"); tap("Example Laboratory")
+    tap("Data"); tap("Blood Work"); wait_for("Example Laboratory"); tap("Example Laboratory")
     wait_for("Rescan report")
     actions = ["View original report", "Add result manually", "Rescan report", "Delete report"]
     nodes = list(tree().iter("node"))
@@ -303,7 +301,7 @@ def report_settings():
     control("test/reset"); control("test/seed-report"); control("test/report-issue")
     adb("shell", "am", "force-stop", "dev.longlivehealth.android")
     adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
-    wait_for("Overview"); tap("Data"); tap("Health Report"); wait_for("Example Laboratory"); tap("Example Laboratory")
+    wait_for("Overview"); tap("Data"); tap("Blood Work"); wait_for("Example Laboratory"); tap("Example Laboratory")
     wait_for("Cannot appear in Browse: unit invalid-unit is not supported for this test.")
     assert "PAGE PROCESSING" not in labels()
     tap("Detail"); wait_for("PAGE PROCESSING"); wait_for("ORIGINAL OCR OUTPUT")
@@ -384,7 +382,7 @@ def edge_scroll():
                     adb("shell", "input", "swipe", "300", "1400", "300", "420", "500")
                 assert not matches("Health Categories"), "Expanded category heading remained pinned"
                 assert bounds(matches("RANGE")[0]) == detail_range, "Left pane scrolled the right detail"
-            tap("Data"); wait_for("Health Report")
+            tap("Data"); wait_for("Blood Work")
             tap("Browse"); wait_for("RANGE")
             print(f"PASS: {'expanded' if wide else 'folded'} scroll-away title, fixed search, category scroll, navigation and retained detail")
         # The same theme must apply outside Browse, not a per-page workaround.

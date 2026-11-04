@@ -11,9 +11,9 @@ struct ReportImportControl: View {
                 path.move(to: CGPoint(x: 3, y: 14)); path.addLine(to: CGPoint(x: 3, y: 21)); path.addLine(to: CGPoint(x: 21, y: 21)); path.addLine(to: CGPoint(x: 21, y: 14))
             }.stroke(Color.accentColor, style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
                 .frame(width: 24, height: 24).frame(width: 44, height: 44)
-        }.accessibilityLabel(Text("Import Health Report"))
+        }.accessibilityLabel(Text("Import Blood Work"))
             .disabled(model.isBusy)
-            .confirmationDialog("Import Health Report", isPresented: $choosing) {
+            .confirmationDialog("Import Blood Work", isPresented: $choosing) {
                 Button("Import PDF") { importDocument("pdf") }
                 Button("Import Images") { importDocument("images") }
                 Button("Camera") { importDocument("camera") }

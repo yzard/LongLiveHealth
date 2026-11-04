@@ -1,84 +1,99 @@
 import SwiftUI
-#if canImport(Charts)
-import Charts
-#endif
 
 struct TrendsView: View {
     var model: AppModel
-    @State var selected = ""
-    @State var comparing = false
-    @State var second = ""
-    @State var preview: DocumentLocation?
+    private let kinds = ["sleep", "steps", "workout", "resting_heart_rate"]
+    @State var window: TrendComparison.Window?
+    @State var summaries: [String: [TrendComparison.Summary]] = [:]
+    @State var failures: [String: String] = [:]
+    @State var loading = false
+
     var body: some View {
         List {
             Section {
-                NavigationLink("Cycle and life stages", destination: CycleHistoryView(model: model))
-                NavigationLink("Compare measurements", destination: ComparisonView(model: model))
-                NavigationLink("Long-term health report", destination: HealthReportView(model: model))
-                NavigationLink("Review daily logs", destination: ArchiveReviewView(model: model))
+                Text("Recorded trends").font(.title2.bold())
+                if let window {
+                    Text("Recent: \(window.recentStart) – \(window.last)")
+                        .font(.subheadline)
+                }
+                InfoHelp(title: "How trends are calculated",
+                         message: "Compare the median on observed days in the last 7 completed days with the preceding 28. Each source and unit is compared separately. A comparison needs at least 4 recent and 14 earlier days. Missing days are omitted. Workout duration describes recorded workout days. These comparisons describe changes in your records.")
+                if loading { ProgressView("Loading trends") }
+                if !loading && failures.isEmpty && summaries.values.allSatisfy(\.isEmpty) {
+                    Text("No observations in these periods.").foregroundStyle(.secondary)
+                }
             }
-            Section("Choose metrics") {
-                picker("Metric", selection: $selected)
-                Toggle("Compare a second metric", isOn: $comparing)
-                if comparing { picker("Second metric", selection: $second) }
+            ForEach(kinds.flatMap { summaries[$0] ?? [] }) { row in
+                tile(row, kind: row.kind)
             }
-            if !selected.isEmpty { TrendSeries(model: model, metric: selected, openPreview: { preview = $0 }).id(selected) }
-            if comparing && !second.isEmpty && second != selected { TrendSeries(model: model, metric: second, openPreview: { preview = $0 }).id(second) }
-            RecentActivitySection(model: model)
-        }.mobileNavigationTitle("Trends")
-            .onChange(of: model.metrics, initial: true) { _, values in
-                if !values.contains(where: { $0["metric_id"].stringValue == selected }) { selected = values.first?["metric_id"].stringValue ?? "" }
-                if !values.contains(where: { $0["metric_id"].stringValue == second }) { second = values.dropFirst().first?["metric_id"].stringValue ?? selected }
+            ForEach(kinds, id: \.self) { kind in
+                if let failure = failures[kind] {
+                    Section(metricTitle(kind)) { Text(failure).foregroundStyle(.secondary) }
+                }
             }
-            .sheet(item: $preview) { DocumentPreview(location: $0) }
+        }
+        .mobileNavigationTitle("Trends")
+        .initialTask { await reload() }
+        .refreshable { await reload() }
     }
-    private func picker(_ label: String, selection: Binding<String>) -> some View {
-        Picker(label, selection: selection) { ForEach(model.metrics, id: \.identifier) { Text($0["name"].stringValue).tag($0["metric_id"].stringValue) } }
-    }
-}
 
-struct TrendSeries: View {
-    var model: AppModel
-    let metric: String
-    @State var result: JSONValue = .null
-    @State var selectedTime: Double?
-    let openPreview: (DocumentLocation) -> Void
-    var body: some View {
-        Group {
-            Section(model.metrics.first(where: { $0["metric_id"].stringValue == metric })?["name"].stringValue ?? metric) {
-                if result["points"].arrayValue.isEmpty { Text("No comparable results.").foregroundStyle(.secondary); InfoHelp(title: "Comparable results", message: "Confirm a result with a mapped metric, a recognized unit and collection date.") }
-                else {
-                    #if os(Android)
-                    AndroidPointPlot(points: AndroidPlotPoint.values(result["points"].arrayValue, x: "timestamp", y: "value", multiplier: 1), unit: result["points"].arrayValue.first?["unit"].stringValue ?? "", select: { selectedTime = $0.x }, connected: true, events: []).frame(height: 220)
-                    #else
-                    Chart(result["points"].arrayValue, id: \.identifier) { point in
-                        LineMark(x: .value("Collection date", point["timestamp"].numberValue ?? 0), y: .value("Value", point["value"].numberValue ?? 0))
-                        PointMark(x: .value("Collection date", point["timestamp"].numberValue ?? 0), y: .value("Value", point["value"].numberValue ?? 0))
-                    }.chartXSelection(value: $selectedTime).chartXAxis { AxisMarks { value in AxisValueLabel { if let seconds = value.as(Double.self) { Text(Date(timeIntervalSince1970: seconds), format: .dateTime.year().month()) } } } }.frame(height: 220)
-                    #endif
-                    InfoHelp(title: result["points"].arrayValue.first?["unit"].stringValue ?? "Source reports", message: "Tap a point or a dated result to open its original report.")
+    private func tile(_ row: TrendComparison.Summary, kind: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(metricTitle(kind)).font(.headline)
+            Text(model.sourceLabel(row.source)).font(.subheadline).foregroundStyle(.secondary)
+            if let recent = row.recentMedian, let baseline = row.baselineMedian {
+                let scale = max(recent, baseline, 1)
+                HStack(alignment: .bottom, spacing: 16) {
+                    bar(recent, scale: scale, label: "Last 7 days", kind: kind, unit: row.unit, color: .accentColor)
+                    bar(baseline, scale: scale, label: "Prior 28 days", kind: kind, unit: row.unit, color: .secondary)
                 }
-                if let count = result["incomparable_count"].numberValue, count > 0 { Text("\(Int(count)) confirmed results have an unknown date, unsupported unit or non-exact value. They remain in Reports.").font(.caption) }
+            } else {
+                Text("Not enough comparable days").font(.subheadline)
             }
-            Section("Source reports") {
-                Button("Refresh history") { Task { await reload() } }
-                ForEach(result["points"].arrayValue, id: \.identifier) { point in
-                    Button { show(point) } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(point["sampled_at"].stringValue)
-                            Text("\(point["value"].numberValue.map { String($0) } ?? point["value"].stringValue) \(point["unit"].stringValue)").font(.headline)
-                            Text(LaboratoryPresentation.standardizedReference(point["reference"])).font(.caption)
-                            Text(LaboratoryPresentation.originalReference(point["original"], reference: point["reference"])).font(.caption).foregroundStyle(.secondary)
-                            Text("Original: \(point["original"]["raw_result"].stringValue) \(point["original"]["raw_unit"].stringValue) · revision \(Int(point["revision"].numberValue ?? 1))").font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-        }.initialTask(id: metric) { await reload() }
-            .onChange(of: selectedTime) { _, time in
-                if let time, let point = result["points"].arrayValue.min(by: { abs(($0["timestamp"].numberValue ?? 0) - time) < abs(($1["timestamp"].numberValue ?? 0) - time) }) { show(point); selectedTime = nil }
-            }
+            Text("\(row.recentDays)/7 recent · \(row.baselineDays)/28 earlier days")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
+        .listRowSeparator(.hidden)
     }
-    private func reload() async { do { if let client = model.client { result = try model.cachedResponse("trends/get", body: .object(["metric_ids": .array([.string(metric)])])) ?? result; result = try await model.request("trends/get", body: .object(["metric_ids": .array([.string(metric)])])) } } catch { model.errorMessage = error.localizedDescription } }
-    private func show(_ point: JSONValue) { Task { do { openPreview(DocumentLocation(url: try await model.source(point["report_id"].stringValue), page: Int(point["original"]["source"]["page"].numberValue ?? 1))) } catch { model.errorMessage = error.localizedDescription } } }
+
+    private func bar(_ value: Double, scale: Double, label: String, kind: String, unit: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(OverviewSummary.value(value, kind: kind, unit: unit)).font(.headline)
+            RoundedRectangle(cornerRadius: 5)
+                .fill(color)
+                .frame(width: 30, height: max(1, 56 * value / scale))
+                .accessibilityHidden(true)
+            Text(label).font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func reload() async {
+        guard !loading, let token = model.session?.token else { return }
+        loading = true
+        defer { loading = false }
+        let scope = dateScope(days: 1)
+        let nextWindow = TrendComparison.Window(lastCompleteDay: scope["start_date"].stringValue)
+        var nextSummaries: [String: [TrendComparison.Summary]] = [:]
+        var nextFailures: [String: String] = [:]
+        for kind in kinds {
+            do {
+                let response = try await model.request("wellness/history", body: .object([
+                    "record_type": .string(kind), "timezone": scope["timezone"],
+                    "dates": .array([.string(nextWindow.first), .string(nextWindow.last)])
+                ]))
+                nextSummaries[kind] = TrendComparison.summaries(kind: kind, history: response["history"].arrayValue, window: nextWindow)
+            } catch {
+                guard !Task.isCancelled, model.session?.token == token else { return }
+                nextFailures[kind] = error.localizedDescription
+            }
+        }
+        guard !Task.isCancelled, model.session?.token == token else { return }
+        window = nextWindow
+        summaries = nextSummaries
+        failures = nextFailures
+    }
 }

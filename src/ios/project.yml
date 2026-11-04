@@ -11,7 +11,7 @@ settings:
     SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
     TARGETED_DEVICE_FAMILY: '1'
     MARKETING_VERSION: '0.1.0'
-    CURRENT_PROJECT_VERSION: '101'
+    CURRENT_PROJECT_VERSION: '103'
 targets:
   LongLiveHealth:
     type: application
@@ -33,7 +33,7 @@ targets:
         UILaunchScreen: {}
         LSSupportsOpeningDocumentsInPlace: false
         CFBundleDocumentTypes:
-          - CFBundleTypeName: PDF Health Report
+          - CFBundleTypeName: PDF Blood Work
             CFBundleTypeRole: Viewer
             LSHandlerRank: Alternate
             LSItemContentTypes: [com.adobe.pdf]

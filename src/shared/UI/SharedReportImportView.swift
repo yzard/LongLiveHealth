@@ -25,7 +25,7 @@ struct SharedReportImportView: View {
                 }
                 if model.isBusy { ProgressView("Waiting for the current operation…") }
             }
-            .mobileNavigationTitle("Import Health Report")
+            .mobileNavigationTitle("Import Blood Work")
             .toolbar { Button("Later") { model.showSharedReportImport = false } }
         }
     }

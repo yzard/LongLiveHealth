@@ -76,9 +76,9 @@ final class AppModel {
 
     private static let cachedReads: Set<String> = [
         "wellness/day", "wellness/history", "wellness/chart", "wellness/measurements", "wellness/preferences/get", "wellness/sources", "wellness/hrv",
-        "wellness/sleep", "wellness/sleep/regularity", "wellness/review", "wellness/timeline", "wellness/report",
+        "wellness/sleep", "wellness/sleep/regularity",
         "wellness/entries/list", "wellness/library", "wellness/nutrition/day", "wellness/diet", "wellness/meals",
-        "wellness/meal-glucose", "wellness/import/list", "wellness/records/list", "wellness/records/get", "trends/get", "metrics/history/get", "browse/catalog", "analysis/list", "analysis/get", "reports/list", "reports/get", "reports/extraction/get", "metrics/list", "server/status", "exports/list", "reports/input/get", "wellness/associations/get", "wellness/associations/list", "wellness/food/lookup", "wellness/food/portion", "wellness/reminders"
+        "wellness/meal-glucose", "wellness/import/list", "wellness/records/list", "wellness/records/get", "metrics/history/get", "browse/catalog", "analysis/list", "analysis/get", "reports/list", "reports/get", "reports/extraction/get", "metrics/list", "server/status", "exports/list", "reports/input/get", "wellness/associations/get", "wellness/associations/list", "wellness/food/lookup", "wellness/food/portion", "wellness/reminders"
     ]
     func request(_ path: String, body: JSONValue) async throws -> JSONValue {
         guard let client, let responseCache, let token = session?.token else { throw APIError.invalidResponse }

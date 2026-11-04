@@ -31,10 +31,34 @@ nonisolated final class SmokeTests: XCTestCase {
         }
         if name == "Archive" {
             if app.navigationBars["Apple Health"].exists { app.navigationBars.buttons.firstMatch.tap() }
-            if app.navigationBars["Data"].exists { app.buttons["Health Report"].tap() }
+            if app.navigationBars["Data"].exists { app.buttons["Blood Work"].tap() }
         }
         if name == "Settings", !app.navigationBars["Settings"].exists { app.buttons["Settings"].firstMatch.tap() }
     }
+    @MainActor func testTrendsShowComparisonTilesAndBloodWorkEntry() throws {
+        let app = XCUIApplication(); app.launch()
+        dismissPasswordPrompts(app)
+        if app.buttons["Sign in"].exists {
+            let server = app.textFields["http://192.168.1.20:8080"]
+            server.tap()
+            let old = server.value as? String ?? ""
+            if old != "http://192.168.1.20:8080" { server.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count)) }
+            server.typeText("http://127.0.0.1:18765")
+            app.textFields["Username"].tap(); app.textFields["Username"].typeText("simulator")
+            app.secureTextFields["Password"].tap(); app.secureTextFields["Password"].typeText("test-password")
+            app.buttons["Sign in"].tap(); dismissPasswordPrompts(app)
+        }
+        XCTAssertTrue(app.tabBars.buttons["Trends"].waitForExistence(timeout: 10))
+        tapTab(app, "Trends")
+        XCTAssertTrue(app.staticTexts["Recorded trends"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Last 7 days"].firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["Prior 28 days"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["7/7 recent · 28/28 earlier days"].firstMatch.exists)
+        XCTAssertFalse(app.buttons["Compare measurements"].exists)
+        tapTab(app, "Data")
+        XCTAssertTrue(app.buttons["Blood Work"].waitForExistence(timeout: 10))
+    }
+
     @MainActor func testECGShowsWaveformBeforeCompactReadableDetails() async throws {
         let app = XCUIApplication(); app.launch()
         dismissPasswordPrompts(app)
@@ -1042,7 +1066,7 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(open.waitForExistence(timeout: 10))
         open.tap()
         let app = XCUIApplication()
-        XCTAssertTrue(app.navigationBars["Import Health Report"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.navigationBars["Import Blood Work"].waitForExistence(timeout: 15))
         // Safari may suffix a repeated download (shared-report-1.pdf).
         let shared = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ AND label ENDSWITH %@", "shared-report", ".pdf")).firstMatch
         XCTAssertTrue(shared.waitForExistence(timeout: 5))
@@ -1160,7 +1184,7 @@ nonisolated final class SmokeTests: XCTestCase {
         let beforeAliases = try await aliasRequestCounts()
         // Alias changes update retained summaries; editor cancellation leaves the saved alias intact.
         tapTab(app, "Data")
-        if app.navigationBars["Health Report"].exists { app.navigationBars.buttons.firstMatch.tap() }
+        if app.navigationBars["Blood Work"].exists { app.navigationBars.buttons.firstMatch.tap() }
         reveal(app, app.buttons["Source Aliases"])
         app.buttons["Source Aliases"].tap()
         let aliasRow = app.buttons["sourceAliasRow-apple_health:watch"]

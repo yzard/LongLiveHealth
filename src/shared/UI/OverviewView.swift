@@ -247,7 +247,7 @@ struct DataCenterView: View {
     private var menu: some View {
         List {
             Section("Import") {
-                link("Health Report", page: .reports)
+                link("Blood Work", page: .reports)
                 if !model.sharedReports.isEmpty { Button("Import shared PDFs (\(model.sharedReports.count))") { model.showSharedReportImport = true } }
                 link(MobilePlatform.healthProviderName, page: .health)
                 link("Import GPX, TCX, or FIT activities", page: .training)

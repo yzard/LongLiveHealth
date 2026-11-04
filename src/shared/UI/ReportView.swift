@@ -101,7 +101,7 @@ struct ReportView: View {
             }
         }
         .disabled(confirmingAll || rescanning)
-        .mobileNavigationTitle(document["context"]["report_title"].stringValue.isEmpty ? "Health Report" : document["context"]["report_title"].stringValue)
+        .mobileNavigationTitle(document["context"]["report_title"].stringValue.isEmpty ? "Blood Work" : document["context"]["report_title"].stringValue)
         .navigationBarTitleDisplayMode(.inline)
         .initialTask { await reload() }
         .task(id: model.jobs.first { $0["file_id"].stringValue == reportID }?["job_id"].stringValue) { await followExtraction() }

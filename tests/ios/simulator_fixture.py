@@ -443,7 +443,9 @@ class Handler(BaseHTTPRequestHandler):
         if route == 'wellness/history':
             kind = body['record_type']
             unit, value = {'sleep': ('seconds', 27000), 'workout': ('seconds', 3600), 'resting_heart_rate': ('count/min', 58), 'hrv_sdnn': ('ms', 40), 'active_energy': ('kcal', 500), 'basal_energy': ('kcal', 1500), 'steps': ('count', 6500)}[kind]
-            dates = ['2020-01-01'] + [(date.today()-timedelta(days=n)).isoformat() for n in range(9, 0, -1)]
+            window = body.get('dates')
+            comparing_trends = window and (date.fromisoformat(window[1]) - date.fromisoformat(window[0])).days == 34
+            dates = ['2020-01-01'] + [(date.today()-timedelta(days=n)).isoformat() for n in range(35 if comparing_trends else 9, 0, -1)]
             all_dates = dates[:]
             if body.get('dates'): dates = [d for d in dates if body['dates'][0] <= d <= body['dates'][1]]
             history = [{'date': d, 'alternatives': [{'source': 'apple_health:watch', 'value': value, 'unit': unit}]} for d in dates]

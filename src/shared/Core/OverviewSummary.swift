@@ -60,12 +60,14 @@ public nonisolated enum OverviewSummary {
 
     public static func startDate(endDate: String, days: Int) -> String {
         let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .gmt
+        formatter.calendar = calendar
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = .gmt
         formatter.dateFormat = "yyyy-MM-dd"
         guard days > 0, let end = formatter.date(from: endDate),
-              let start = formatter.calendar.date(byAdding: .day, value: 1 - days, to: end) else { return endDate }
+              let start = calendar.date(byAdding: .day, value: 1 - days, to: end) else { return endDate }
         return formatter.string(from: start)
     }
 

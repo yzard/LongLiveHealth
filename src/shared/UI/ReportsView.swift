@@ -34,7 +34,7 @@ struct ReportsView: View {
                 }
             }
         }
-        .mobileNavigationTitle("Health Report")
+        .mobileNavigationTitle("Blood Work")
         .refreshable { await model.refresh(automatic: false) }
         .toolbar { ToolbarItem(placement: .primaryAction) { ReportImportControl(model: model) } }
     }
