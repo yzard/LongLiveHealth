@@ -16,15 +16,15 @@ struct BrowseView: View {
         entries.filter { entry in matches(entry.title, entry.kind, categories.first { $0.id == entry.categoryID }?.title ?? "") }
     }
     #if os(Android)
-    @State var chosen: BrowseChoice?
+    @State var detailPath: [BrowseChoice] = []
     var body: some View {
-        AdaptiveDetailLayout(selected: chosen != nil) {
+        AdaptiveDetailLayout(selected: !detailPath.isEmpty) {
             NavigationStack { metricList }
         } detail: {
-            NavigationStack {
+            NavigationStack(path: $detailPath) {
                 EmptyContent(title: "Choose a metric", symbol: "chart.xyaxis.line")
-                    .navigationDestination(isPresented: Binding(get: { chosen != nil }, set: { if !$0 { chosen = nil } })) {
-                        if let chosen { AnyView(destination(chosen)).id(chosen.identity) }
+                    .navigationDestination(for: BrowseChoice.self) { choice in
+                        destination(choice)
                     }
             }
         }
@@ -106,7 +106,7 @@ struct BrowseView: View {
     }
     @ViewBuilder private func metricLink(_ entry: BrowseEntry) -> some View {
         #if os(Android)
-        Button { chosen = entry.choice } label: { metricLabel(entry) }.buttonStyle(.plain)
+        Button { detailPath = [entry.choice] } label: { metricLabel(entry) }.buttonStyle(.plain)
         #else
         NavigationLink { destination(entry.choice) } label: { metricLabel(entry) }.buttonStyle(.plain)
         #endif
@@ -144,9 +144,17 @@ struct BrowseView: View {
     }
 }
 
-enum BrowseChoice {
+enum BrowseChoice: Hashable {
     case daily(JSONValue), sleep, measurement(JSONValue), lab(JSONValue), records(JSONValue)
-    var identity: String {
+    static func == (lhs: BrowseChoice, rhs: BrowseChoice) -> Bool {
+        lhs.identity == rhs.identity
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(identity)
+    }
+
+    private var identity: String {
         switch self {
         case .daily(let value): "daily:" + value["record_type"].stringValue
         case .sleep: "sleep"

@@ -54,3 +54,11 @@ Final artifact: Android Build 14, SHA-256 `728035c2fbe870c729d7e8ce819cfcc2010a5
 Follow-up on 2026-10-30: Build 14 native camera and original-PDF layouts were checked on the unlocked folded phone (1248×1972). Camera entry and cancellation returned to the report list. An existing 11-page PDF rendered correctly; the slider reached page 11 and Back/Done returned to Report Info without changing report data. Final native-page verification on the unfolded display and actual hardware camera capture remain untested.
 
 Expanded-screen follow-up on 2026-10-30: the device reported OPENED with its physical 2448×1848 internal display. Build 14 camera entry/cancellation and the existing 11-page original PDF were checked on that display. Titles, system insets, three equal-height camera controls and page slider remained visible without clipping. PDF aspect ratio was preserved; the slider rendered page 6, then Back/Done restored the report and its Data split-pane navigation. No new layout defect was found. This closes the pending expanded native-page layout check; no new photos were captured or imported during the hardware audit.
+
+## Build workspace cleanup
+
+After an APK is exported successfully, the build removes its private Swift and Gradle workspaces. The success hook also removes the recognized old `build/android/client` and `research` compilation directories.
+
+Use `dist/android/longlivehealth.apk` for installation. New emulator containers should mount `dist/android/` at `/artifacts` and install `/artifacts/longlivehealth.apk`. An existing container with an older bind path keeps its APK under `dist/android/emulator/<container-id>/`; a small link preserves its recorded source path. The old compiler caches are removed without stopping that container. See the [Android cleanup verification](../reviews/2026-10-31-android-cleanup.md).
+
+The signing volume and shared Qwen model remain intact. Cleanup refuses to remove a workspace still mounted for compilation, or one whose paths or artifact destinations are unexpected.

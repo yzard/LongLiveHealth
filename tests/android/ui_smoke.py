@@ -131,6 +131,59 @@ def selectors():
     print("PASS: comparison and association selectors render without native crash")
 
 
+def browse_switch():
+    """Replace an open Browse detail by tapping another metric in the sidebar."""
+
+    def catalog_requests():
+        counts = subprocess.check_output([
+            "docker", "exec", CONTAINER, "curl", "-fsS", "-X", "POST",
+            "http://127.0.0.1:18765/api/v1/test/counts",
+        ], text=True)
+        return json.loads(counts).get("browse/catalog", 0)
+
+    def metric_node(title, sidebar):
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            for node in tree().iter("node"):
+                label = node.get("text") or node.get("content-desc") or ""
+                left = int(re.findall(r"\d+", node.get("bounds"))[0])
+                if label.casefold() == title.casefold() and (left < 680) == sidebar:
+                    return node
+        raise AssertionError(f"{title} missing from the {'sidebar' if sidebar else 'detail'}")
+
+    try:
+        adb("shell", "am", "force-stop", "dev.longlivehealth.android")
+        adb("shell", "wm", "size", "2208x1840")
+        adb("shell", "wm", "density", "320")
+        adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
+        wait_for("Overview")
+        tap("Browse")
+        wait_for("Health Categories")
+        tap("Heart")
+        for title in ("Heart rate", "HRV SDNN", "Heart rate"):
+            tap_node(metric_node(title, sidebar=True))
+            metric_node(title, sidebar=False)
+            wait_for("RANGE")
+        requests_before_tab_switch = catalog_requests()
+        tap("Data")
+        wait_for("Health Report")
+        tap("Browse")
+        metric_node("Heart rate", sidebar=False)
+        metric_node("HRV SDNN", sidebar=True)
+        assert catalog_requests() == requests_before_tab_switch, "Returning to Browse reloaded the catalog"
+
+        adb("shell", "wm", "size", "1080x2400")
+        adb("shell", "wm", "density", "420")
+        wait_for("RANGE")
+        adb("shell", "input", "keyevent", "KEYCODE_BACK")
+        wait_for("HRV SDNN")
+        assert "RANGE" not in labels(), "Back did not dismiss the folded detail"
+        print("PASS: wide Browse switches between metrics, keeps the sidebar, and preserves folded Back")
+    finally:
+        adb("shell", "wm", "size", "reset")
+        adb("shell", "wm", "density", "reset")
+
+
 def chart_scroll():
     adb("shell", "am", "force-stop", "dev.longlivehealth.android")
     adb("shell", "wm", "size", "reset")
@@ -401,7 +454,7 @@ def paired_charts():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("inspect", "login", "tap", "navigation", "camera", "selectors", "chart-scroll", "original-preview", "rescan", "blood-work", "report-settings", "edge-scroll", "paired-charts"))
+    parser.add_argument("action", choices=("inspect", "login", "tap", "navigation", "browse-switch", "camera", "selectors", "chart-scroll", "original-preview", "rescan", "blood-work", "report-settings", "edge-scroll", "paired-charts"))
     parser.add_argument("text", nargs="?")
     args = parser.parse_args()
     if args.action == "inspect":
@@ -412,6 +465,8 @@ if __name__ == "__main__":
         edge_scroll()
     elif args.action == "login":
         login()
+    elif args.action == "browse-switch":
+        browse_switch()
     elif args.action == "chart-scroll":
         chart_scroll()
     elif args.action == "selectors":

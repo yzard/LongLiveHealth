@@ -26,6 +26,7 @@ RUN src/backend_ocr/.venv/bin/isort --settings-path src/backend_ocr/pyproject.to
     && touch /checks-passed
 
 FROM scratch AS model
+LABEL org.shared-model.sha256="74d2c57145e6ff11d1d2faa79594477f9bc903a611af1fb20218189fbbb77d82"
 ADD --chmod=644 --checksum=sha256:74d2c57145e6ff11d1d2faa79594477f9bc903a611af1fb20218189fbbb77d82 https://huggingface.co/neroued/Qwen3.8-27B-nvfp4-NInfer/resolve/f0b43ad436b9fa8142c6ed6647c470a6fe409484/qwen3_8_27b_nvfp4.ninfer /models/qwen3_8_27b_nvfp4.ninfer
 ADD --chmod=644 --checksum=sha256:c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4 https://huggingface.co/neroued/Qwen3.8-27B-nvfp4-NInfer/resolve/f0b43ad436b9fa8142c6ed6647c470a6fe409484/LICENSE /models/LICENSE
 

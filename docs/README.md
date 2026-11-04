@@ -45,3 +45,5 @@ Web GUI 的范围与拆分见 [网页实施计划](implementation-webgui.md)，�
 后台服务全部配置凭据直接内嵌其 config.toml；运行时没有独立密钥文件。当前配置与 skills 更新见[内嵌凭据审查](reviews/2026-10-03-embedded-credentials.md)。
 
 NAS API 与 Desk GPU OCR 的分机部署见 [NAS 部署](runbooks/nas.md)。
+
+完整执行 build_docker.sh 的模型本机复用、APK/镜像校验和自动清理结果见 [2026-10-31 完整构建验收](reviews/2026-10-31-full-build.md)。

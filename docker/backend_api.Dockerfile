@@ -14,8 +14,8 @@ RUN --mount=type=cache,id=longlivehealth-cargo-registry,target=/usr/local/cargo/
     --mount=type=cache,id=longlivehealth-cargo-git,target=/usr/local/cargo/git \
     --mount=type=cache,id=longlivehealth-cargo-target,target=/workspace/build/backend_api/target \
     cargo fmt --all --check \
-    && cargo clippy --locked --all-targets -- -D warnings \
-    && cargo test --locked --all-targets \
+    && cargo clippy --locked --release --all-targets -- -D warnings \
+    && cargo test --locked --release --all-targets \
     && cargo build --locked --release --bin longlivehealth \
     && mkdir -p /workspace/dist/backend_api \
     && cp /workspace/build/backend_api/target/release/longlivehealth /workspace/dist/backend_api/longlivehealth
