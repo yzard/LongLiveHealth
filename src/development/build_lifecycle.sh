@@ -38,27 +38,3 @@ finish_build() {
     fi
     exit "$result"
 }
-
-prepare_shared_model() {
-    local cache_root="$1"
-    mkdir -p "$cache_root"
-    exec 8>"$cache_root/model.lock"
-    python3 - <<'PY'
-import fcntl
-fcntl.flock(8, fcntl.LOCK_EX)
-PY
-    SHARED_MODEL_LAYOUT="$cache_root/model"
-    if [ -e "$SHARED_MODEL_LAYOUT" ]; then
-        python3 "$BUILD_PROJECT_ROOT/src/development/build_artifacts.py" model "$SHARED_MODEL_LAYOUT"
-        echo "Using local shared Qwen 3.8 model layers: $SHARED_MODEL_LAYOUT"
-    else
-        local staging
-        staging="$(mktemp -d "$cache_root/download.XXXXXX")"
-        docker buildx build --builder "$BUILD_DOCKER_BUILDER" --file docker/backend_ocr.Dockerfile \
-            --target model --provenance=false --output "type=oci,tar=false,dest=$staging/model" .
-        python3 "$BUILD_PROJECT_ROOT/src/development/build_artifacts.py" model "$staging/model"
-        mv "$staging/model" "$SHARED_MODEL_LAYOUT"
-        rmdir "$staging"
-    fi
-    exec 8>&-
-}

@@ -74,4 +74,4 @@ WHOOP 与 Bevel 的功能并集仅作为软件与分析参考，见[数据中心
 
 用户从 iPhone 导入真实 Function Health PDF 或照片，校正与确认后能查看可信趋势及原报告；同步中断可恢复、不重复记账、不同用户不可互访；可查看健康明细覆盖范围，并能完整导出自己的原档案与结构化记录。具体证据见 [验证计划](validation.md)。
 
-2026-10-01 服务边界补充：用户明确指定独立 backend_ocr，采用 Qwen3.8 + NInfer；backend_api 接收并归档手机原件，调用 OCR 获取结构化结果。配置及当前验收见 [OCR 运维](runbooks/ocr.md)。
+2026-11-05 服务边界：API 内置 OCR 生成提示并调用共享 local_llm / Strata，backend_api 的 Analytics 使用同一推理服务。API 归档手机原件、保存草稿并执行人工确认；OCR 不启动模型。配置及验收见 [OCR 运维](runbooks/ocr.md)。

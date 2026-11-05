@@ -16,8 +16,9 @@ pub struct Config {
     pub security: SecurityConfig,
     pub storage: StorageConfig,
     pub jobs: JobConfig,
-    pub ocr: OcrConfig,
-    pub providers: ProviderConfigs,
+    pub extraction: ExtractionConfig,
+    pub llm: ProviderConfig,
+    pub analysis_enabled: bool,
 }
 
 #[derive(Clone, Deserialize)]
@@ -52,22 +53,14 @@ pub struct JobConfig {
 
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct OcrConfig {
-    pub url: String,
-    pub timeout_seconds: u64,
-    pub api_key: String,
-}
-
-#[derive(Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProviderConfigs {
-    pub analysis: ProviderConfig,
+pub struct ExtractionConfig {
+    pub output_tokens: usize,
+    pub image_pixel_budget: u64,
 }
 
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderConfig {
-    pub enabled: bool,
     pub base_url: String,
     pub model: String,
     pub adapter: String,
@@ -117,29 +110,15 @@ impl Config {
         {
             return Err(AppError::Invalid("Invalid job limits"));
         }
-        validate_url(&self.ocr.url)?;
-        if !(1..=3600).contains(&self.ocr.timeout_seconds) {
-            return Err(AppError::Invalid("Invalid OCR service timeout"));
-        }
-        validate_key(&self.ocr.api_key, 24)?;
+        if !(256..=32768).contains(&self.extraction.output_tokens)
+            || !(65536..=16777216).contains(&self.extraction.image_pixel_budget)
         {
-            let provider = &self.providers.analysis;
-            if !provider.api_key.is_empty() {
-                validate_key(&provider.api_key, 1)?;
-            }
-            let address = url::Url::parse(&provider.base_url)
-                .map_err(|_| AppError::Invalid("Invalid provider URL"))?;
-            if !["http", "https"].contains(&address.scheme())
-                || address.host_str().is_none()
-                || !address.username().is_empty()
-                || address.password().is_some()
-                || address.query().is_some()
-                || address.fragment().is_some()
-            {
-                return Err(AppError::Invalid(
-                    "Provider URL must be HTTP(S) without credentials, query or fragment",
-                ));
-            }
+            return Err(AppError::Invalid("Invalid extraction generation limits"));
+        }
+        validate_key(&self.llm.api_key, 24)?;
+        {
+            let provider = &self.llm;
+            validate_url(&provider.base_url)?;
             if provider.model.trim().is_empty()
                 || provider.adapter != "openai_chat"
                 || !(1..=3600).contains(&provider.timeout_seconds)
@@ -172,7 +151,7 @@ fn validate_key(key: &str, minimum: usize) -> Result<(), AppError> {
 
 fn validate_url(value: &str) -> Result<(), AppError> {
     let address =
-        url::Url::parse(value).map_err(|_| AppError::Invalid("Invalid OCR service URL"))?;
+        url::Url::parse(value).map_err(|_| AppError::Invalid("Invalid shared inference URL"))?;
     if !["http", "https"].contains(&address.scheme())
         || address.host_str().is_none()
         || !address.username().is_empty()
@@ -181,7 +160,7 @@ fn validate_url(value: &str) -> Result<(), AppError> {
         || address.fragment().is_some()
     {
         return Err(AppError::Invalid(
-            "OCR URL must be HTTP(S) without credentials, query or fragment",
+            "Shared inference URL must be HTTP(S) without credentials, query or fragment",
         ));
     }
     Ok(())

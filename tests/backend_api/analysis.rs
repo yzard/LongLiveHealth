@@ -8,8 +8,8 @@ async fn analysis_uses_confirmed_snapshot_and_becomes_stale_after_correction() {
     let observation = confirm(&state, &user.user_id, &report).await;
     let (address, server) = super::provider::mock().await;
     let mut config = (*state.config).clone();
-    config.providers.analysis.enabled = true;
-    config.providers.analysis.base_url = address;
+    config.analysis_enabled = true;
+    config.llm.base_url = address;
     state.config = std::sync::Arc::new(config);
     let scope = longlivehealth::analysis::AnalysisRequest {
         start_date: "2026-08-01".into(),

@@ -14,30 +14,7 @@ services:
     volumes:
       - ${LONGLIVEHEALTH_API_DATA_DIR:-../playground/backend_api}:/data
     expose: ["8080"]
-    networks: [ingress, inference]
-    stop_grace_period: 30s
-  backend_ocr:
-    image: longlivehealth-backend-ocr:local
-    build:
-      context: ..
-      dockerfile: docker/backend_ocr.Dockerfile
-    restart: unless-stopped
-    environment:
-      PUID: "${PUID:-1000}"
-      PGID: "${PGID:-1000}"
-      UMASK: "077"
-      TZ: "${TZ:-UTC}"
-    volumes:
-      - ${LONGLIVEHEALTH_OCR_DATA_DIR:-../playground/backend_ocr}:/data:ro
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ["${LONGLIVEHEALTH_GPU_DEVICE:-0}"]
-              capabilities: [gpu]
-    expose: ["8000"]
-    networks: [inference]
+    networks: [ingress, inference_egress]
     stop_grace_period: 30s
   caddy:
     image: caddy:2
@@ -55,8 +32,7 @@ services:
     depends_on: [backend_api]
 networks:
   ingress:
-  inference:
-    internal: true
+  inference_egress:
 volumes:
   caddy-data:
   caddy-config:

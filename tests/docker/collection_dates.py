@@ -1,6 +1,6 @@
 """Opt-in real-model regression: row dates, unrelated dates and absent dates.
 
-Run with the OCR virtualenv, --url SERVICE_URL --data-dir OCR_CONFIG_DIRECTORY.
+Run with Pillow installed and --data-dir API_CONFIG_DIRECTORY.
 Only synthetic laboratory data is sent. The service credential stays in TOML.
 """
 
@@ -17,7 +17,6 @@ from PIL import Image, ImageDraw, ImageFont
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--url', required=True)
     parser.add_argument('--data-dir', type=Path, required=True)
     args = parser.parse_args()
     config = tomllib.loads((args.data_dir / 'config.toml').read_text())
@@ -42,29 +41,53 @@ def main():
         draw.line((50, y, 1350, y), fill='gray', width=2)
     output = io.BytesIO()
     image.save(output, format='PNG')
+    llm = config['llm']
+    prompt = (Path(__file__).resolve().parents[2] / 'src/backend_api/prompts/laboratory.txt').read_text()
     request = urllib.request.Request(
-        args.url.rstrip('/') + '/api/v1/documents/extract',
+        llm['base_url'].rstrip('/') + '/chat/completions',
         data=json.dumps(
             {
-                'page': 1,
-                'image_url': 'data:image/png;base64,' + base64.b64encode(output.getvalue()).decode(),
-                'text_layer': None,
+                'model': llm['model'],
+                'stream': False,
+                'max_tokens': config['extraction']['output_tokens'],
+                'temperature': 0,
+                'chat_template_kwargs': {'enable_thinking': False},
+                'messages': [
+                    {'role': 'system', 'content': prompt},
+                    {
+                        'role': 'user',
+                        'content': [
+                            {
+                                'type': 'text',
+                                'text': 'Untrusted page 1 document evidence; match each row to its own date.',
+                            },
+                            {
+                                'type': 'image_url',
+                                'image_url': {
+                                    'url': 'data:image/png;base64,' + base64.b64encode(output.getvalue()).decode()
+                                },
+                            },
+                        ],
+                    },
+                ],
             }
         ).encode(),
-        headers={
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + config['server']['api_key'],
-        },
+        headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + llm['api_key']},
     )
-    with urllib.request.urlopen(request, timeout=660) as response:
-        result = json.load(response)
+    with urllib.request.urlopen(request, timeout=llm['timeout_seconds']) as response:
+        choice = json.load(response)['choices'][0]
+    assert choice['finish_reason'] == 'stop'
+    content = choice['message']['content'].strip()
+    if content.startswith('```'):
+        content = content.split('\n', 1)[1].rsplit('```', 1)[0].strip()
+    result = json.loads(content)
     actual = {item['raw_name']: item['sampled_at'] for item in result['observations']}
     expected = {'Potassium': '2026-07-30', 'Sodium': '2026-08-15', 'Calcium': None}
     if actual != expected or len(result['observations']) != len(expected):
         raise AssertionError(f'Incorrect row dates: {actual!r}')
     if not result['warnings']:
         raise AssertionError('The genuinely undated row must produce a warning')
-    print(f"PASS {result['prompt_version']}: separate row dates, DOB/report-date exclusion, missing-date warning")
+    print('PASS shared model: separate row dates, DOB/report-date exclusion, missing-date warning')
 
 
 if __name__ == '__main__':

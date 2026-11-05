@@ -123,14 +123,8 @@ pub async fn run(cli: Cli) -> Result<(), AppError> {
         return Ok(());
     }
     if matches!(cli.command, Command::ProbeProviders) {
-        crate::ocr::probe(&config.ocr).await?;
-        println!("ocr: service is available (model not loaded, not an accuracy test)");
-        if config.providers.analysis.enabled {
-            crate::provider::probe(&config.providers.analysis).await?;
-            println!("analysis: synthetic text response received");
-        } else {
-            println!("analysis: disabled");
-        }
+        crate::provider::probe(&config.llm).await?;
+        println!("shared LLM: synthetic text response received for OCR and Analytics");
         return Ok(());
     }
     if matches!(cli.command, Command::Serve) {

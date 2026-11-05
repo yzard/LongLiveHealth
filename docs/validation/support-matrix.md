@@ -7,7 +7,7 @@
 | PDF、PNG、JPEG | 原字节、摘要、文件元数据、完整 OCR/解析回复、候选与出处、人工修订 | Rust 回归及真实 GPU 合成 PNG、文字 PDF、扫描/混合两页 PDF 多单位→HTTPS 数据闭环通过；真实报告待测 |
 | HEIC/HEIF | 原字节在 raw/photos；JPEG 识别副本在 derived | 合成容器头及双 part 原字节/重放/删除测试通过；真实 HEIC 与原生照片导入待测，后端只校验容器头 |
 | 扫描纸质报告 | VisionKit 输出的每页 PNG 单独归档 | 每页分别创建报告，不声称保留相机传感器 RAW 或自动合并为多页 PDF |
-| backend_ocr / Qwen3.8 + NInfer | 各 run/page 的完整服务 HTTP 正文、原生 raw_response_body、reasoning、content、结构化结果、model/engine/prompt_version | 原生正文上限 3 MiB，服务回复上限 8 MiB；结构失败已接收回复保留，网络失败无回复；真实 GPU 合成识别及卸载通过；有效 warnings 记录 needs_review，不当成执行失败 |
+| API OCR / shared Strata | 各 run/page 的完整服务 HTTP 正文、原生 raw_response_body、reasoning、content、结构化结果、model/engine/prompt_version | 原生正文上限 3 MiB，服务回复上限 8 MiB；结构失败已接收回复保留，网络失败无回复；共享推理按独立合成测试验收，模型卸载由 local_llm 负责；有效 warnings 记录 needs_review，不当成执行失败 |
 | PDF 文本层 | 按 run/page 的文字、归一化词坐标、原始 bbox XML、状态/错误与处理版本；原 PDF 仍保留 | Poppler 和真实 GPU 文字/扫描/混合 PDF、归属/导出/删除测试通过；全部页面始终保留视觉，真实文档准确性待测 |
 | 单位与参考区间 | 原值/单位/范围，加可重算派生结果、规则/来源/版本 | 现有 10 项常见单位；比较符/范围不伪装精确值，复杂条件/歧义/未知保持不可比较；无临床阈值推断 |
 | 所有人工报告项目 | 原名、原值/单位/范围、日期精度、出处和不可变修订 | 不受 HealthKit 类型范围限制；文本、比较符或未映射项仍归档 |

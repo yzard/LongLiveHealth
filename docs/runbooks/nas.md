@@ -318,3 +318,7 @@ Current image: `longlivehealth-backend-api:apple-browse-apk-20261029`. It includ
 ## ARM64 Android Build 3 — 2026-10-29
 
 Current API image: `longlivehealth-backend-api:android-jni-20261029`. The fixed `/longlivehealth.apk` download is now ARM64-only. Its SHA-256 is `556889b39812c9f69352cdd1661bc084f0b36612aa113e90bb30e689e0dddcaf`. The app build checks every native DEX method against the packaged ARM64 library before publication. [Crash investigation](../validation/android-browse-crash.md).
+
+## 2026-11-05 unified shared inference
+
+Current architecture: NAS runs only the Long Live Health backend_api business service. Its private `/data/config.toml` has one `[llm]` endpoint/model/key for both built-in Rust OCR and Analytics. Desk local_llm owns Strata; no Long Live Health OCR container, model image, GPU reservation or OCR host port is needed. Keep the existing Caddy ingress and API data mount unchanged. Stop local_llm during resource-intensive builds and restart it afterwards. Existing report results and raw archives are preserved; changing the model does not rescan confirmed reports automatically.

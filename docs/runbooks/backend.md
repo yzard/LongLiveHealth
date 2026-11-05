@@ -37,14 +37,10 @@ cargo run --locked -- --data-dir /absolute/path/backend_api serve
 
 ## 模型服务
 
-backend_api 接收原件并持久化任务；backend_ocr 是独立 FastAPI 服务，管理 Qwen3.8 27B NVFP4 + NInfer 推理。PDF 由 API 渲染为逐页 PNG，HEIC 使用已归档的 JPEG 处理副本；原件均留在 API。服务通信、配置和运行限额见 [OCR 运维](ocr.md)。
+backend_api 接收原件并持久化任务；OCR 在 backend_api 内整理提示并调用 Desk local_llm 的 Strata 推理服务。PDF 由 API 渲染为逐页 PNG，HEIC 使用已归档的 JPEG 处理副本；原件均留在 API。服务通信、配置和运行限额见 [OCR 运维](ocr.md)。
 
-- API `[ocr]` 配置 `url`、`api_key` 和 `timeout_seconds`。OCR 是必要服务，容器连接 `http://backend_ocr:8000`，宿主机模板连接配置的本地 OCR 地址；URL、有效密钥和超时均须配置。
-- OCR 服务只接受内联 PNG/JPEG，不接受远程 URL、文件路径、任意 messages 或客户端模型配置。当前没有 document_parser 第二阶段。
-- `providers.analysis` 使用独立 OpenAI 兼容 `/v1/chat/completions` 接口，个人血脂分析默认关闭。其模型/extra_body 仍由管理员明确配置，凭据直接写入 `[providers.analysis].api_key`；空串表示该本地接口无需鉴权。
-- OCR 请求不进行 HTTP 层重复调用；重试由 API 持久任务与租约负责。已确认修订不会被重跑覆盖。分析接口的临时错误最多三次调用，间隔 1、2 秒。
-
-在 `src/backend_api/` 执行 `cargo run --locked -- --data-dir /absolute/path/backend_api probe-providers`：OCR 只检查服务存活，不加载模型；分析发送合成文字。该命令不证明视觉识别正确。OCR 必须配置且 worker 始终运行；上传归档事务直接创建 queued 任务。OCR 暂时不可达时原件仍归档，提取任务显示 failed / extraction_failed，可在服务恢复后重试；不再存在 blocked / provider_disabled 模式。
+- API `[llm]` 为 OCR 与 Analytics 提供同一个 OpenAI 风格接口、模型和内嵌凭据，`[extraction]` 保存 OCR 的输出与图像预算。没有独立 OCR 服务或 URL。
+- `probe-providers` 通过共享接口发送合成文字；真实 OCR 验收通过标记过的隔离 API 及合成报告完成。原件、任务、审核与模型失败处理都由 API 负责。
 
 ## 账户与隔离
 
@@ -75,7 +71,7 @@ docker compose -f docker/docker-compose.yaml exec --user "$PUID:$PGID" backend_a
   /app/longlivehealth --data-dir /data create-user --username yourname
 ```
 
-直接 Compose 默认使用相同的两个服务根目录，应与 playground 二选一运行，避免同时打开同一数据库。独立部署可以用 LONGLIVEHEALTH_API_DATA_DIR 和 LONGLIVEHEALTH_OCR_DATA_DIR 指向另外两个绝对目录，先在各目录准备 config.toml，API `[ocr].api_key` 与 OCR `[server].api_key` 必须一致。所有服务配置用的 keys/tokens/passwords 直接内嵌在各自 TOML，不能使用文件引用或环境/CLI 密钥覆盖。Compose 内部后端 HTTP，Caddy 对外 HTTPS。默认 localhost 使用本地 CA；真机需使用受信任的证书和可访问地址。配置 `LONGLIVEHEALTH_DOMAIN` 为自己的域名并安排解析和入口端口。没有替用户发布公共服务。
+直接 Compose 使用一个 API 数据根；以 LONGLIVEHEALTH_API_DATA_DIR 指定目录，在 config.toml 中配置共享 [llm]。不要同时启动多个实例打开同一数据库。Caddy 仍可作为 HTTPS 入口，Desk local_llm 单独管理模型。
 
 `docker/config.toml` 是 API 首次初始化模板；运行时配置是 `/data/config.toml`。模型 URL 在容器内解析，127.0.0.1 指容器自身，需改为真实模型服务地址或同网络服务名。PUID/PGID 默认 1000，入口验证 UID/GID/UMASK 并对专用 data 卷降权；管理员 exec 使用对应 UID。不要将无关目录挂载为 `/data`。
 
@@ -104,7 +100,7 @@ cargo test --locked --all-targets
 cargo clippy --locked --all-targets -- -D warnings
 cd ../..
 docker compose -f docker/docker-compose.yaml config --quiet
-src/backend_ocr/.venv/bin/python tests/docker/deployment.py --ocr --load
+python tests/docker/deployment.py --ocr --llm-config /path/to/api/config.toml --load
 ```
 
 最后一项使用 OCR 组件虚拟环境（见 OCR 运维），启动独立合成测试容器，验证实际 GPU 图片/文字 PDF/扫描与混合 PDF 多单位识别、惰性加载与空闲卸载、HTTPS、归档、复核、趋势、导出、重启和删除；--load 追加并发 32 MiB 单 payload /40 MiB 批次、超限原子拒绝和完整重放，记录 API RSS 与状态延迟，再清理自己的临时卷。省略 --ocr 会在上传前停止合成测试的 OCR 容器，核验真实故障下失败任务、原件归档与人工复核；--ocr 才运行真实 GPU 识别。这个测试选项不控制 API 的 OCR 配置或功能。

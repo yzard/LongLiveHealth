@@ -1,3 +1,5 @@
+analysis_enabled = true
+
 [server]
 listen = "127.0.0.1:8080"
 
@@ -16,17 +18,19 @@ maximum_image_pixels = 40000000
 lease_seconds = 120
 maximum_attempts = 3
 
-# OCR is required; configure its URL and matching service key before startup.
-# Configure these centrally; clients cannot override them.
-[ocr]
-url = "http://127.0.0.1:8001"
-timeout_seconds = 660
-api_key = "" # Set the shared OCR key here; playground initialization generates it.
+[extraction]
+output_tokens = 8192
+image_pixel_budget = 2097152
 
-[providers.analysis]
-enabled = false
-base_url = "http://127.0.0.1:8002/v1"
-model = "configure-your-model"
+# One shared inference service for document extraction and Analytics.
+[llm]
+base_url = "http://192.168.1.20:8080/v1"
+model = "qwen3.8-flash-next-iq3_s"
 adapter = "openai_chat"
-api_key = "" # Empty only for a provider that needs no authentication.
-timeout_seconds = 120
+api_key = "" # Set the local_llm credential in this service's operator config.toml.
+timeout_seconds = 900
+
+[llm.extra_body]
+max_tokens = 4096
+temperature = 0
+chat_template_kwargs = { enable_thinking = false }

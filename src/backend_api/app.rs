@@ -13,6 +13,7 @@ pub struct AppState {
     pub(crate) file_mutation: Arc<Mutex<()>>,
     pub(crate) upload_slots: Arc<Semaphore>,
     pub(crate) health_slots: Arc<Semaphore>,
+    pub(crate) inference_slots: Arc<Semaphore>,
     _service_lock: Arc<File>,
 }
 
@@ -58,6 +59,7 @@ impl AppState {
             file_mutation: Arc::new(Mutex::new(())),
             upload_slots: Arc::new(Semaphore::new(2)),
             health_slots: Arc::new(Semaphore::new(2)),
+            inference_slots: Arc::new(Semaphore::new(1)),
             _service_lock: Arc::new(service_lock),
         })
     }

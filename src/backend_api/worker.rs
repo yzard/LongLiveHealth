@@ -1,3 +1,4 @@
+use crate::ocr::ExtractedPage;
 use crate::{
     app::AppState,
     authentication::{digest, now},
@@ -5,21 +6,10 @@ use crate::{
     error::AppError,
     jobs::ClaimedJob,
     provider,
-    reports::ObservationPayload,
 };
 use base64::Engine;
-use serde::Deserialize;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ExtractedPage {
-    report_title: Option<String>,
-    source_name: Option<String>,
-    observations: Vec<ObservationPayload>,
-    warnings: Vec<String>,
-}
 
 pub async fn run(state: AppState, stop: CancellationToken) {
     let tasks = async {
@@ -363,9 +353,16 @@ async fn extract_page(
     image_url: String,
     text_layer: Option<&crate::documents::TextLayer>,
 ) -> Result<(ExtractedPage, String, String), AppError> {
+    let _permit = state
+        .inference_slots
+        .acquire()
+        .await
+        .map_err(|_| AppError::Internal)?;
     let reply = crate::ocr::extract(
         &state.database.cpu,
-        &state.config.ocr,
+        &state.config.llm,
+        &state.config.extraction,
+        state.config.storage.maximum_image_pixels,
         page,
         image_url,
         text_layer.cloned(),
@@ -445,7 +442,7 @@ async fn save_output(
         .bind(reply.status_code as i64)
         .bind(content)
         .bind(model)
-        .bind("qwen3.8_ninfer")
+        .bind("strata")
         .bind(now()?)
         .execute(&mut *transaction)
         .await?;

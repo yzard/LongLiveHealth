@@ -41,10 +41,10 @@ pub async fn complete(provider: &ProviderConfig, messages: Value) -> Result<Comp
     Err(AppError::ProviderUnavailable)
 }
 
-async fn complete_once(provider: &ProviderConfig, messages: Value) -> Result<Completion, AppError> {
-    if !provider.enabled {
-        return Err(AppError::Invalid("Provider is disabled"));
-    }
+pub(crate) async fn complete_once(
+    provider: &ProviderConfig,
+    messages: Value,
+) -> Result<Completion, AppError> {
     let client = reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())

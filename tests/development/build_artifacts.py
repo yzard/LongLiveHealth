@@ -1,7 +1,5 @@
 import fcntl
-import hashlib
 import importlib.util
-import json
 import os
 import shutil
 import subprocess
@@ -15,60 +13,7 @@ artifacts = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(artifacts)
 
 
-def model_layout(layout):
-    directory = layout / 'blobs/sha256'
-    directory.mkdir(parents=True)
-
-    def blob(value):
-        data = value if isinstance(value, bytes) else json.dumps(value).encode()
-        digest = hashlib.sha256(data).hexdigest()
-        (directory / digest).write_bytes(data)
-        return {'digest': 'sha256:' + digest, 'size': len(data)}
-
-    layers = [blob(b'model'), blob(b'license')]
-    config = blob(
-        {
-            'config': {'Labels': {'org.shared-model.sha256': artifacts.MODEL_SHA256}},
-            'rootfs': {'diff_ids': [row['digest'] for row in layers]},
-        }
-    )
-    manifest = blob({'config': config, 'layers': layers})
-    (layout / 'index.json').write_text(json.dumps({'manifests': [manifest]}))
-    (layout / 'oci-layout').write_text(json.dumps({'imageLayoutVersion': '1.0.0'}))
-    return layers
-
-
 class BuildArtifactTests(unittest.TestCase):
-    def test_existing_model_is_reused_without_any_docker_download_call(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve()
-            layout = root / 'shared/model'
-            layers = model_layout(layout)
-            artifacts.validate_model(layout)
-            script = '''set -euo pipefail
-source "$1"
-BUILD_PROJECT_ROOT="$2"
-BUILD_DOCKER_BUILDER=unused
-docker() { echo Unexpected-model-download >&2; return 99; }
-prepare_shared_model "$3"
-'''
-            args = [
-                'bash',
-                '-c',
-                script,
-                'model-test',
-                str(ROOT / 'src/development/build_lifecycle.sh'),
-                str(ROOT),
-                str(layout.parent),
-            ]
-            valid = subprocess.run(args, capture_output=True, text=True)
-            self.assertEqual(valid.returncode, 0, valid.stderr)
-            self.assertIn('Using local shared', valid.stdout)
-            (layout / 'blobs/sha256' / layers[0]['digest'].split(':')[1]).unlink()
-            invalid = subprocess.run(args, capture_output=True, text=True)
-            self.assertNotEqual(invalid.returncode, 0)
-            self.assertNotIn('Unexpected-model-download', invalid.stderr)
-
     def test_cleanup_removes_private_work_and_targets_preserving_active_android_artifacts_and_data(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

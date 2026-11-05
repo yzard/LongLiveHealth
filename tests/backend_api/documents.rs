@@ -91,7 +91,7 @@ async fn evidence_is_archived_exported_owner_scoped_and_deleted_with_report() {
     let bob = crate::add_user(&state, "bob").await;
     let (address, server) = super::provider::mock().await;
     let mut config = (*state.config).clone();
-    config.ocr.url = address.trim_end_matches("/v1").into();
+    config.llm.base_url = address.clone();
     state.config = std::sync::Arc::new(config);
     let app = longlivehealth::app::create_application(state.clone());
     let token = crate::token(&state, "alice").await;

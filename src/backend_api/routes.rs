@@ -217,7 +217,7 @@ async fn review_report(
             .review(&current.user.user_id, request)
             .await?
     };
-    if confirmed && state.config.providers.analysis.enabled {
+    if confirmed && state.config.analysis_enabled {
         let end = chrono::Utc::now().date_naive();
         let scope = crate::analysis::AnalysisRequest {
             start_date: (end - chrono::Duration::days(90)).to_string(),
@@ -530,7 +530,7 @@ async fn health_coverage(
 async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(
         json!({"status":"ok", "api_version":1, "capabilities":{"file_archive":true,"document_extraction":true,
-        "review":true,"trends":true,"health_sync":true,"wellness_day":true,"manual_entries":true,"export":true,"delete":true,"analysis":state.config.providers.analysis.enabled}}),
+        "review":true,"trends":true,"health_sync":true,"wellness_day":true,"manual_entries":true,"export":true,"delete":true,"analysis":state.config.analysis_enabled}}),
     )
 }
 

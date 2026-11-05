@@ -2,7 +2,7 @@
 
 2026-10-06 更新：[健康数据中心实施计划与竞品参考](implementation-whoop-bevel.md)。保留 34 项竞品研究，按开源、无硬件、开放数据接入的定位筛选范围。优先交付读取、整合和导出，再扩展辅助分析。
 
-更新：2026-10-03。状态：本地 API、SQLite、来源分类原件归档、独立 Qwen3.8/NInfer OCR 和随 API 交付的 Web GUI 已实现，服务端生命周期、并发负载及真实 GPU 合成图片/文字/扫描/混合 PDF 验证通过；真实样本/Apple SDK 真机验收尚未完成。数据库采用当前 schema，不提供历史迁移。
+更新：2026-10-03。状态：本地 API、SQLite、来源分类原件归档、API 内置 OCR 与共享 Strata / Qwen3.8 Flash Next 和随 API 交付的 Web GUI 已实现，服务端生命周期、并发负载及真实 GPU 合成图片/文字/扫描/混合 PDF 验证通过；真实样本/Apple SDK 真机验收尚未完成。数据库采用当前 schema，不提供历史迁移。
 
 Long Live Health 是开源、可自托管的健康数据中心。先把报告和设备明细变成可追溯、可整合、可导出的数据，再提供辅助分析。封闭设备与硬件研发不在范围内。
 
@@ -44,6 +44,6 @@ Web GUI 的范围与拆分见 [网页实施计划](implementation-webgui.md)，�
 
 后台服务全部配置凭据直接内嵌其 config.toml；运行时没有独立密钥文件。当前配置与 skills 更新见[内嵌凭据审查](reviews/2026-10-03-embedded-credentials.md)。
 
-NAS API 与 Desk GPU OCR 的分机部署见 [NAS 部署](runbooks/nas.md)。
+NAS API 与 Desk OCR / local_llm 的分机部署见 [NAS 部署](runbooks/nas.md)。
 
 完整执行 build_docker.sh 的模型本机复用、APK/镜像校验和自动清理结果见 [2026-10-31 完整构建验收](reviews/2026-10-31-full-build.md)。

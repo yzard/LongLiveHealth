@@ -1,61 +1,28 @@
-# 独立 OCR 服务
+# API 内置血检 OCR 与共享推理
 
-backend_api 接收手机照片/PDF，保存原件并逐页调用 backend_ocr。backend_ocr 使用 Qwen3.8 27B NVFP4 + NInfer 返回结构化化验项目，API 先归档完整服务回复，再校验候选并写 SQLite。原件、审核、趋势和导出都归 API，OCR 不挂载其 data 或数据库。
+Long Live Health 仅部署 backend_api 一个业务服务。上传的 PDF/图片仍先归档，持久化后台任务负责逐页渲染、文字证据、图像缩放、提示、模型请求、结构验证与草稿保存。用户 Confirm All 才将指标写入正式结果。没有独立 OCR HTTP 接口或 Python/GPU 容器。
 
-## 固定版本与硬件
+## 一份配置
 
-| 项目 | 当前值 |
-| --- | --- |
-| 引擎 | [NInfer](https://github.com/Neroued/ninfer)，commit `9e163eee4b8acec21ab0ac765107b6a3f287b217` |
-| 模型 | [Qwen3.8-27B-nvfp4-NInfer](https://huggingface.co/neroued/Qwen3.8-27B-nvfp4-NInfer)，revision `f0b43ad436b9fa8142c6ed6647c470a6fe409484` |
-| 模型文件 | `qwen3_8_27b_nvfp4.ninfer`，23,719,715,844 字节 |
-| SHA256 | `74d2c57145e6ff11d1d2faa79594477f9bc903a611af1fb20218189fbbb77d82` |
-| 容器 / GPU | CUDA 13.1.2；RTX 5090；需要 NVIDIA Container Toolkit |
+API 使用 `--data-dir /data`，只读取 `/data/config.toml`。`[llm]` 包含共享 `/v1` URL、模型、内嵌 API 密钥、超时和生成参数；OCR 与 Analytics 使用同一个配置。`[extraction]` 只指定 OCR 输出 token 数和图像像素预算，没有第二套地址或密钥。`analysis_enabled` 控制可选的分析功能，OCR 始终可用。
 
-模型在镜像构建时下载、校验并放入 `/models/`，不是启动时下载。源码与模型许可证随镜像保留。默认 FP8 KV、单并发、32,768 上下文、8,192 最大输出 token、MTP 推测解码和 thinking；参数见 `src/backend_ocr/config.toml`。当前 GPU 合成验收通过不代表其他硬件可用或真实报告准确率已通过。
+Desk 实际模型配置为 `qwen3.8-flash-next-iq3_s`，API 为 `http://192.168.1.20:8080/v1`。其服务位于 `/home/zyin/dev/local_llm`，内部 Strata 端口 8081 不提供给客户端。模型加载、空闲卸载和显存管理全由 local_llm 负责；Long Live Health 不打包模型或启动模型进程。
 
-## 配置与运行
+当前共享上下文 16,384 tokens；OCR 输出预算 8,192、图像像素预算 2,097,152，Analytics 输出预算 4,096，关闭 thinking 以输出严格 JSON。凭据在 API operator TOML 中内嵌，0600；不放入手机、镜像、环境变量、CLI 参数或单独密钥文件。模板只有空占位，不会自动制造无效的共享服务密钥。
 
-两个服务分别要求 `--data-dir ABSOLUTE_DIRECTORY`，只加载其根内固定的 `config.toml`；TOML 不包含 data_dir。相对模型路径以该根解析。API `[ocr]` 指定 URL、内嵌 api_key 和 660 秒请求超时。OCR `[server]` 指定监听、内嵌同值 api_key、600 秒整体推理截止时间和限额，`[engine]` 指定引擎及模型文件、生成参数。配置变更重启生效。手机用户 token 不传入 OCR。
+## 调用与并发
 
-`./run_playground.sh` 构建两个镜像，以前台运行 API、OCR 和 Caddy。仅在缺失时生成 playground/backend_api 与 playground/backend_ocr 内的 config.toml（0600），OCR 密钥直接写入两份 TOML，已有配置与稳定密钥不覆盖。旧 api_key_file 配置由离线初始化脚本一次性转换；运行时拒绝该旧字段且不读取密钥文件。API 根读写挂载，OCR 根只读挂载，OCR 无法读取 API SQLite 或原件。独立部署用 LONGLIVEHEALTH_API_DATA_DIR 和 LONGLIVEHEALTH_OCR_DATA_DIR 选择两个根目录。
+Rust OCR 模块复用 API 的 HTTP provider，发送 OpenAI 风格的文字与 image_url。提示词位于 `src/backend_api/prompts/laboratory.txt`，保留每个视觉行的采集日期、原始结果、原单位、参考区间和页码引文。原件和 PDF 文字层都属于不可信证据，不作为指令。
 
-Compose 的 OCR 只加入 internal inference 网络，没有宿主机端口。8000 是服务入口，NInfer 仅监听容器回环 8002；不直接暴露原生 chat 接口。API 通过 Caddy HTTPS 为手机提供服务，OCR 不通过 Caddy。服务使用 PUID/PGID 降权运行，默认为 1000:1000。
+OCR 与 Analytics 在 API 内共用一个推理槽位，避免同时向大模型发出多项生成。普通浏览、上传、审核和同步不占用这个槽位。OCR 请求中的 CPU 图片处理进入已有后台 CPU 执行器，任务继续使用租约续期和取消机制；不因手机锁屏而丢失服务器任务。
 
-健康检查 GET `/health` 返回 `status=ok` 和 `engine_state`（unloaded/loading/ready/busy/stopping），不加载模型或重置空闲时间。首次提取惰性启动 NInfer，默认空闲 300 秒后回收进程及显存。队列最多 4 个请求（包含正在执行的请求），预处理和推理串行。超时、客户端取消或服务退出会终止并等待 NInfer 进程组，必要时 SIGKILL；释放执行槽后才能处理下一项。服务访问日志只含方法、已知路由、状态和耗时。
+模型的完整 raw_response_body、content、model、engine=strata 和 prompt_version 随 run/page 归档。截断回复、无效 JSON、错误页码、猜测 metric_id 均失败并保留原始证据。缺失名称、结果或采集日期沿用现有逐项诊断，不能静默进入 Browse。没有响应或超过响应限额时不伪造原始输出。
 
-## 内部契约
+## 构建与验证
 
-POST `/api/v1/documents/extract`，`Authorization: Bearer <service-key>`，JSON 请求：
+`./build_docker.sh TAG` 构建 Android APK 和单个 backend_api 镜像，并执行相关检查。Desk 资源有限，构建前先 `systemctl --user stop local-llm.service`；构建完成后再启动服务并执行真实推理验证，不让编译与模型争用内存。
 
-```json
-{"page":1,"image_url":"data:image/png;base64,...","text_layer":null}
-```
-
-仅接受内联 PNG/JPEG。禁止远程 URL、文件路径、任意模型名、messages 和推理参数。请求正文默认最多 64 MiB、解码图像最多 40 百万像素；仅推理副本做 EXIF 转正和缩小至 4,194,304 像素，API 原件不改变。PDF 由 API 渲染逐页 PNG，同时 pdftotext -bbox-layout 提取文本及归一化词坐标；HEIC 用已归档 JPEG 处理副本。内部请求必须显式携带 text_layer：普通图片为 null，PDF 为 {status,text,words}（每词 text/bounding_box）。模型提示只附该层状态和文字，完整词位置与原始 XML 保存在 API。
-
-文本提取 30 秒，原始 XML 上限 2 MiB、可用文字上限 32 KiB、最多 4096 词。available/empty/unavailable/limit_exceeded 状态显式记录；失败/超限不会发送部分文字冒充成功，继续视觉并标记需要核对。文本层是非可信证据，可能只有页眉或与图像冲突，不能当作指令或替代整页视觉。每次 run/page 的证据存 extraction_inputs，通过鉴权接口读取并随导出/删除生命周期管理。
-
-成功回复包含 `model`、`engine=ninfer`、`prompt_version=laboratory-page-v5`、`content`、`raw_response_body`、`observations` 和 `warnings`。坐标为 null 或归一化 [left,top,right,bottom] 数组，与 API 一致。每项保留原名、原结果（包括比较符/文本）、单位、参考范围、异常标记、采样日期、页码和原文引文，`metric_id` 必须为 null。API 二次校验后保存为 pending，人工复核才可确认和映射指标。有效结构中的 warnings 保留完整证据，并使该页 needs_review；不会把已经有效提取的候选判成执行失败。真正的 HTTP、结构或字段错误仍明确失败。
-
-完整原生回复含模型正文、reasoning 和 usage 等实际返回字段。原生响应上限 3 MiB，API 服务回复上限 8 MiB；超过上限显式失败，不截断后冒充完整。结构不合法、页码错误或 `finish_reason` 非 stop 返回 422 `invalid_structured_output`，同时附原始正文及完整原生回复供 API 归档。鉴权 401、请求超限 413、队列满 429、引擎不可用 503、整体超时 504 都是明确失败。
-
-API 将已接收完整 HTTP 回复保存到 extraction_outputs，含失败回复；归档后才检查状态与结构。无回复的网络失败不伪造模型正文。HTTP 调用不在 OCR 客户端内部自动重试；API 持久任务负责有限尝试、租约和手动重试，晚到结果在提交前核对归属及删除状态。
-
-## 验证
-
-```bash
-uv sync --locked --all-groups --project src/backend_ocr
-src/backend_ocr/.venv/bin/python -m unittest discover -s tests/backend_ocr -p '*.py'
-./build_docker.sh
-src/backend_ocr/.venv/bin/python tests/docker/deployment.py --ocr --load
-```
-
-Docker 构建关口运行 Rust fmt/Clippy/75 项测试、Python isort/Black/10 项 OCR 测试、13 项开发脚本测试及 11 项前端测试。最后一个命令以隔离配置、随机端口、容器和临时卷完成真实 GPU 合成图片、文字 PDF、两页扫描/混合 PDF 的多单位识别及 HTTPS 数据闭环；--load 同时核验 Health 大载荷准入、原始重放、超限及响应性，结束清理自己的资源。未提供任何真实健康报告输入，不能据此标记临床准确性或 iPhone 真机验收完成。
-
-所有 background service 配置凭据直接内嵌到 config.toml，禁止凭据文件与环境/CLI 密钥覆盖。示例与验收见[内嵌凭据审查](../reviews/2026-10-03-embedded-credentials.md)。模板的空 OCR 密钥必须配置后才可启动 OCR；Playground 初始化会生成匹配的有效密钥。OCR 配置对象隐藏密钥表示，非法配置错误不输出原值。
-
-OCR 是 API 的必要服务：[ocr] 没有 enabled，所有上传在归档事务内直接排队，worker 始终尝试提取；原件和人工复核在 OCR 临时故障时继续可用。有效 URL 与内嵌密钥必须在启动时校验，不能通过开关跳过。详见[必要 OCR 服务审查](../reviews/2026-10-03-required-ocr.md)。
+Docker 构建执行 Rust fmt、Clippy、单元和集成测试。`probe-providers` 使用唯一的共享配置发送合成文字探针。`tests/docker/unified_inference.py` 只针对带 `.synthetic-check` 标记的隔离 API 数据根，验证合成图片上传、采集日期、pending/confirm、真实 Analytics 及完整模型归档，不触碰生产库。
 
 ## 2026-10-30 Function Health 采集日期核查
 
@@ -63,10 +30,10 @@ OCR 是 API 的必要服务：[ocr] 没有 enabled，所有上传在归档事务
 
 真实 11 页报告隔离复测共 126 项，全部日期匹配页面。原件和测试输出仅存于忽略的 build/ocr/function-date-audit/，不提交个人健康数据。测试不覆盖生产已确认结果；旧提取不会因为更新提示词而自动改写。
 
-可重复的合成 GPU 回归检查（需要运行中的 OCR 服务及其配置目录）：
+可重复的共享模型日期回归检查（使用 API 配置目录，需安装 Pillow）：
 
 ```bash
-python tests/docker/collection_dates.py --url http://127.0.0.1:8000 --data-dir /data
+python tests/docker/collection_dates.py --data-dir /path/to/api-data
 ```
 
 样本含两个不同采集日期、生日、报告生成日期及一个真正无日期的项目；必须正确区分前两项、保留第三项空日期并给出警告。服务凭据只从配置读取，不通过命令行传递。

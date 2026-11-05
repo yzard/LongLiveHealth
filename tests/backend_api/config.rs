@@ -7,13 +7,10 @@ fn configuration_is_owned_by_the_service_root() {
     std::fs::write(&path, crate::configured_template()).unwrap();
     let configuration = Config::load(directory.path()).unwrap();
     assert_eq!(configuration.data_dir, directory.path().to_path_buf());
-    assert!(!configuration.ocr.api_key.is_empty());
+    assert!(!configuration.llm.api_key.is_empty());
     assert!(Config::load(&path).is_err());
     assert!(Config::load(std::path::Path::new("relative/data")).is_err());
-    assert_ne!(
-        configuration.ocr.url,
-        configuration.providers.analysis.base_url
-    );
+    assert_eq!(configuration.llm.model, "qwen3.8-flash-next-iq3_s");
 }
 
 #[test]
@@ -24,17 +21,20 @@ fn malformed_unknown_and_unsafe_configuration_fail() {
     let valid = crate::configured_template();
     for content in [
         TEMPLATE.to_owned(),
-        crate::configured_template().replace("[ocr]", "[ocr]\nenabled = true"),
-        crate::configured_template().replace("[ocr]", "[ocr]\nenabled = false"),
+        crate::configured_template().replace("[extraction]", "[extraction]\nenabled = true"),
+        crate::configured_template().replace("[extraction]", "[extraction]\nenabled = false"),
         "not toml".into(),
         format!("data_dir = \"/data\"\n{valid}"),
         valid.replace("session_ttl_seconds = 86400", "session_ttl_seconds = 0"),
         valid.replace("maximum_attempts = 3", "maximum_attempts = 0"),
         valid.replace("maximum_pdf_pages = 100", "maximum_pdf_pages = 0"),
         valid.replace("[server]", "[server]\ndata_dir = \"/data\""),
-        valid.replace("http://127.0.0.1:8001", "https://user:secret@example.com"),
-        valid.replace("http://127.0.0.1:8001", "file:///tmp/model"),
-        valid.replace("timeout_seconds = 120", "timeout_seconds = 0"),
+        valid.replace(
+            "http://192.168.1.20:8080/v1",
+            "https://user:secret@example.com",
+        ),
+        valid.replace("http://192.168.1.20:8080/v1", "file:///tmp/model"),
+        valid.replace("timeout_seconds = 900", "timeout_seconds = 0"),
         valid.replace("maximum_attempts = 3", "unexpected = 3"),
     ] {
         std::fs::write(&path, content).unwrap();
@@ -50,7 +50,7 @@ fn embedded_credentials_validate_at_startup_without_secret_files() {
     let valid = TEMPLATE.replacen("api_key = \"\"", &format!("api_key = \"{secret}\""), 1);
     std::fs::write(&path, &valid).unwrap();
     let config = Config::load(directory.path()).unwrap();
-    assert_eq!(config.ocr.api_key, secret);
+    assert_eq!(config.llm.api_key, secret);
     assert!(!directory.path().join("ocr-key").exists());
     for invalid in [
         valid.replace(secret, ""),
@@ -59,10 +59,6 @@ fn embedded_credentials_validate_at_startup_without_secret_files() {
         valid.replace(secret, "synthetic-private-key\\r\\nheader-injection"),
         valid.replace(secret, &"x".repeat(8193)),
         valid.replace("api_key =", "api_key_file ="),
-        valid.replace(
-            "api_key = \"\"",
-            "api_key = \"provider-private-secret-with spaces\"",
-        ),
     ] {
         std::fs::write(&path, invalid).unwrap();
         let error = Config::load(directory.path()).err().unwrap().to_string();

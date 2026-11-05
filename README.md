@@ -4,7 +4,7 @@ The product is named **Long Live Health**. The GitHub repository is `yzard/LongL
 
 开源、可自托管的 health data center（健康数据中心）。目标是读取不同设备和平台的可用数据，统一整合、保存与导出，并提供辅助分析。项目采用 [MIT 许可证](LICENSE)，完全没有硬件产品；没有公开接口、健康平台或文件导出通道的封闭设备不支持。
 
-当前实现：Rust + SQLite `backend_api`、独立 Qwen3.8 + NInfer `backend_ocr` 和原生 iPhone 客户端。手机连接 API，API 归档照片并调用 OCR 获取结构化候选；分析使用单独配置的模型接口。
+当前实现：Rust + SQLite `backend_api`、iOS 和 Android 客户端。API 内置血检 OCR 的页面预处理、提示词和结果校验；OCR 与 Analytics 共用 `[llm]` 配置，调用 Desk 的 local_llm / Strata（`qwen3.8-flash-next-iq3_s`）。Long Live Health 只部署一个业务服务，不运行模型进程。
 
 Android 测试版已可安装：共用 Swift 核心、应用状态和页面源码，iOS 保留原生 SwiftUI 风格。Android 模拟器已验证主要流程、双栏布局和 Health Connect；Z Fold 8 真机验收待进行。[Android 安装与构建](docs/runbooks/android.md)。[跨平台范围与验证进度](docs/architecture/android-parity.md)。
 
@@ -19,7 +19,7 @@ PDF 保留逐页文字与图像证据；当前 17 项指标支持常见单位换
 后端及合成部署测试通过。2026-10-02 的旧版完成 iOS 模拟器与 unsigned Release 构建。2026-10-06 新增界面目前仅完成 Swift 语法解析与可移植核心测试，尚未通过 Apple SDK 构建。真机、真实传感器/临床记录和真实报告准确性仍待验收，设备安装需要签名。[iOS 验证记录](docs/validation/ios-simulator-2026-10-02.md)。
 
 - [后端启动](docs/runbooks/backend.md)
-- [NAS 部署与 Desk GPU OCR](docs/runbooks/nas.md)
+- [NAS 部署与共享 LLM](docs/runbooks/nas.md)
 - [OCR 服务配置](docs/runbooks/ocr.md)
 - [iPhone 构建与试用](docs/runbooks/ios.md)
 - [API 契约](docs/api.md)

@@ -24,6 +24,7 @@ mod maintenance;
 mod metric_history;
 mod middleware;
 mod models;
+mod ocr;
 mod provider;
 mod raw;
 mod reports;
@@ -107,11 +108,13 @@ pub async fn fixture() -> (TempDir, AppState) {
 }
 
 pub fn configured_template() -> String {
-    TEMPLATE.replacen(
-        "api_key = \"\"",
-        "api_key = \"synthetic-ocr-service-key-123456789\"",
-        1,
-    )
+    TEMPLATE
+        .replace("analysis_enabled = true", "analysis_enabled = false")
+        .replacen(
+            "api_key = \"\"",
+            "api_key = \"synthetic-ocr-service-key-123456789\"",
+            1,
+        )
 }
 
 pub async fn add_user(state: &AppState, username: &str) -> longlivehealth::models::User {

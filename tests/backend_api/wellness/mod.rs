@@ -2219,7 +2219,7 @@ async fn coach_snapshots_memory_and_deletion_removes_it_from_future_context() {
     };
     assert!(request(&state, &user.user_id, scope()).await.is_err());
     let mut config = (*state.config).clone();
-    config.providers.analysis.enabled = true;
+    config.analysis_enabled = true;
     state.config = std::sync::Arc::new(config);
     let memory = uuid::Uuid::new_v4().to_string();
     let save:SaveRequest=serde_json::from_value(json!({"record_id":memory,"version":1,"batch_id":uuid::Uuid::new_v4(),"at":100,"timezone":"UTC","entry":{"kind":"memory","content":{"name":"Style","content":"Explain uncertainty clearly","enabled":true,"note":""}}})).unwrap();

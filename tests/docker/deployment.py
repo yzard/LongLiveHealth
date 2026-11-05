@@ -8,12 +8,13 @@ import os
 import secrets
 import shutil
 import socket
-import ssl
 import sqlite3
+import ssl
 import struct
 import subprocess
 import threading
 import time
+import tomllib
 import urllib.error
 import urllib.request
 import uuid
@@ -26,14 +27,17 @@ OUTPUT = ROOT / 'build' / 'deployment-check'
 OUTPUT.mkdir(parents=True, exist_ok=True)
 PROJECT = 'longlivehealth-check-' + uuid.uuid4().hex[:8]
 parser = argparse.ArgumentParser()
-parser.add_argument('--ocr', action='store_true', help='Run actual Qwen3.8/NInfer GPU inference on a synthetic page')
+parser.add_argument('--ocr', action='store_true', help='Run shared Strata inference on a synthetic page')
 parser.add_argument('--webgui', type=Path, help='Run browser checks with the given Playwright index.mjs module')
 parser.add_argument(
-    '--load',
-    action='store_true',
-    help='Measure large synthetic Health sync and concurrent server responsiveness',
+    '--load', action='store_true', help='Measure large synthetic Health sync and concurrent server responsiveness'
+)
+parser.add_argument(
+    '--llm-config', type=Path, help='API config.toml containing the shared [llm] endpoint and credential'
 )
 options = parser.parse_args()
+if options.ocr and not options.llm_config:
+    parser.error('--ocr requires --llm-config pointing to the configured API TOML')
 
 
 def free_port():
@@ -46,7 +50,6 @@ http_port, https_port = free_port(), free_port()
 environment = dict(
     os.environ,
     LONGLIVEHEALTH_API_DATA_DIR=str(OUTPUT / (PROJECT + '-api')),
-    LONGLIVEHEALTH_OCR_DATA_DIR=str(OUTPUT / (PROJECT + '-ocr')),
     PUID=str(os.getuid()),
     PGID=str(os.getgid()),
     LONGLIVEHEALTH_BIND_ADDRESS='127.0.0.1',
@@ -55,38 +58,34 @@ environment = dict(
     LONGLIVEHEALTH_HTTPS_PORT=str(https_port),
 )
 api_root = Path(environment['LONGLIVEHEALTH_API_DATA_DIR'])
-ocr_root = Path(environment['LONGLIVEHEALTH_OCR_DATA_DIR'])
-for root in (api_root, ocr_root):
-    root.mkdir(mode=0o700)
-    os.chmod(root, 0o700)
-key = secrets.token_urlsafe(32)
-(api_root / 'config.toml').write_text(
-    (ROOT / 'docker/config.toml')
-    .read_text()
-    .replace(
-        'api_key = "" # Set the shared OCR key here; playground initialization generates it.',
-        'api_key = ' + json.dumps(key),
-    )
+api_root.mkdir(mode=0o700)
+llm = (
+    tomllib.loads(options.llm_config.read_text())["llm"]
+    if options.llm_config
+    else tomllib.loads((ROOT / 'docker/config.toml').read_text())["llm"]
 )
-(ocr_root / 'config.toml').write_text(
-    (ROOT / 'src/backend_ocr/config.toml')
-    .read_text()
-    .replace('idle_timeout_seconds = 300', 'idle_timeout_seconds = 2')
-    .replace(
-        'api_key = "" # Set the shared OCR key here; playground initialization generates it.',
-        'api_key = ' + json.dumps(key),
-    )
+if not options.ocr:
+    llm = dict(llm, base_url='http://127.0.0.1:9/v1', api_key='synthetic-unreachable-inference-123456789')
+
+
+def toml_value(value):
+    if isinstance(value, dict):
+        return '{' + ', '.join(json.dumps(k) + '=' + toml_value(v) for k, v in value.items()) + '}'
+    return json.dumps(value)
+
+
+text = (
+    (ROOT / 'docker/config.toml').read_text().split('[llm]', 1)[0]
+    + '[llm]\n'
+    + ''.join(k + ' = ' + toml_value(v) + '\n' for k, v in llm.items() if v is not None)
 )
-for root in (api_root, ocr_root):
-    os.chmod(root / 'config.toml', 0o600)
-    assert not (root / 'ocr-key').exists()
+(api_root / 'config.toml').write_text(text)
+os.chmod(api_root / 'config.toml', 0o600)
 compose = ['docker', 'compose', '-p', PROJECT, '-f', str(ROOT / 'docker/docker-compose.yaml')]
 
 
 def command(args, **kwargs):
-    result = subprocess.run(
-        args, cwd=ROOT, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs
-    )
+    result = subprocess.run(args, cwd=ROOT, env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
     if result.returncode:
         raise RuntimeError(f"Command failed: {args!r}\n{result.stderr.decode(errors='replace')}")
     return result.stdout
@@ -150,7 +149,12 @@ def raw_originals():
     # Inspect only this isolated test volume, never add an unused production API for tests.
     with sqlite3.connect(f'file:{api_root / "database.sqlite"}?mode=ro', uri=True) as connection:
         connection.row_factory = sqlite3.Row
-        return [dict(row) for row in connection.execute('SELECT raw_id,record_id,raw_path,raw_offset,raw_length FROM health_originals')]
+        return [
+            dict(row)
+            for row in connection.execute(
+                'SELECT raw_id,record_id,raw_path,raw_offset,raw_length FROM health_originals'
+            )
+        ]
 
 
 def raw_original_bytes(row):
@@ -189,22 +193,6 @@ def completed_report(upload, label):
         raise TerminalJobError(label + ' failed: ' + str(job.get('error_code')))
     assert job['status'] == 'succeeded', job['status']
     return api('reports/get', {'report_id': upload['file']['file_id']})
-
-
-def ocr_health():
-    return json.loads(
-        command(
-            compose
-            + [
-                'exec',
-                '-T',
-                'backend_ocr',
-                'python3',
-                '-c',
-                'import json, urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8000/health").read().decode())',
-            ]
-        )
-    )
 
 
 def png():
@@ -398,15 +386,14 @@ def assert_service_identity(service):
 
 try:
     resolved = json.loads(command(compose + ['config', '--format', 'json']))
-    for service, source, read_only in [('backend_api', api_root, False), ('backend_ocr', ocr_root, True)]:
+    for service, source, read_only in [('backend_api', api_root, False)]:
         mounts = resolved['services'][service]['volumes']
         assert len(mounts) == 1
         assert mounts[0]['source'] == str(source) and mounts[0]['target'] == '/data'
         assert bool(mounts[0].get('read_only', False)) == read_only
     command(compose + ['up', '-d'])
-    for service in ['backend_api', 'backend_ocr']:
+    for service in ['backend_api']:
         eventually(lambda: assert_service_identity(service), 30)
-    command(compose + ['exec', '-T', 'backend_ocr', 'test', '!', '-e', '/data/database.sqlite'])
     caddy = command(compose + ['ps', '-q', 'caddy']).decode().strip()
     ca = OUTPUT / 'local-test-ca.crt'
     eventually(lambda: command(['docker', 'cp', f'{caddy}:/data/caddy/pki/authorities/local/root.crt', str(ca)]), 60)
@@ -422,7 +409,6 @@ try:
             assert response.headers['Cache-Control'] == 'no-store'
             assert "connect-src 'self'" in response.headers['Content-Security-Policy']
             assert response.read()
-    assert eventually(ocr_health, 60)['engine_state'] == 'unloaded'
     password = secrets.token_urlsafe(24)
     command(
         compose
@@ -467,7 +453,6 @@ try:
         raw = output.getvalue()
     else:
         # OCR is mandatory. Lightweight checks exercise a real outage without loading the GPU.
-        command(compose + ['stop', 'backend_ocr'])
         raw = png()
     payload = (
         b'--check\r\nContent-Disposition: form-data; name="file"; filename="synthetic.png"\r\nContent-Type: image/png\r\n\r\n'
@@ -513,17 +498,11 @@ try:
             {'report_id': report, 'run_id': metadata['run_id'], 'page': metadata['page'], 'stage': metadata['stage']},
         )
         original = json.loads(complete['response_body'])
-        assert original['prompt_version'] == 'laboratory-page-v2'
-        assert original['engine'] == 'ninfer'
-        assert original['model'] == 'qwen3.8-27b-ninfer-nvfp4'
+        assert original['prompt_version'] == 'laboratory-page-v5'
+        assert original['engine'] == 'strata'
+        assert original['model'] == llm['model']
         assert json.loads(original['raw_response_body'])['choices'][0]['finish_reason'] == 'stop'
 
-        def unloaded():
-            health = ocr_health()
-            assert health['engine_state'] == 'unloaded', health
-            return health
-
-        eventually(unloaded, 30)
     observation = {
         'raw_name': 'Synthetic LDL',
         'raw_result': '120',
@@ -692,16 +671,48 @@ try:
             },
         )
         for kind, records in [
-            ('sleep', [dict(record_id='browser-sleep', source_id='synthetic-watch', record_type='sleep',
-                            start_at=timestamp - 7200, end_at=timestamp - 3600, version=1, deleted=False,
-                            payload=dict(category=1, metadata=dict(synthetic=True)))]),
-            ('heart_rate', [dict(record_id=f'browser-heart-{index}', source_id='synthetic-watch', record_type='heart_rate',
-                                 start_at=timestamp - 120 + index * 10, end_at=timestamp - 120 + index * 10,
-                                 version=1, deleted=False, payload=dict(value=100 + index * 10, unit='count/min'))
-                            for index in range(7)]),
+            (
+                'sleep',
+                [
+                    dict(
+                        record_id='browser-sleep',
+                        source_id='synthetic-watch',
+                        record_type='sleep',
+                        start_at=timestamp - 7200,
+                        end_at=timestamp - 3600,
+                        version=1,
+                        deleted=False,
+                        payload=dict(category=1, metadata=dict(synthetic=True)),
+                    )
+                ],
+            ),
+            (
+                'heart_rate',
+                [
+                    dict(
+                        record_id=f'browser-heart-{index}',
+                        source_id='synthetic-watch',
+                        record_type='heart_rate',
+                        start_at=timestamp - 120 + index * 10,
+                        end_at=timestamp - 120 + index * 10,
+                        version=1,
+                        deleted=False,
+                        payload=dict(value=100 + index * 10, unit='count/min'),
+                    )
+                    for index in range(7)
+                ],
+            ),
         ]:
-            api('health/sync', dict(connection_id=connection['connection_id'], batch_id=str(uuid.uuid4()),
-                                    record_type=kind, coverage_status='observed', records=records))
+            api(
+                'health/sync',
+                dict(
+                    connection_id=connection['connection_id'],
+                    batch_id=str(uuid.uuid4()),
+                    record_type=kind,
+                    coverage_status='observed',
+                    records=records,
+                ),
+            )
         if not pdf_report:
             pdf_payload = (
                 b'--check\r\nContent-Disposition: form-data; name="file"; filename="text.pdf"\r\nContent-Type: application/pdf\r\n\r\n'
@@ -744,10 +755,13 @@ try:
         assert 'observation_revisions.jsonl' not in archive.namelist()
         assert json.loads(archive.read('manifest.json'))['version'] == 1
         if options.load:
-            assert sum(json.loads(line)['platform'] == 'apple_health' for line in archive.read('health_originals.jsonl').splitlines()) == 3 + 9 * bool(options.webgui)
-            assert len([name for name in archive.namelist() if '/apple_health/' in name and name.startswith('raw/')]) == 3 + 9 * bool(
-                options.webgui
-            )
+            assert sum(
+                json.loads(line)['platform'] == 'apple_health'
+                for line in archive.read('health_originals.jsonl').splitlines()
+            ) == 3 + 9 * bool(options.webgui)
+            assert len(
+                [name for name in archive.namelist() if '/apple_health/' in name and name.startswith('raw/')]
+            ) == 3 + 9 * bool(options.webgui)
         if options.ocr:
             assert archive.read(pdf_upload['file']['relative_path']) == pdf
             assert b'2.586' in archive.read('extraction_inputs.jsonl')
@@ -808,13 +822,12 @@ try:
                 },
             )
     assert not api('reports/list', {'limit': 100})['reports']
-    command(compose + ['stop', 'backend_ocr'])
     assert api('server/status')['capabilities']['review']
     assert api('server/status')['capabilities']['document_extraction']
     api('user/delete', {'confirmation': 'synthetic'})
     result = {
         'https_with_trusted_test_ca': True,
-        'separate_data_roots_fixed_config_and_nonroot_identity': True,
+        'single_service_private_config_and_nonroot_identity': True,
         'embedded_webgui_assets': True,
         'webgui_browser_checks': bool(options.webgui),
         'login_upload_review_trend_original_export': True,
@@ -824,10 +837,10 @@ try:
         'image': 'longlivehealth-backend-api:local',
         'synthetic_only': True,
         'health_load_and_limit_checks': load_result,
-        'real_qwen3_8_ninfer_inference': options.ocr,
+        'real_shared_strata_inference': options.ocr,
         'real_pdf_text_and_unit_reference_conversion': options.ocr,
         'real_scanned_mixed_pdf_multi_unit_extraction': options.ocr,
-        'ocr_lazy_load_idle_unload_api_survives_ocr_stop': True,
+        'api_remains_available_when_inference_is_unavailable': True,
     }
     (OUTPUT / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps(result))
@@ -837,5 +850,5 @@ finally:
     if snapshot.exists():
         shutil.rmtree(snapshot)
     command(compose + ['down', '-v'])
-    for root in (api_root, ocr_root):
+    for root in (api_root,):
         shutil.rmtree(root)

@@ -6,7 +6,7 @@ async fn actual_http_extraction_creates_pending_candidates_with_provenance() {
     let user = add_user(&state, "alice").await;
     let (address, server) = super::provider::mock().await;
     let mut config = (*state.config).clone();
-    config.ocr.url = address.trim_end_matches("/v1").into();
+    config.llm.base_url = address.clone();
     state.config = std::sync::Arc::new(config);
     let report = archive(&state, "alice").await;
     assert!(longlivehealth::worker::extract_next(&state).await.unwrap());
@@ -47,7 +47,7 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
     let user = add_user(&state, "alice").await;
     let (address, server) = super::provider::mock().await;
     let mut config = (*state.config).clone();
-    config.ocr.url = address.trim_end_matches("/v1").into();
+    config.llm.base_url = address.clone();
     state.config = std::sync::Arc::new(config);
     let app = longlivehealth::app::create_application(state.clone());
     let token = crate::token(&state, "alice").await;
@@ -83,20 +83,20 @@ async fn malformed_ocr_is_archived_before_validation_and_obeys_owner_and_deletio
     let (_directory, mut state) = fixture().await;
     let user = add_user(&state, "alice").await;
     let other = add_user(&state, "bob").await;
-    let body = json!({"model":"qwen3.8-27b-ninfer-nvfp4","engine":"ninfer","content":"An original row with <5, but not JSON","raw_response_body":"Complete native failure reply","error":{"code":"invalid_structured_output"}}).to_string();
+    let body = json!({"choices":[{"message":{"content":"An original row with <5, but not JSON"},"finish_reason":"stop"}]}).to_string();
     let response = body.clone();
     let router = axum::Router::new().route(
-        "/api/v1/documents/extract",
+        "/v1/chat/completions",
         axum::routing::post(move || {
             let response = response.clone();
-            async move { (axum::http::StatusCode::UNPROCESSABLE_ENTITY, response) }
+            async move { (axum::http::StatusCode::OK, response) }
         }),
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let mut config = (*state.config).clone();
-    config.ocr.url = format!("http://{address}");
+    config.llm.base_url = format!("http://{address}/v1");
     state.config = std::sync::Arc::new(config);
     let report_id = archive(&state, "alice").await;
     longlivehealth::worker::extract_next(&state).await.unwrap();
@@ -126,7 +126,9 @@ async fn malformed_ocr_is_archived_before_validation_and_obeys_owner_and_deletio
         .extraction_output(&user.user_id, request())
         .await
         .unwrap();
-    assert_eq!(original["response_body"], body);
+    let envelope: serde_json::Value =
+        serde_json::from_str(original["response_body"].as_str().unwrap()).unwrap();
+    assert_eq!(envelope["raw_response_body"], body);
     assert_eq!(original["status_code"], 422);
     assert_eq!(original["content"], "An original row with <5, but not JSON");
     assert!(
@@ -164,7 +166,7 @@ async fn deleted_report_rejects_late_ocr_and_clears_temporary_images() {
     let released = Arc::new(tokio::sync::Notify::new());
     let started_in = started.clone();
     let released_in = released.clone();
-    let app = axum::Router::new().route("/api/v1/documents/extract",axum::routing::post(move || {
+    let app = axum::Router::new().route("/v1/chat/completions",axum::routing::post(move || {
         let started = started_in.clone(); let released = released_in.clone();
         async move {
             started.notify_one(); released.notified().await;
@@ -177,7 +179,7 @@ async fn deleted_report_rejects_late_ocr_and_clears_temporary_images() {
         axum::serve(listener, app).await.unwrap();
     });
     let mut config = (*state.config).clone();
-    config.ocr.url = format!("http://{address}");
+    config.llm.base_url = format!("http://{address}/v1");
     state.config = Arc::new(config);
     let report = archive(&state, "alice").await;
     let worker_state = state.clone();
@@ -218,7 +220,7 @@ async fn long_extraction_renews_lease_and_releases_renewal_on_completion() {
     let start_in = started.clone();
     let release_in = released.clone();
     let router = axum::Router::new().route(
-        "/api/v1/documents/extract",
+        "/v1/chat/completions",
         axum::routing::post(move || {
             let started = start_in.clone();
             let released = release_in.clone();
@@ -228,11 +230,11 @@ async fn long_extraction_renews_lease_and_releases_renewal_on_completion() {
                 let mut observation = crate::observation_payload();
                 observation.metric_id = None;
                 let page = serde_json::json!({"observations":[observation],"warnings":[]});
-                axum::Json(serde_json::json!({
-                    "model":"synthetic-model", "engine":"ninfer", "prompt_version":"laboratory-page-v2",
+                axum::Json(super::provider::completion(serde_json::json!({
+                    "model":"synthetic-model", "engine":"strata", "prompt_version":"laboratory-page-v2",
                     "content":page.to_string(), "raw_response_body":"synthetic native output",
                     "observations":page["observations"], "warnings":[]
-                }))
+                })))
             }
         }),
     );
@@ -240,7 +242,7 @@ async fn long_extraction_renews_lease_and_releases_renewal_on_completion() {
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let mut config = (*state.config).clone();
-    config.ocr.url = format!("http://{address}");
+    config.llm.base_url = format!("http://{address}/v1");
     config.jobs.lease_seconds = 3;
     state.config = Arc::new(config);
     let report_id = archive(&state, "alice").await;
@@ -329,21 +331,21 @@ async fn complete_ocr_with_review_warnings_succeeds_without_confirming_or_losing
     let mut observation = crate::observation_payload();
     observation.metric_id = None;
     let page = serde_json::json!({"observations":[observation],"warnings":["Text layer contains only the footer; values were read from the image."]});
-    let output = serde_json::json!({"model":"synthetic","engine":"ninfer","prompt_version":"laboratory-page-v2",
+    let output = serde_json::json!({"model":"synthetic","engine":"strata","prompt_version":"laboratory-page-v2",
         "content":page.to_string(), "raw_response_body":"synthetic full native response",
         "observations":page["observations"], "warnings":page["warnings"]});
     let router = axum::Router::new().route(
-        "/api/v1/documents/extract",
+        "/v1/chat/completions",
         axum::routing::post(move || {
             let output = output.clone();
-            async move { axum::Json(output) }
+            async move { axum::Json(super::provider::completion(output)) }
         }),
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let mut config = (*state.config).clone();
-    config.ocr.url = format!("http://{address}");
+    config.llm.base_url = format!("http://{address}/v1");
     state.config = std::sync::Arc::new(config);
     let report_id = archive(&state, "alice").await;
     longlivehealth::worker::extract_next(&state).await.unwrap();
@@ -389,7 +391,7 @@ async fn required_ocr_outage_fails_retryably_without_losing_the_original() {
     let address = listener.local_addr().unwrap();
     drop(listener);
     let mut config = (*state.config).clone();
-    config.ocr.url = format!("http://{address}");
+    config.llm.base_url = format!("http://{address}/v1");
     state.config = std::sync::Arc::new(config);
     let report_id = archive(&state, "alice").await;
     let job = state
@@ -443,16 +445,16 @@ async fn multipage_extraction_survives_source_relocation_and_old_path_cleanup() 
     let old_path = Arc::new(tokio::sync::Mutex::new(None::<std::path::PathBuf>));
     let path_in = old_path.clone();
     let cleanup_state = state.clone();
-    let router=axum::Router::new().route("/api/v1/documents/extract",axum::routing::post(move |axum::Json(request):axum::Json<serde_json::Value>| {
+    let router=axum::Router::new().route("/v1/chat/completions",axum::routing::post(move |axum::Json(request):axum::Json<serde_json::Value>| {
         let path=path_in.clone(); let state=cleanup_state.clone();
         async move {
-            let page=request["page"].as_i64().unwrap();
+            let page=super::provider::request_page(&request);
             if page==2 {
                 longlivehealth::maintenance::cleanup(&state).await.unwrap();
                 assert!(!path.lock().await.as_ref().unwrap().exists());
             }
             let mut observation=crate::observation_payload();observation.metric_id=None;observation.source.page=page;
-            axum::Json(json!({"report_title":"Three page report","source_name":"Synthetic Lab","model":"fixture","engine":"fixture","prompt_version":"laboratory-page-v3","content":"synthetic page","raw_response_body":"synthetic","observations":[observation],"warnings":[]}))
+            axum::Json(super::provider::completion(json!({"report_title":"Three page report","source_name":"Synthetic Lab","model":"fixture","engine":"fixture","prompt_version":"laboratory-page-v3","content":"synthetic page","raw_response_body":"synthetic","observations":[observation],"warnings":[]})))
         }
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -461,7 +463,7 @@ async fn multipage_extraction_survives_source_relocation_and_old_path_cleanup() 
         axum::serve(listener, router).await.unwrap();
     });
     let mut config = (*state.config).clone();
-    config.ocr.url = format!("http://{address}");
+    config.llm.base_url = format!("http://{address}/v1");
     state.config = Arc::new(config);
     let app = longlivehealth::app::create_application(state.clone());
     let token = crate::token(&state, "relocation").await;
@@ -510,16 +512,16 @@ async fn ocr_workflow_fields_are_archived_but_never_become_candidates() {
     status.raw_name = "Status Information".into();
     status.raw_result = "Final".into();
     let rows = vec![crate::observation_payload(), metadata, status];
-    let router = axum::Router::new().route("/api/v1/documents/extract", axum::routing::post(move || {
+    let router = axum::Router::new().route("/v1/chat/completions", axum::routing::post(move || {
         let rows = rows.clone();
-        async move { axum::Json(json!({"model":"test","engine":"test","prompt_version":"test","report_title":null,"source_name":null,
-            "content":serde_json::to_string(&rows).unwrap(),"raw_response_body":"original response","observations":rows,"warnings":[]})) }
+        async move { axum::Json(super::provider::completion(json!({"model":"test","engine":"test","prompt_version":"test","report_title":null,"source_name":null,
+            "content":serde_json::to_string(&rows).unwrap(),"raw_response_body":"original response","observations":rows,"warnings":[]}))) }
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let mut config = (*state.config).clone();
-    config.ocr.url = format!("http://{address}");
+    config.llm.base_url = format!("http://{address}/v1");
     state.config = std::sync::Arc::new(config);
     let report = archive(&state, "metadata-filter").await;
     assert!(longlivehealth::worker::extract_next(&state).await.unwrap());
@@ -579,20 +581,20 @@ async fn missing_collection_date_fails_job_and_returns_item_reason() {
     let mut observation = crate::observation_payload();
     observation.sampled_at = None;
     let page = json!({"observations":[observation],"warnings":[]});
-    let response = json!({"model":"qwen3.8-27b-ninfer-nvfp4","engine":"ninfer","prompt_version":"laboratory-page-v4",
+    let response = json!({"model":"qwen3.8-flash-next-iq3_s","engine":"strata","prompt_version":"laboratory-page-v4",
         "report_title":null,"source_name":null,"content":page.to_string(),"raw_response_body":"original", "observations":page["observations"],"warnings":[]});
     let router = axum::Router::new().route(
-        "/api/v1/documents/extract",
+        "/v1/chat/completions",
         axum::routing::post(move || {
             let response = response.clone();
-            async move { axum::Json(response) }
+            async move { axum::Json(super::provider::completion(response)) }
         }),
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let mut config = (*state.config).clone();
-    config.ocr.url = format!("http://{address}");
+    config.llm.base_url = format!("http://{address}/v1");
     state.config = std::sync::Arc::new(config);
     let report = archive(&state, "alice").await;
     longlivehealth::worker::extract_next(&state).await.unwrap();
