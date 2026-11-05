@@ -31,6 +31,8 @@ pub mod statistics;
 pub mod steps;
 pub mod timeline;
 pub mod training;
+mod trend_change;
+pub mod trends;
 
 use crate::{
     authentication::now,

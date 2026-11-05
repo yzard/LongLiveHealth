@@ -358,7 +358,7 @@ pub(crate) fn loinc_metric(code: &str) -> Option<&'static str> {
     })
 }
 
-async fn load_health(
+pub(crate) async fn load_health(
     database: &Database,
     user_id: &str,
     quantity_kind: &str,

@@ -50,11 +50,15 @@ nonisolated final class SmokeTests: XCTestCase {
         }
         XCTAssertTrue(app.tabBars.buttons["Trends"].waitForExistence(timeout: 10))
         tapTab(app, "Trends")
-        XCTAssertTrue(app.staticTexts["Recorded trends"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Last 7 days"].firstMatch.waitForExistence(timeout: 20))
-        XCTAssertTrue(app.staticTexts["Prior 28 days"].firstMatch.exists)
-        XCTAssertTrue(app.staticTexts["7/7 recent · 28/28 earlier days"].firstMatch.exists)
-        XCTAssertFalse(app.buttons["Compare measurements"].exists)
+        XCTAssertTrue(app.staticTexts["Worsening"].firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["Blood Pressure"].firstMatch.exists)
+        reveal(app, app.staticTexts["Improving"].firstMatch)
+        XCTAssertTrue(app.staticTexts["Improving"].firstMatch.exists)
+        for title in ["VO₂ Max", "LDL Cholesterol"] {
+            reveal(app, app.staticTexts[title].firstMatch)
+            XCTAssertTrue(app.staticTexts[title].firstMatch.exists)
+        }
+        XCTAssertFalse(app.staticTexts["More data needed"].exists)
         tapTab(app, "Data")
         XCTAssertTrue(app.buttons["Blood Work"].waitForExistence(timeout: 10))
     }

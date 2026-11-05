@@ -99,6 +99,7 @@ pub fn router(upload_limit: usize) -> Router<AppState> {
         )
         .route("/api/v1/wellness/day", post(wellness_day))
         .route("/api/v1/wellness/history", post(wellness_history))
+        .route("/api/v1/wellness/trends", post(long_term_trends))
         .route("/api/v1/wellness/chart", post(measurement_chart))
         .route("/api/v1/wellness/measurements", post(measurement_history))
         .route("/api/v1/wellness/hrv", post(wellness_hrv))
@@ -674,6 +675,20 @@ async fn measurement_history(
             .database
             .measurement_history(&current.user.user_id, request)
             .await?,
+    ))
+}
+async fn long_term_trends(
+    State(state): State<AppState>,
+    current: CurrentUser,
+    Json(request): Json<crate::wellness::trends::Request>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let _permit = state
+        .health_slots
+        .acquire()
+        .await
+        .map_err(|_| AppError::Internal)?;
+    Ok(Json(
+        crate::wellness::trends::get(&state.database, &current.user.user_id, request).await?,
     ))
 }
 async fn wellness_history(

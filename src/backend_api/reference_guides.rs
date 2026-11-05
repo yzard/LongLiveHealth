@@ -247,7 +247,7 @@ pub fn evaluate(request: &EvaluationRequest, profile: &Profile) -> Value {
 }
 
 /// The printed interval belongs to one observation only; never transfer it across sources.
-fn report_assessment(point: &Value, value: f64, unit: &str) -> Option<Value> {
+pub(crate) fn report_assessment(point: &Value, value: f64, unit: &str) -> Option<Value> {
     let reference = &point["reference"];
     if reference["unit"].as_str()? != unit {
         return None;
@@ -272,7 +272,7 @@ fn report_assessment(point: &Value, value: f64, unit: &str) -> Option<Value> {
 
 /// Only a single unqualified FHIR interval with matching UCUM units is eligible.
 /// Multiple sex/age/method alternatives require their explicit context, never first-match selection.
-fn clinical_assessment(point: &Value, value: f64, unit: &str) -> Option<Value> {
+pub(crate) fn clinical_assessment(point: &Value, value: f64, unit: &str) -> Option<Value> {
     let ranges = point["original"]["clinical_observation"]["referenceRange"].as_array()?;
     if ranges.len() != 1 {
         return None;

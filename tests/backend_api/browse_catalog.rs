@@ -92,3 +92,29 @@ fn blood_pressure_has_one_entry_even_without_correlations() {
     );
     assert_eq!(result["entries"][0]["presentation"], "measurement");
 }
+
+#[test]
+fn clinical_ecg_titles_are_heart_metrics_and_not_blood_work() {
+    for title in [
+        "Atrial Rate",
+        "Ventricular Rate",
+        "QRS Duration",
+        "QTc",
+        "Q-T Interval",
+        "P-R Interval",
+        "P Axis",
+        "R Axis",
+        "T Axis",
+    ] {
+        let result = assemble(
+            &[],
+            &[json!({"metric_id":"clinical:opaque_hash", "name":title})],
+        );
+        assert_eq!(result["entries"][0]["category_id"], "heart", "{title}");
+    }
+    let result = assemble(
+        &[],
+        &[json!({"metric_id":"clinical:opaque_hash", "name":"Apolipoprotein B"})],
+    );
+    assert_eq!(result["entries"][0]["category_id"], "bloodWork");
+}

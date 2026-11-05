@@ -21,3 +21,9 @@ import Testing
     #expect(ChartValueScale.domain(values: []) == 0...1)
     #expect(ChartValueScale.domain(values: [.nan, .infinity]) == 0...1)
 }
+
+@Test func smallTrendAxisTicksRemainDistinct() {
+    #expect(ChartValueScale.tickDecimals(domain: -0.01...0.01) == 2)
+    #expect(ChartValueScale.tickDecimals(domain: 0.0001...0.0003) >= 4)
+    #expect(ChartValueScale.tickDecimals(domain: 60...140) == 1)
+}

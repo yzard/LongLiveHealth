@@ -1,14 +1,18 @@
 # Trends evidence and data readiness
 
-## First release
+## Directional display policy — November 5, 2026
 
-The mobile Trends tab compares source-specific daily medians for sleep duration, steps, recorded workout duration and resting heart rate. It uses the same dated aggregates as Browse. The chart compares the last seven completed local calendar days with the preceding 28 completed days. A source and unit need four and 14 observed days respectively before the chart compares the medians. These coverage minima are product rules for descriptive comparisons. The chart omits missing days, deduplicates identical values and excludes conflicting duplicate values for the same source, unit and date.
+Trends displays worsening changes before improving changes. It omits stable results, small fluctuations, insufficient comparisons and changes without a defensible direction. These labels describe movement relative to an applicable reference guide or personal sleep goal, not a diagnosis or a validated clinical-change assessment.
 
-Sleep duration uses the archive's wake-day summaries. Consumer sleep tracking can support descriptive observations, while clinical use requires validation for the intended purpose. [AASM position statement](https://pmc.ncbi.nlm.nih.gov/articles/PMC5940440/)
+The server retains separate source, unit, assay and specimen comparisons. Daily sleep and resting heart rate compare medians from seven completed local calendar days against the preceding 28, with at least four and 14 observed days. Sleep uses distance below the saved goal; sleeping eight hours with a seven-hour goal is not labelled below goal. No sleep goal means no goal-based classification. Lower heart rate is not inherently better: its direction uses distance outside the applicable reference interval.
 
-Steps and workout duration describe recorded activity. An assessment against physical activity recommendations also needs intensity and frequency. Missing workout days cannot distinguish no workout from no recording. [WHO physical activity guidelines](https://www.who.int/publications/i/item/9789240015128/)
+For device series with daily points, compare the latest 14 calendar days with earlier history when both contain two points. Monthly histories use the latest 90 days and earlier history. Sparse histories compare their last two collection dates. Retired device sources without data in 90 days and lab series without data in 366 days are not current changes. Those horizons and coverage requirements are product rules.
 
-Resting heart rate compares the same source and measurement type. Different devices, acquisition conditions and measurement methods can change what the readings represent. The first release displays the two medians and coverage without assigning a clinical severity.
+VO₂ Max direction requires an applicable age/biological-sex fitness guide. Blood pressure evaluates both explicit components; any worsening component places the card in Worsening while retaining each component's direction. Readings below 90 systolic or 60 diastolic are not called improvements using a hypertension-only guide. Blood Work uses identical original reference bounds when all included results have them, otherwise a uniquely applicable published guide. Unknown or changed context cannot be guessed.
+
+To reduce minor fluctuations, display filters require 5% of a two-sided reference interval's width, or 5% of the previous magnitude for a one-sided interval; VO₂ Max requires a 5% change and sleep requires a 30-minute change in goal shortfall. These are explicit UI filters, not medically validated significance thresholds or reference change values. The method sheet states this limitation.
+
+Steps and workout duration are not automatically classified as better/worse: recorded volume alone lacks intensity, recording completeness and personal goals. [WHO physical activity guidelines](https://www.who.int/publications/i/item/9789240015128/)
 
 ## Candidate analyses
 
@@ -29,3 +33,21 @@ For VO₂ Max, report the measurement method and source. The cited validation st
 For blood work, distinguish a lab reference interval from a reference change value, which depends on analytical and within-person variation. [EFLM Biological Variation Database](https://biologicalvariation.eu/) · [EFLM review](https://www.eflm.eu/upload/publications/2034-2022-ClinChemLabMed-Sandberg-et-al.pdf.pdf)
 
 For nutrition, capture repeat observations because day-to-day intake varies. [NIH/NCI Dietary Assessment Primer](https://epi.grants.cancer.gov/dietary-assessment-primer/approach/principles.html)
+
+## Long-term cards added November 5, 2026
+
+The authenticated long-term Trends endpoint reads complete stored histories and checks the archive revision before returning results. It returns source-preserving directional cards in one response.
+
+Blood pressure resolves explicit correlations and manual pairs before calculating daily means for both components. Isolated components cannot become pairs through approximate timestamps. VO₂ Max uses the existing unit conversion and preserves device sources. For device histories spanning over 90 days, each observed day contributes equally to its calendar month's average. Two observed dates spanning at least 30 days are a product chart-coverage rule.
+
+Blood Work preserves collected numeric results by calendar date. Identical values at the same timestamp are coalesced. Source, canonical unit, recorded assay method and specimen type define comparison boundaries. A specimen-instance reference identifies a particular collection and does not by itself create a different method. Missing assay/specimen context is disclosed in the information sheet. Two distinct collection dates are required for a serial-result chart.
+
+Insufficient comparisons are omitted from Trends. Original report and Browse history retain text, bounded, unnormalized and undated results.
+
+The read-only NAS audit found five VO₂ Max device histories beginning in 2018 and two blood pressure histories beginning in 2021. Hospital lab records contained 85 numeric source/code/unit combinations with explicit units. Of those, 37 had multiple collection dates and 48 had a single date before additional assay/specimen checks. Confirmed PDF results contained one collection date. A further read-only audit of 199 Clinical Vitals resources found 38 explicitly paired blood pressure observations using UCUM mm[Hg]; the endpoint includes these hospital pairs alongside device correlations and manual pairs. These counts describe the inspected archive on November 5 and can change as data is added.
+
+Home BP interpretation requires repeated readings and appropriate technique. [AHA home monitoring guidance](https://www.heart.org/en/health-topics/high-blood-pressure/understanding-blood-pressure-readings/monitoring-your-blood-pressure-at-home)
+
+Wearable cardio fitness estimates depend on the device method and personal context. [Apple cardio fitness white paper](https://www.apple.com/healthcare/docs/site/Using_Apple_Watch_to_Estimate_Cardio_Fitness_with_VO2_max.pdf)
+
+Laboratory change assessment requires analytical imprecision and within-person biological variation. [EFLM Biological Variation Database](https://biologicalvariation.eu/)

@@ -440,6 +440,27 @@ class Handler(BaseHTTPRequestHandler):
         if route == 'wellness/day':
             for metric in response['metrics']:
                 metric['chart_ranges'] = chart_ranges([(p['source'], p['unit'], datetime.fromisoformat(day['date']).replace(tzinfo=timezone.utc).timestamp(), p['value']) for day in metric['history'] for p in day['alternatives']])
+        if route == 'wellness/trends':
+            cards = []
+            for metric, title, category, unit in [
+                ('vo2_max', 'VO₂ Max', 'heart_vo2', 'ml/kg*min'),
+                ('blood_pressure', 'Blood Pressure', 'heart_bp', 'mmHg'),
+                ('ldl_cholesterol', 'LDL Cholesterol', 'bloodWork', 'mg/dL'),
+            ]:
+                names = ['Systolic', 'Diastolic'] if metric == 'blood_pressure' else [title]
+                cards.append({
+                    'id': 'long-term-' + metric, 'metric_id': metric, 'title': title, 'source': 'apple_health:watch',
+                    'source_name': 'Synthetic Laboratory', 'unit': unit, 'category': category, 'state': 'ready',
+                    'series': [{'title': name, 'points': [{'at': 1577836800 + index * 31536000, 'value': 30 + index + component * 10} for index in range(4)]} for component, name in enumerate(names)],
+                    'observed_days': 4, 'first_at': 1577836800, 'last_at': 1672444800,
+                    'aggregation': 'Collected results', 'missing': [], 'explanation': 'Synthetic evidence',
+                    'citation': 'https://biologicalvariation.eu/', 'comparison_note': '',
+                    'change': {'direction': 'worsening' if metric == 'blood_pressure' else 'improving', 'comparison': 'Synthetic comparison', 'filter_note': 'Synthetic filter', 'comparisons': [{'title': title, 'before': 40, 'after': 45, 'basis': 'Synthetic reference', 'citations': []}]}
+                })
+            second_source = dict(cards[0], id='long-term-vo2-second-source', source='apple_health:older-watch')
+            cards.insert(1, second_source)
+            cards.sort(key=lambda c: c['change']['direction'] != 'worsening')
+            response = {'cards': cards, 'complete': True, 'data_revision': 1}
         if route == 'wellness/history':
             kind = body['record_type']
             unit, value = {'sleep': ('seconds', 27000), 'workout': ('seconds', 3600), 'resting_heart_rate': ('count/min', 58), 'hrv_sdnn': ('ms', 40), 'active_energy': ('kcal', 500), 'basal_energy': ('kcal', 1500), 'steps': ('count', 6500)}[kind]

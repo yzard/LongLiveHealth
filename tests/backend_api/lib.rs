@@ -19,6 +19,7 @@ mod health_connect;
 mod jobs;
 mod laboratory;
 mod lifecycle;
+mod long_term_trends;
 mod maintenance;
 mod metric_history;
 mod middleware;

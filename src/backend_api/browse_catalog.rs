@@ -10,7 +10,7 @@ fn taxonomy() -> &'static Value {
             .expect("validated Browse taxonomy")
     })
 }
-fn classify(kind: &str, title: &str, laboratory: bool) -> String {
+pub(crate) fn classify(kind: &str, title: &str, laboratory: bool) -> String {
     let normalize = |s: &str| {
         s.to_lowercase()
             .chars()
@@ -27,8 +27,12 @@ fn classify(kind: &str, title: &str, laboratory: bool) -> String {
             "qtc",
             "qtinterval",
             "printerval",
+            "paxis",
+            "raxis",
+            "taxis",
         ]
-        .contains(&key.as_str())
+        .iter()
+        .any(|name| *name == key || *name == title)
         {
             "heart"
         } else {

@@ -65,21 +65,9 @@ impl Database {
                     }))
                     .ok_or(AppError::Internal)?
                     .min(end_date);
-                let result = if request.record_type == "sleep" {
-                    self.sleep_wake_days(user, cursor, end, &request.timezone)
-                        .await?
-                } else {
-                    self.aggregate_health(
-                        user,
-                        AggregateRequest {
-                            record_type: request.record_type.clone(),
-                            start_date: cursor.to_string(),
-                            end_date: end.to_string(),
-                            timezone: request.timezone.clone(),
-                        },
-                    )
-                    .await?
-                };
+                let result = self
+                    .daily_period(user, &request.record_type, cursor, end, &request.timezone)
+                    .await?;
                 days.extend(
                     result["days"]
                         .as_array()
@@ -106,5 +94,28 @@ impl Database {
         result["first_record_at"] = json!(first);
         result["last_record_at"] = json!(last);
         Ok(result)
+    }
+    pub(super) async fn daily_period(
+        &self,
+        user: &str,
+        kind: &str,
+        first: chrono::NaiveDate,
+        last: chrono::NaiveDate,
+        timezone: &str,
+    ) -> Result<Value, AppError> {
+        if kind == "sleep" {
+            self.sleep_wake_days(user, first, last, timezone).await
+        } else {
+            self.aggregate_health(
+                user,
+                AggregateRequest {
+                    record_type: kind.into(),
+                    start_date: first.to_string(),
+                    end_date: last.to_string(),
+                    timezone: timezone.into(),
+                },
+            )
+            .await
+        }
     }
 }
