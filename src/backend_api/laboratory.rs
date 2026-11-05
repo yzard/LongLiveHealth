@@ -4,7 +4,7 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 use std::str::FromStr;
 
-pub const CONVERSION_VERSION: &str = "lab-units-v7";
+pub const CONVERSION_VERSION: &str = "lab-units-v8";
 pub const CANONICAL_UNITS: &[&str] = &[
     "mg/dL",
     "mg/L",
@@ -506,6 +506,24 @@ fn shape(text: &str) -> Option<Shape> {
     }
     None
 }
+// Accept a printed unit suffix only when it agrees with the independently
+// supplied unit. Never take a numeric prefix from arbitrary text or mismatched units.
+fn result_shape(raw: &str, unit: &str) -> Option<Shape> {
+    let raw = raw.trim();
+    let raw = raw.strip_suffix("(calc)").unwrap_or(raw).trim_end();
+    if let Some(parsed) = shape(raw) {
+        return Some(parsed);
+    }
+    raw.char_indices().find_map(|(index, _)| {
+        let (value, suffix) = raw.split_at(index);
+        if canonical_unit(suffix) == Some(unit) {
+            shape(value)
+        } else {
+            None
+        }
+    })
+}
+
 fn derive(
     metric_id: Option<&str>,
     raw: &str,
@@ -531,7 +549,11 @@ fn derive(
     let Some(rule) = conversion(metric.metric_id, metric.standard_unit, unit) else {
         return Quantity::unavailable("unsupported_unit", Some(raw_unit), origin);
     };
-    let Some(parsed) = shape(raw) else {
+    let Some(parsed) = (if reference {
+        shape(raw)
+    } else {
+        result_shape(raw, unit)
+    }) else {
         return Quantity::unavailable(
             if reference {
                 "unparsed_reference"

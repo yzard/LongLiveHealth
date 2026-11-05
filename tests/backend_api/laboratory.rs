@@ -273,3 +273,40 @@ fn apple_volume_prefixes_do_not_accept_count_concentrations() {
     assert_eq!(normalize(2.0, "10⁻¹²L", "pL"), Some(2.0));
     assert_eq!(normalize(2.0, "10^9/L", "mL"), None);
 }
+
+#[test]
+fn printed_result_unit_suffixes_are_parsed_only_when_units_agree() {
+    for (metric, raw, unit, value, standard) in [
+        ("apob", "120 mg/dL", "mg/dL", "120", "mg/dL"),
+        ("globulin", "2.8 g/dL (calc)", "g/dL", "2.8", "g/dL"),
+        ("wbc", "4.8 Thousand/uL", "Thousand/uL", "4.8", "10^9/L"),
+        ("glucose", "5.551 mmol/L", "mmol/L", "100", "mg/dL"),
+    ] {
+        let mut input = observation_payload();
+        input.metric_id = Some(metric.into());
+        input.raw_result = raw.into();
+        input.raw_unit = Some(unit.into());
+        let before = serde_json::to_value(&input).unwrap();
+        assert_eq!(normalized(&input), Some((value.into(), standard.into())));
+        assert_eq!(serde_json::to_value(&input).unwrap(), before);
+    }
+    let mut input = observation_payload();
+    input.metric_id = Some("glucose".into());
+    input.raw_unit = Some("mg/dL".into());
+    for raw in [
+        "90 mmol/L",
+        "90 mg/dL 120",
+        "90 unknown",
+        "90 negative",
+        "90 (estimated)",
+    ] {
+        input.raw_result = raw.into();
+        assert!(normalized(&input).is_none(), "{raw}");
+    }
+    input.raw_result = "<90 mg/dL".into();
+    let result = interpret(&input).result;
+    assert_eq!(result.status, "comparison");
+    assert_eq!(result.upper.as_deref(), Some("90"));
+    assert_eq!(result.upper_inclusive, Some(false));
+    assert!(normalized(&input).is_none());
+}

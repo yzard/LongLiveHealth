@@ -114,7 +114,7 @@ pub fn wrap_completion(reply: Completion, model: &str, page: i64) -> Result<Comp
     let parsed = serde_json::from_str::<serde_json::Value>(&reply.response_body).ok();
     let choice = parsed.as_ref().and_then(|v| v["choices"].get(0));
     let content = choice.and_then(|v| v["message"]["content"].as_str());
-    let mut envelope = json!({"model":model,"engine":"strata","prompt_version":"laboratory-page-v5","content":content,"raw_response_body":reply.response_body});
+    let mut envelope = json!({"model":model,"engine":"strata","prompt_version":"laboratory-page-v6","content":content,"raw_response_body":reply.response_body});
     let mut status = reply.status_code;
     if (200..300).contains(&status) {
         let rows = content.and_then(|text| crate::provider::parse_json::<ExtractedPage>(text).ok());
