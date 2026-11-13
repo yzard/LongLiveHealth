@@ -12,6 +12,7 @@ struct ReportView: View {
     @State var rescanning = false
     @State var rescanConfirmation = false
     @State var confirmingAll = false
+    @State var savingReview = false
     @State var confirmationError: String?
     @Environment(\.scenePhase) var scenePhase
     @Environment(\.dismiss) var dismiss
@@ -26,7 +27,11 @@ struct ReportView: View {
         }
     }
 
-    struct EditTarget: Identifiable { let id = UUID(); let observation: JSONValue }
+    struct EditTarget: Identifiable {
+        let id = UUID()
+        let observation: JSONValue
+        let choosingMetric: Bool
+    }
     var body: some View {
         List {
             Section {
@@ -56,7 +61,7 @@ struct ReportView: View {
                 HStack(spacing: 12) {
                     Button { showSource(page: 1) } label: { reportAction("View Original", icon: "doc.text.magnifyingglass") }
                         .accessibilityLabel("View original report").accessibilityIdentifier("report-original")
-                    Button { editor = EditTarget(observation: .null) } label: { reportAction("Add Result", icon: "plus") }
+                    Button { editor = EditTarget(observation: .null, choosingMetric: false) } label: { reportAction("Add Result", icon: "plus") }
                         .accessibilityLabel("Add result manually").accessibilityIdentifier("report-add-result")
                     Button { rescanConfirmation = true } label: { reportAction("Rescan", icon: "arrow.clockwise") }
                         .accessibilityLabel("Rescan report").accessibilityIdentifier("report-rescan")
@@ -90,9 +95,11 @@ struct ReportView: View {
                     InfoHelp(title: "Manual results", message: "You can add results manually while OCR is disabled or processing.") }
                 ForEach(document["observations"].arrayValue.filter { ["pending", "confirmed"].contains($0["status"].stringValue) }, id: \.identifier) { observation in
                     ReportObservationRow(observation: observation, isBusy: model.isBusy,
-                        edit: { editor = EditTarget(observation: observation) },
+                        changeStatus: { Task { await toggleStatus(observation) } },
+                        edit: { editor = EditTarget(observation: observation, choosingMetric: false) },
+                        chooseMetric: { editor = EditTarget(observation: observation, choosingMetric: true) },
                         showSource: { showSource(page: $0) },
-                        writeHealth: { healthWriter = EditTarget(observation: observation) })
+                        writeHealth: { healthWriter = EditTarget(observation: observation, choosingMetric: false) })
                 }
             }
             Section {
@@ -100,7 +107,7 @@ struct ReportView: View {
                     .accessibilityIdentifier("report-detail")
             }
         }
-        .disabled(confirmingAll || rescanning)
+        .disabled(confirmingAll || rescanning || savingReview)
         .mobileNavigationTitle(document["context"]["report_title"].stringValue.isEmpty ? "Blood Work" : document["context"]["report_title"].stringValue)
         .navigationBarTitleDisplayMode(.inline)
         .initialTask { await reload() }
@@ -108,12 +115,13 @@ struct ReportView: View {
         .refreshable { await reload() }
         .sheet(item: $preview) { DocumentPreview(location: $0) }
         .sheet(item: $editor) { target in
-            ObservationEditor(observation: target.observation, metrics: model.metrics, pageCount: Int(document["report"]["page_count"].numberValue ?? 1)) { change in
-                try await save(observations: [change], context: .null)
+            ObservationEditor(observation: target.observation, metrics: model.metrics,
+                pageCount: Int(document["report"]["page_count"].numberValue ?? 1), choosingMetric: target.choosingMetric) { change, metric in
+                try await save(observations: [change], context: .null, newMetric: metric)
             }
         }
         .sheet(item: $healthWriter) { target in ReviewedGlucoseWriter(model: model, observation: target.observation) }
-        .sheet(isPresented: $contextVisible) { ContextEditor(context: document["context"]) { context in try await save(observations: [], context: context) } }
+        .sheet(isPresented: $contextVisible) { ContextEditor(context: document["context"]) { context in try await save(observations: [], context: context, newMetric: .null) } }
         .alert("Rescan report?", isPresented: $rescanConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Rescan", role: .destructive) { Task { await rescan() } }
@@ -137,9 +145,11 @@ struct ReportView: View {
             Section("Rejected results") {
                 ForEach(rejected, id: \.identifier) { observation in
                     ReportObservationRow(observation: observation, isBusy: model.isBusy,
-                        edit: { editor = EditTarget(observation: observation) },
+                        changeStatus: nil,
+                        edit: { editor = EditTarget(observation: observation, choosingMetric: false) },
+                        chooseMetric: { editor = EditTarget(observation: observation, choosingMetric: true) },
                         showSource: { showSource(page: $0) },
-                        writeHealth: { healthWriter = EditTarget(observation: observation) })
+                        writeHealth: { healthWriter = EditTarget(observation: observation, choosingMetric: false) })
                 }
             }
         }
@@ -197,7 +207,7 @@ struct ReportView: View {
         }
     }
     private func confirmAll() async {
-        guard !confirmingAll, !extracting else { return }
+        guard !confirmingAll, !savingReview, !extracting else { return }
         confirmingAll = true; confirmationError = nil
         defer { confirmingAll = false }
         do {
@@ -206,22 +216,31 @@ struct ReportView: View {
                 let changes = Array(ReportReview.pendingChanges(in: document).prefix(2_000))
                 guard !changes.isEmpty else { return }
                 try Task.checkCancellation()
-                try await save(observations: changes, context: .null)
+                try await save(observations: changes, context: .null, newMetric: .null)
             }
         } catch { confirmationError = error.localizedDescription }
+    }
+    private func toggleStatus(_ observation: JSONValue) async {
+        guard !confirmingAll, !savingReview, !rescanning else { return }
+        let status = observation["status"].stringValue
+        guard status == "pending" || status == "confirmed" else { return }
+        let change = ReportReview.change(observation, to: status == "pending" ? "confirmed" : "pending")
+        await model.perform {
+            try await save(observations: [change], context: .null, newMetric: .null)
+        }
     }
     private func followExtraction() async {
         while !Task.isCancelled {
             guard model.jobs.contains(where: { $0["file_id"].stringValue == reportID && ["queued", "running"].contains($0["status"].stringValue) }) else { return }
             do {
                 try await Task.sleep(for: .seconds(4))
-                guard scenePhase == .active, model.selectedTab == "Data", !confirmingAll, !contextVisible, editor == nil, preview == nil, !model.isLocked else { continue }
+                guard scenePhase == .active, model.selectedTab == "Data", !confirmingAll, !savingReview, !contextVisible, editor == nil, preview == nil, !model.isLocked else { continue }
                 guard let token = model.session?.token else { return }
                 let response = try await model.request("jobs/list", body: .object(["limit": .number(100)]))
                 guard !Task.isCancelled, model.session?.token == token else { return }
                 model.jobs = response["jobs"].arrayValue
                 let latest = try await model.report(reportID)
-                guard !Task.isCancelled, model.session?.token == token, !confirmingAll, !contextVisible, editor == nil else { continue }
+                guard !Task.isCancelled, model.session?.token == token, !confirmingAll, !savingReview, !contextVisible, editor == nil else { continue }
                 if document != latest { document = latest }
                 if let index = model.reports.firstIndex(where: { $0["report_id"].stringValue == reportID }) {
                     model.reports[index] = latest["report"]; model.reports[index]["context"] = latest["context"]
@@ -230,9 +249,16 @@ struct ReportView: View {
         }
     }
     private func reload() async { do { document = try await model.report(reportID) } catch { model.errorMessage = error.localizedDescription } }
-    private func save(observations: [JSONValue], context: JSONValue) async throws {
-        guard let client = model.client else { throw APIError.invalidResponse }
-        document = try await model.request("reports/review", body: .object(["report_id": .string(reportID), "expected_revision": document["report"]["revision"], "context": context, "observations": .array(observations)]))
+    private func save(observations: [JSONValue], context: JSONValue, newMetric: JSONValue) async throws {
+        guard model.client != nil, !savingReview else { throw APIError.invalidResponse }
+        savingReview = true
+        defer { savingReview = false }
+        var request: JSONValue = .object(["report_id": .string(reportID), "expected_revision": document["report"]["revision"], "context": context, "observations": .array(observations)])
+        if newMetric != .null { request["new_metric"] = newMetric }
+        document = try await model.request("reports/review", body: request)
+        if document["created_metric"] != .null {
+            model.metrics.append(document["created_metric"])
+        }
         let savedDocument = document
         let savedToken = model.session?.token
         let cachedBytes = try await Task.detached(priority: .utility) { try JSONEncoder().encode(savedDocument) }.value
@@ -341,7 +367,9 @@ struct DocumentEvidenceView: View {
 struct ReportObservationRow: View {
     let observation: JSONValue
     let isBusy: Bool
+    let changeStatus: (() -> Void)?
     let edit: () -> Void
+    let chooseMetric: () -> Void
     let showSource: (Int) -> Void
     let writeHealth: () -> Void
     private var resultLabel: String {
@@ -349,7 +377,7 @@ struct ReportObservationRow: View {
                        observation["payload"]["raw_unit"].stringValue]
             .filter { !$0.isEmpty }.joined(separator: " ")
         let standardized = observation["interpretation"]["result"]["display"].stringValue
-        return standardized.isEmpty ? printed : "\(printed) (\(standardized))"
+        return standardized.isEmpty || standardized == printed ? printed : "\(standardized) (\(printed))"
     }
     private var sourcePage: Int { Int(observation["payload"]["source"]["page"].numberValue ?? 1) }
 
@@ -358,15 +386,33 @@ struct ReportObservationRow: View {
             HStack(alignment: .center, spacing: 8) {
                 Button { edit() } label: {
                     VStack(alignment: .leading, spacing: 5) {
-                        HStack {
-                            Text(observation["payload"]["raw_name"].stringValue).font(.headline)
-                            Spacer()
-                            Text(observation["status"].stringValue.capitalized).font(.caption)
+                        Text(laboratoryResultName(observation)).font(.headline)
+                        let code = observation["lab_test_code"].stringValue
+                        if !code.isEmpty {
+                            Text("LOINC \(code)").font(.caption).foregroundStyle(.secondary)
+                                .accessibilityIdentifier("report-result-loinc")
                         }
                         Text(resultLabel).foregroundStyle(.primary)
                             .fixedSize(horizontal: false, vertical: true)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }.buttonStyle(.plain)
+                HStack(spacing: 6) {
+                    Text(observation["status"].stringValue.capitalized)
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let changeStatus {
+                        Button(action: changeStatus) {
+                            Text(observation["status"] == .string("confirmed") ? "Hold" : "Confirm")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Color.accentColor)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.accentColor.opacity(0.12), in: Capsule())
+                                .frame(minHeight: 44)
+                        }
+                        .accessibilityIdentifier("report-result-status-action")
+                        .disabled(isBusy)
+                    }
+                }
                 Button { showSource(sourcePage) } label: {
                     Image(systemName: MobileSymbol.name("doc.text.magnifyingglass"))
                         .frame(minWidth: 44, minHeight: 44)
@@ -377,14 +423,36 @@ struct ReportObservationRow: View {
                 #endif
             }
             ForEach(Array(observation["browse_issues"].arrayValue.enumerated()), id: \.offset) { _, issue in
-                Label(issue["message"].stringValue, systemImage: MobileSymbol.name("exclamationmark.triangle"))
-                    .font(.caption).foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("report-result-issue")
+                if issue["scope"] == .string("browse"), observation["status"] != .string("rejected") {
+                    Button { chooseMetric() } label: {
+                        HStack(alignment: .firstTextBaseline) {
+                            issueLabel(issue)
+                            Image(systemName: MobileSymbol.name("chevron.right"))
+                        }.font(.caption).foregroundStyle(.orange)
+                    }.buttonStyle(.plain).accessibilityIdentifier("report-result-issue")
+                } else {
+                    issueLabel(issue).accessibilityIdentifier("report-result-issue")
+                }
             }
             if observation["status"] == .string("confirmed"), observation["payload"]["metric_id"] == .string("glucose") {
                 Button("Save to \(MobilePlatform.healthProviderName)") { writeHealth() }.font(.caption).disabled(isBusy)
             }
         }.buttonStyle(.borderless).padding(.vertical, 5)
     }
+
+    private func issueLabel(_ issue: JSONValue) -> some View {
+        Label(issue["message"].stringValue, systemImage: MobileSymbol.name("exclamationmark.triangle"))
+            .font(.caption).foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+}
+
+
+func laboratoryResultName(_ observation: JSONValue) -> String {
+    let name = observation["display_name"].stringValue
+    return LaboratoryPresentation.printedName(
+        name.isEmpty ? observation["payload"]["raw_name"].stringValue : name,
+        code: observation["lab_test_code"].stringValue
+    )
 }

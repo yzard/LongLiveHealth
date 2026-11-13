@@ -6,9 +6,9 @@ Long Live Health 仅部署 backend_api 一个业务服务。上传的 PDF/图片
 
 API 使用 `--data-dir /data`，只读取 `/data/config.toml`。`[llm]` 包含共享 `/v1` URL、模型、内嵌 API 密钥、超时和生成参数；OCR 与 Analytics 使用同一个配置。`[extraction]` 只指定 OCR 输出 token 数和图像像素预算，没有第二套地址或密钥。`analysis_enabled` 控制可选的分析功能，OCR 始终可用。
 
-Desk 实际模型配置为 `qwen3.8-flash-next-iq3_s`，API 为 `http://192.168.1.20:8080/v1`。其服务位于 `/home/zyin/dev/local_llm`，内部 Strata 端口 8081 不提供给客户端。模型加载、空闲卸载和显存管理全由 local_llm 负责；Long Live Health 不打包模型或启动模型进程。
+Desk 实际模型配置为 `qwen3.8-flash-next-nvfp4`，API 为 `http://192.168.1.20:8080/v1`。其服务位于 `/home/zyin/dev/local_llm`，内部 Strata 端口 8081 不提供给客户端。模型加载、空闲卸载和显存管理由 local_llm 负责。切换 Desk 模型时，用 `GET /v1/models` 核对模型 ID，同步修改 NAS `/data/config.toml` 的 `[llm].model`。重启 API 后运行 `probe-providers`。
 
-当前共享上下文 16,384 tokens；OCR 输出预算 8,192、图像像素预算 2,097,152，Analytics 输出预算 4,096，关闭 thinking 以输出严格 JSON。凭据在 API operator TOML 中内嵌，0600；不放入手机、镜像、环境变量、CLI 参数或单独密钥文件。模板只有空占位，不会自动制造无效的共享服务密钥。
+当前图像上下文 98,304 tokens；OCR 输出预算 16,384、图像像素预算 2,097,152，Analytics 输出预算 4,096，关闭 thinking 以输出严格 JSON。凭据在 API operator TOML 中内嵌，0600；不放入手机、镜像、环境变量、CLI 参数或单独密钥文件。模板只有空占位，不会自动制造无效的共享服务密钥。
 
 ## 调用与并发
 

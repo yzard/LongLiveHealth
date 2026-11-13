@@ -1,6 +1,140 @@
 use crate::{add_user, archive, fixture};
 
 #[tokio::test]
+async fn extraction_replay_refreshes_untouched_drafts_and_preserves_reviewed_rows() {
+    use longlivehealth::reports::{ReviewItem, ReviewRequest};
+    use serde_json::{Value, json};
+    use sqlx::{Connection, SqliteConnection, sqlite::SqliteConnectOptions};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let (directory, mut state) = fixture().await;
+    let user = add_user(&state, "alice").await;
+    let report = archive(&state, "alice").await;
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let router = axum::Router::new().route(
+        "/v1/chat/completions",
+        axum::routing::post(move |_: axum::Json<Value>| {
+            let replay = calls.fetch_add(1, Ordering::SeqCst) > 0;
+            async move {
+                let observations: Vec<_> = [
+                    "Review fixture A",
+                    "Review fixture B",
+                    "Review fixture C",
+                    "Review fixture D",
+                ]
+                .into_iter()
+                .take(if replay { 4 } else { 3 })
+                .map(|name| {
+                    let mut row = crate::observation_payload();
+                    row.raw_name = name.into();
+                    row.source.quote = if replay {
+                        format!("{name} result")
+                    } else {
+                        name.into()
+                    };
+                    row.ocr_mapping_note = Some(
+                        if replay {
+                            "Refreshed note"
+                        } else {
+                            "Original note"
+                        }
+                        .into(),
+                    );
+                    row
+                })
+                .collect();
+                axum::Json(super::provider::completion(
+                    json!({"observations":observations,"warnings":[]}),
+                ))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut config = (*state.config).clone();
+    config.llm.base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    state.config = std::sync::Arc::new(config);
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    assert!(longlivehealth::worker::extract_next(&state).await.unwrap());
+    let mut original = state
+        .database
+        .observations(&user.user_id, &report)
+        .await
+        .unwrap();
+    original.sort_by_key(|row| row.payload.raw_name.clone());
+    let revision = state
+        .database
+        .report_summary(&user.user_id, &report)
+        .await
+        .unwrap()
+        .revision;
+    let edits = [(&original[1], "pending"), (&original[2], "confirmed")];
+    state
+        .database
+        .review(
+            &user.user_id,
+            ReviewRequest {
+                new_metric: None,
+                report_id: report.clone(),
+                expected_revision: revision,
+                context: None,
+                observations: edits
+                    .into_iter()
+                    .map(|(row, status)| {
+                        let mut payload = row.payload.clone();
+                        payload.notes = Some("Reviewer annotation".into());
+                        ReviewItem {
+                            observation_id: Some(row.observation_id.clone()),
+                            expected_revision: Some(row.revision),
+                            status: status.into(),
+                            payload,
+                        }
+                    })
+                    .collect(),
+            },
+        )
+        .await
+        .unwrap();
+    let mut db = SqliteConnection::connect_with(
+        &SqliteConnectOptions::new().filename(directory.path().join("database.sqlite")),
+    )
+    .await
+    .unwrap();
+    sqlx::query("UPDATE jobs SET status='queued' WHERE file_id=?")
+        .bind(&report)
+        .execute(&mut db)
+        .await
+        .unwrap();
+    assert!(longlivehealth::worker::extract_next(&state).await.unwrap());
+    let mut rows = state
+        .database
+        .observations(&user.user_id, &report)
+        .await
+        .unwrap();
+    rows.sort_by_key(|row| row.payload.raw_name.clone());
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows[0].observation_id, original[0].observation_id);
+    assert_eq!(
+        rows[0].payload.source.quote,
+        original[0].payload.source.quote
+    );
+    assert_eq!(
+        rows[0].payload.ocr_mapping_note.as_deref(),
+        Some("Refreshed note")
+    );
+    for (row, expected_status) in rows[1..=2].iter().zip(["pending", "confirmed"]) {
+        assert_eq!(row.status, expected_status);
+        assert_eq!(row.payload.notes.as_deref(), Some("Reviewer annotation"));
+        assert_eq!(
+            row.payload.ocr_mapping_note.as_deref(),
+            Some("Original note")
+        );
+    }
+    assert_eq!(rows[3].status, "pending");
+    assert!(rows[3].payload.metric_id.is_none());
+    server.abort();
+}
+
+#[tokio::test]
 async fn actual_http_extraction_creates_pending_candidates_with_provenance() {
     let (_directory, mut state) = fixture().await;
     let user = add_user(&state, "alice").await;
@@ -45,7 +179,117 @@ async fn actual_http_extraction_creates_pending_candidates_with_provenance() {
 async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
     let (_directory, mut state) = fixture().await;
     let user = add_user(&state, "alice").await;
-    let (address, server) = super::provider::mock().await;
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use longlivehealth::health::{ConnectionRequest, HealthRecordInput, SyncRequest};
+    use serde_json::json;
+    let mut alice_metric = None;
+    let bob = add_user(&state, "bob").await;
+    for (account, label) in [
+        (&user, "Synthetic clinical marker"),
+        (&bob, "Other account marker"),
+    ] {
+        let connection = state
+            .database
+            .create_connection(
+                &account.user_id,
+                ConnectionRequest {
+                    platform: "apple_health".into(),
+                    installation_id: uuid::Uuid::new_v4().to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let record_type = "HKClinicalTypeIdentifierLabResultRecord";
+        let fhir = json!({
+            "resourceType":"Observation", "status":"final",
+            "effectiveDateTime":"2026-08-03T00:00:00Z",
+            "code":{"text":label,"coding":[{"system":"https://example.org/lab","code":"synthetic"}]},
+            "valueQuantity":{"value":2,"code":"mg/L","system":"http://unitsofmeasure.org"}
+        });
+        state
+            .database
+            .sync_health(
+                &account.user_id,
+                SyncRequest {
+                    connection_id: connection.connection_id,
+                    batch_id: uuid::Uuid::new_v4().to_string(),
+                    record_type: record_type.into(),
+                    coverage_status: "observed".into(),
+                    records: vec![HealthRecordInput {
+                        record_id: "sample".into(),
+                        source_id: "clinical-provider".into(),
+                        record_type: record_type.into(),
+                        start_at: 1785715200,
+                        end_at: 1785715200,
+                        version: 1,
+                        deleted: false,
+                        payload: json!({"fhir":{"data_base64":STANDARD.encode(fhir.to_string())}}),
+                    }],
+                },
+            )
+            .await
+            .unwrap();
+        let browse = longlivehealth::metric_history::browse(&state.database, &account.user_id)
+            .await
+            .unwrap();
+        if account.user_id == user.user_id {
+            alice_metric = Some(browse["metrics"][0]["metric_id"].clone());
+        }
+    }
+    let alice_metric = alice_metric.unwrap();
+    let router = axum::Router::new().route(
+        "/v1/chat/completions",
+        axum::routing::post(move |axum::Json(request): axum::Json<serde_json::Value>| {
+            let alice_metric = alice_metric.clone();
+            async move {
+                let input = &request["messages"][1]["content"];
+                let evidence: serde_json::Value =
+                    serde_json::from_str(input[0]["text"].as_str().unwrap()).unwrap();
+                let catalog = evidence["laboratory_metric_catalog"].as_array().unwrap();
+                assert!(catalog.contains(&json!([
+                    alice_metric,
+                    "Synthetic clinical marker",
+                    "mg/L",
+                    []
+                ])));
+                assert!(
+                    !catalog
+                        .iter()
+                        .any(|entry| entry[1] == "Other account marker")
+                );
+                assert_eq!(evidence["page"], 1);
+                assert!(evidence["text_layer"].is_object());
+                assert!(
+                    evidence["laboratory_metric_catalog"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|entry| entry[0] == "urine_appearance"
+                            && entry[1] == "Appearance - urine"
+                            && entry[2] == "1")
+                );
+                assert!(
+                    input[1]["image_url"]["url"]
+                        .as_str()
+                        .unwrap()
+                        .starts_with("data:image/png;base64,")
+                );
+                let mut observation = crate::observation_payload();
+                observation.raw_name = "Appearance".into();
+                observation.raw_result = "Clear".into();
+                observation.raw_unit = None;
+                observation.source.quote = "Appearance Clear".into();
+                observation.ocr_section_heading = Some("Urinalysis".into());
+                observation.ocr_metric_candidate = Some("urine_appearance".into());
+                axum::Json(super::provider::completion(
+                    serde_json::json!({"observations":[observation],"warnings":[]}),
+                ))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = format!("http://{}/v1", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let mut config = (*state.config).clone();
     config.llm.base_url = address.clone();
     state.config = std::sync::Arc::new(config);
@@ -62,15 +306,20 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
     assert_eq!(result["file"]["content_type"], "application/pdf");
     longlivehealth::worker::extract_next(&state).await.unwrap();
     let report = result["file"]["file_id"].as_str().unwrap();
+    let rows = state
+        .database
+        .observations(&user.user_id, report)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].status, "pending");
     assert_eq!(
-        state
-            .database
-            .observations(&user.user_id, report)
-            .await
-            .unwrap()
-            .len(),
-        1
+        rows[0].resolved_metric_id.as_deref(),
+        Some("urine_appearance")
     );
+    assert!(rows[0].payload.metric_id.is_none());
+    assert_eq!(rows[0].payload.raw_name, "Appearance");
+    assert_eq!(rows[0].payload.raw_result, "Clear");
     let archived = state.database.report(&user.user_id, report).await.unwrap();
     assert_eq!(archived["extraction_outputs"].as_array().unwrap().len(), 1);
     server.abort();
@@ -563,7 +812,7 @@ fn ocr_required_fields_accept_text_values_and_report_each_missing_field() {
         {"raw_name":"ApoB", "sampled_at":null, "raw_result":"120"},
         {"raw_name":" ", "sampled_at":"2026-02-30", "raw_result":""}
     ]});
-    let issues = longlivehealth::ocr::validation_issues(&page.to_string(), 3);
+    let issues = longlivehealth::ocr::validation_issues(&page.to_string(), 3, false);
     assert_eq!(issues.len(), 4);
     assert_eq!(issues[0]["item_name"], "ApoB");
     assert_eq!(issues[0]["page"], 3);

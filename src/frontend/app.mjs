@@ -325,8 +325,10 @@ async function reportView(id) {
     const payload = observation.payload;
     const item = el('article', null, 'observation');
     const heading = el('div', null, 'observation-heading');
-    heading.append(el('h3', payload.raw_name), badge(observation.status));
-    item.append(heading, el('p', `${payload.raw_result} ${payload.raw_unit ?? ''}`, 'result-value'),
+    heading.append(el('h3', observation.display_name || payload.raw_name), badge(observation.status));
+    item.append(heading);
+    if (observation.lab_test_code) item.append(el('p', `LOINC ${observation.lab_test_code}`, 'muted'));
+    item.append(el('p', `${payload.raw_result} ${payload.raw_unit ?? ''}`, 'result-value'),
       el('p', `Standardized: ${quantity(observation.interpretation.result)}`),
       el('p', `Printed reference: ${originalReference(payload, observation.interpretation.reference)}`, 'muted'),
       el('p', `Standardized reference: ${quantity(observation.interpretation.reference)}`, 'muted'),
@@ -462,7 +464,7 @@ async function analysisView(id) {
       item.append(el('h4', 'Source reports'));
       for (const observationID of finding.observation_ids) {
         const source = run.input.observations.find(observation => observation.observation_id === observationID);
-        if (source) item.append(reportLink(source.report_id, `${source.payload.raw_name}: ${source.payload.raw_result} ${source.payload.raw_unit ?? ''}`));
+        if (source) item.append(reportLink(source.report_id, `${source.display_name || source.payload.raw_name}: ${source.payload.raw_result} ${source.payload.raw_unit ?? ''}`));
       }
       panel.append(item);
     }

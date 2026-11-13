@@ -10,7 +10,7 @@ fn configuration_is_owned_by_the_service_root() {
     assert!(!configuration.llm.api_key.is_empty());
     assert!(Config::load(&path).is_err());
     assert!(Config::load(std::path::Path::new("relative/data")).is_err());
-    assert_eq!(configuration.llm.model, "qwen3.8-flash-next-iq3_s");
+    assert_eq!(configuration.llm.model, "qwen3.8-flash-next-nvfp4");
 }
 
 #[test]

@@ -36,8 +36,9 @@ def compact_locked(root, database):
     canonical.executescript(SCHEMA.read_text())
     definitions = canonical.execute(queries.SCHEMA).fetchall()
     tables = sorted(name for kind, name, _ in definitions if kind == 'table')
-    check_export.require(set(row[0] for row in source.execute(queries.TABLES)) == set(tables), 'Unknown source tables')
-    for table in tables:
+    source_tables = {row[0] for row in source.execute(queries.TABLES)}
+    check_export.require(source_tables in (set(tables), set(tables) - {'custom_lab_metrics'}), 'Unknown source tables')
+    for table in sorted(source_tables):
         check_export.require(
             sorted(map(tuple, restore_queries.columns(canonical, table))) == sorted(map(tuple, restore_queries.columns(source, table))),
             'Source columns differ from schema: ' + table,
@@ -54,7 +55,7 @@ def compact_locked(root, database):
             if kind == 'table':
                 destination.execute(statement)
         destination.commit()
-        for table in tables:
+        for table in sorted(source_tables):
             if table == 'health_totals':
                 continue
             columns = [r[0] for r in restore_queries.columns(canonical, table)]

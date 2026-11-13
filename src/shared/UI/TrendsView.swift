@@ -3,10 +3,14 @@ import SwiftUI
 struct TrendsView: View {
     var model: AppModel
     @State var response: JSONValue = .null
+    @State var responseRevision: Int?
     @State var loading = false
     @State var failure: String?
 
-    private var cards: [LongTermTrend] { response["cards"].arrayValue.map { LongTermTrend($0) } }
+    private var cards: [LongTermTrend] {
+        guard responseRevision == model.reportDataRevision else { return [] }
+        return response["cards"].arrayValue.map { LongTermTrend($0) }
+    }
 
     var body: some View {
         List {
@@ -29,21 +33,23 @@ struct TrendsView: View {
             }
         }
         .mobileNavigationTitle("Trends")
-        .initialTask { await reload() }
+        .initialTask(id: model.reportDataRevision) { await reload() }
         .refreshable { await reload() }
     }
 
     private func reload() async {
-        guard !loading, let token = model.session?.token else { return }
+        guard let token = model.session?.token else { return }
+        let revision = model.reportDataRevision
         loading = true
-        defer { loading = false }
+        defer { if model.reportDataRevision == revision { loading = false } }
         do {
             let next = try await model.request("wellness/trends", body: .object(["timezone": .string(TimeZone.current.identifier)]))
-            guard !Task.isCancelled, model.session?.token == token else { return }
+            guard !Task.isCancelled, model.session?.token == token, model.reportDataRevision == revision else { return }
             response = next
+            responseRevision = revision
             failure = nil
         } catch {
-            guard !Task.isCancelled, model.session?.token == token else { return }
+            guard !Task.isCancelled, model.session?.token == token, model.reportDataRevision == revision else { return }
             failure = error.localizedDescription
         }
     }

@@ -4,6 +4,16 @@
   "missing_contract": "Null means unknown or not applicable. It is never an implicit zero.",
   "source_contract": "Health payloads retain provider fields. Unsupported fields are archival evidence, not validated measurements.",
   "tables": {
+    "custom_lab_metrics": {
+      "meaning": "Owner-defined laboratory metrics created while reviewing a report result.",
+      "fields": {
+        "metric_id": "Stable private identifier used by reviewed report observations.",
+        "user_id": "Owner account identifier.",
+        "name": "Reviewed display name.",
+        "name_key": "Normalized name used to prevent duplicates.",
+        "standard_unit": "Reviewed display unit, or an empty string if no unit is specified."
+      }
+    },
     "analysis_feedback": {
       "meaning": "User comments linked to retained analysis runs.",
       "fields": {

@@ -9,6 +9,7 @@ async fn partial_review_history_and_conflicts_are_transactional() {
     let bob = add_user(&state, "bob").await;
     let report = archive(&state, "alice").await;
     let request = ReviewRequest {
+        new_metric: None,
         report_id: report.clone(),
         expected_revision: 1,
         context: None,
@@ -59,6 +60,7 @@ async fn partial_review_history_and_conflicts_are_transactional() {
         .review(
             &alice.user_id,
             ReviewRequest {
+                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: 2,
                 context: None,
@@ -96,6 +98,7 @@ async fn partial_review_history_and_conflicts_are_transactional() {
             .review(
                 &alice.user_id,
                 ReviewRequest {
+                    new_metric: None,
                     report_id: report.clone(),
                     expected_revision: 2,
                     context: None,
@@ -213,6 +216,7 @@ async fn confirmed_units_share_scale_and_unknown_values_report_specific_reasons(
         .review(
             &user.user_id,
             ReviewRequest {
+                new_metric: None,
                 report_id: report,
                 expected_revision: 1,
                 context: None,
@@ -286,6 +290,7 @@ async fn ocr_identity_autofills_and_relocates_without_overwriting_user_edits() {
         .review(
             &user.user_id,
             ReviewRequest {
+                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: first["report"]["revision"].as_i64().unwrap(),
                 context: Some(
@@ -346,7 +351,7 @@ async fn observation_counts(root: &std::path::Path) -> (i64, i64) {
 }
 
 #[tokio::test]
-async fn draft_results_are_physically_separate_until_confirmed_and_can_be_rejected() {
+async fn reviewing_moves_rows_between_sqlite_databases_and_updates_browse_history() {
     let (directory, state) = fixture().await;
     let user = add_user(&state, "draft-owner").await;
     let other = add_user(&state, "other-owner").await;
@@ -356,6 +361,7 @@ async fn draft_results_are_physically_separate_until_confirmed_and_can_be_reject
         .review(
             &user.user_id,
             ReviewRequest {
+                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: 1,
                 context: None,
@@ -391,11 +397,14 @@ async fn draft_results_are_physically_separate_until_confirmed_and_can_be_reject
         .to_owned();
     for (status, counts) in [
         ("confirmed", (1, 0)),
+        ("pending", (0, 1)),
+        ("confirmed", (1, 0)),
         ("rejected", (0, 1)),
         ("confirmed", (1, 0)),
     ] {
         let revision = document["observations"][0]["revision"].as_i64().unwrap();
         let request = |expected| ReviewRequest {
+            new_metric: None,
             report_id: report.clone(),
             expected_revision: document["report"]["revision"].as_i64().unwrap(),
             context: None,
@@ -421,6 +430,18 @@ async fn draft_results_are_physically_separate_until_confirmed_and_can_be_reject
             .await
             .unwrap();
         assert_eq!(observation_counts(directory.path()).await, counts);
+        assert_eq!(document["observations"][0]["status"], status);
+        assert_eq!(document["observations"][0]["observation_id"], id);
+        assert_eq!(document["observations"][0]["payload"]["raw_result"], "120");
+        let history = ldl_history(&state.database, &user.user_id).await;
+        let points = history["points"].as_array().unwrap();
+        if status == "confirmed" {
+            assert_eq!(points.len(), 1);
+            assert_eq!(points[0]["observation_id"], id);
+        } else {
+            assert!(points.is_empty());
+            assert!(history["records"].as_array().unwrap().is_empty());
+        }
         assert_eq!(
             state.database.confirmed(&user.user_id).await.unwrap().len(),
             usize::from(status == "confirmed")
@@ -439,6 +460,7 @@ async fn deleting_report_removes_official_and_draft_results() {
         .review(
             &user.user_id,
             ReviewRequest {
+                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: 1,
                 context: None,
@@ -472,12 +494,22 @@ async fn deleting_report_removes_official_and_draft_results() {
             .is_err()
     );
     assert_eq!(observation_counts(directory.path()).await, (1, 1));
+    assert_eq!(
+        ldl_history(&state.database, &user.user_id).await["points"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     state
         .database
         .delete_report(&user.user_id, &report, revision)
         .await
         .unwrap();
     assert_eq!(observation_counts(directory.path()).await, (0, 0));
+    let history = ldl_history(&state.database, &user.user_id).await;
+    assert!(history["points"].as_array().unwrap().is_empty());
+    assert!(history["records"].as_array().unwrap().is_empty());
     assert!(
         state
             .database
@@ -493,6 +525,21 @@ async fn deleting_report_removes_official_and_draft_results() {
             .await
             .is_err()
     );
+}
+
+async fn ldl_history(
+    database: &longlivehealth::database::Database,
+    user: &str,
+) -> serde_json::Value {
+    longlivehealth::metric_history::history(
+        database,
+        user,
+        longlivehealth::metric_history::HistoryRequest {
+            metric_id: "ldl_cholesterol".into(),
+        },
+    )
+    .await
+    .unwrap()
 }
 
 #[tokio::test]
@@ -591,6 +638,7 @@ async fn rescan_replaces_results_preserves_original_and_rejects_stale_or_active_
         .review(
             &alice.user_id,
             ReviewRequest {
+                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: summary.revision,
                 context: None,
@@ -687,6 +735,7 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
         .review(
             &user.user_id,
             ReviewRequest {
+                new_metric: None,
                 report_id: report,
                 expected_revision: 1,
                 context: None,
@@ -714,6 +763,8 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
     let bad = find("Globulin", false);
     assert_eq!(bad["browse_issues"][0]["code"], "unsupported_unit");
     assert_eq!(bad["browse_issues"][0]["scope"], "browse");
+    assert_eq!(bad["metric_suggestions"][0]["metric_id"], "globulin");
+    assert_eq!(bad["metric_suggestions"][0]["unit_match"], "incompatible");
     assert!(
         bad["browse_issues"][0]["message"]
             .as_str()
@@ -743,6 +794,7 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
         .review(
             &user.user_id,
             ReviewRequest {
+                new_metric: None,
                 report_id: bad["report_id"].as_str().unwrap().into(),
                 expected_revision: 2,
                 context: None,
@@ -764,4 +816,227 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
         .unwrap();
     assert!(fixed["browse_issues"].as_array().unwrap().is_empty());
     assert_eq!(fixed["resolved_metric_id"], "globulin");
+}
+
+#[tokio::test]
+async fn report_summaries_use_collection_evidence_for_the_date_column() {
+    let (_directory, state) = fixture().await;
+    let alice = add_user(&state, "alice").await;
+    let report = archive(&state, "alice").await;
+    let request = longlivehealth::models::ListRequest {
+        after_id: None,
+        limit: 10,
+    };
+    assert!(
+        state
+            .database
+            .reports(&alice.user_id, &request)
+            .await
+            .unwrap()[0]
+            .collection_date
+            .is_none()
+    );
+    let observations = [
+        ("confirmed", "2026-08-15"),
+        ("pending", "2026-09-01T23:30:00-05:00"),
+        ("rejected", "2026-10-01"),
+    ]
+    .into_iter()
+    .map(|(status, date)| {
+        let mut payload = observation_payload();
+        payload.sampled_at = Some(date.into());
+        ReviewItem {
+            observation_id: None,
+            expected_revision: None,
+            status: status.into(),
+            payload,
+        }
+    })
+    .collect();
+    state
+        .database
+        .review(
+            &alice.user_id,
+            ReviewRequest {
+                new_metric: None,
+                report_id: report.clone(),
+                expected_revision: 1,
+                context: None,
+                observations,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        state
+            .database
+            .reports(&alice.user_id, &request)
+            .await
+            .unwrap()[0]
+            .collection_date
+            .as_deref(),
+        Some("2026-09-01")
+    );
+    let evidence =
+        serde_json::json!({"report_collection_date":{"date":"2026-08-15","source_page":1}});
+    use sqlx::{Connection, SqliteConnection, sqlite::SqliteConnectOptions};
+    let mut connection = SqliteConnection::connect_with(
+        &SqliteConnectOptions::new().filename(state.config.data_dir.join("database.sqlite")),
+    )
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO extraction_inputs (user_id, report_id, run_id, page_number, input_json, created_at) VALUES (?, ?, 'test-run', 1, ?, 1)")
+        .bind(&alice.user_id)
+        .bind(&report)
+        .bind(evidence.to_string())
+        .execute(&mut connection)
+        .await.unwrap();
+    assert_eq!(
+        state
+            .database
+            .reports(&alice.user_id, &request)
+            .await
+            .unwrap()[0]
+            .collection_date
+            .as_deref(),
+        Some("2026-08-15")
+    );
+    assert_eq!(
+        state
+            .database
+            .report(&alice.user_id, &report)
+            .await
+            .unwrap()["report"]["collection_date"],
+        "2026-08-15"
+    );
+}
+
+#[tokio::test]
+async fn review_creates_an_owned_metric_and_links_its_confirmed_browse_history() {
+    use longlivehealth::metric_history::{HistoryRequest, history};
+    use longlivehealth::reports::NewMetric;
+
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "alice").await;
+    let other = add_user(&state, "bob").await;
+    let report = archive(&state, "alice").await;
+    let mut payload = observation_payload();
+    payload.raw_name = "Zyphorin activity".into();
+    payload.raw_result = "120".into();
+    payload.raw_unit = Some("ZR".into());
+    payload.source.quote = "Zyphorin activity 120 ZR".into();
+    payload.metric_id = None;
+    let drafted = state
+        .database
+        .review(
+            &user.user_id,
+            ReviewRequest {
+                report_id: report.clone(),
+                expected_revision: 1,
+                context: None,
+                observations: vec![ReviewItem {
+                    observation_id: None,
+                    expected_revision: None,
+                    status: "pending".into(),
+                    payload: payload.clone(),
+                }],
+                new_metric: None,
+            },
+        )
+        .await
+        .unwrap();
+    let draft = &drafted["observations"][0];
+    assert_eq!(draft["metric_suggestions"], serde_json::json!([]));
+    let request = |observation_revision| ReviewRequest {
+        report_id: report.clone(),
+        expected_revision: 2,
+        context: None,
+        observations: vec![ReviewItem {
+            observation_id: Some(draft["observation_id"].as_str().unwrap().to_owned()),
+            expected_revision: Some(observation_revision),
+            status: "confirmed".into(),
+            payload: payload.clone(),
+        }],
+        new_metric: Some(NewMetric {
+            name: payload.raw_name.clone(),
+            standard_unit: "ZR".into(),
+        }),
+    };
+    assert!(
+        state
+            .database
+            .review(&user.user_id, request(2))
+            .await
+            .is_err()
+    );
+    assert!(
+        state
+            .database
+            .custom_metrics(&user.user_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let saved = state
+        .database
+        .review(&user.user_id, request(1))
+        .await
+        .unwrap();
+    let id = saved["created_metric"]["metric_id"].as_str().unwrap();
+    let result = &saved["observations"][0];
+    assert_eq!(result["resolved_metric_id"], id);
+    assert_eq!(result["payload"]["raw_unit"], "ZR");
+    assert_eq!(
+        result["payload"]["source"]["quote"],
+        "Zyphorin activity 120 ZR"
+    );
+    assert_eq!(result["interpretation"]["result"]["display"], "120 ZR");
+
+    let history_request = || HistoryRequest {
+        metric_id: id.to_owned(),
+    };
+    let series = history(&state.database, &user.user_id, history_request())
+        .await
+        .unwrap();
+    assert_eq!(series["metric"]["name"], "Zyphorin activity");
+    assert_eq!(series["points"][0]["report_id"], report);
+    assert!(
+        history(&state.database, &other.user_id, history_request())
+            .await
+            .is_err()
+    );
+}
+
+#[test]
+fn count_exponent_units_use_a_verified_conversion_and_keep_the_printed_unit() {
+    use longlivehealth::laboratory::interpret;
+    use longlivehealth::reports::OcrNormalization;
+    let mut payload = observation_payload();
+    payload.raw_name = "RBC".into();
+    payload.raw_result = "4.61".into();
+    payload.raw_unit = Some("×10⁶/µL".into());
+    payload.metric_id = None;
+    payload.ocr_normalization = Some(OcrNormalization {
+        result: "4610000".into(),
+        unit: "10^12/L".into(),
+    });
+    let interpreted = interpret(&payload);
+    assert_eq!(interpreted.result.display.as_deref(), Some("4.61 10^12/L"));
+    assert_eq!(payload.raw_unit.as_deref(), Some("×10⁶/µL"));
+    for (name, unit, expected) in [
+        ("RBC (789-8)", "10E6/uL", "4.61 10^12/L"),
+        ("RBC (789-8)", "x10E6/uL", "4.61 10^12/L"),
+        ("WBC (6690-2)", "10E3/uL", "4.61 10^9/L"),
+        ("Platelets (777-3)", "x10E3/uL", "4.61 10^9/L"),
+    ] {
+        payload.raw_name = name.into();
+        payload.raw_unit = Some(unit.into());
+        assert_eq!(
+            interpret(&payload).result.display.as_deref(),
+            Some(expected)
+        );
+        assert_eq!(payload.raw_unit.as_deref(), Some(unit));
+    }
+    payload.raw_unit = Some("unknown".into());
+    assert!(interpret(&payload).result.display.is_none());
 }

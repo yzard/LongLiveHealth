@@ -201,6 +201,84 @@
     }
   },
   "metrics": {
+    "hdl_percent_total_cholesterol": {
+      "metric_id": "hdl_percent_total_cholesterol",
+      "name": "HDL as % of total cholesterol",
+      "unit": "%",
+      "loinc": "2095-8",
+      "reason": "Use the original laboratory reference interval for this assay.",
+      "sources": [
+        "lab_context"
+      ],
+      "rules": [],
+      "note": "Use the original laboratory reference interval for this assay.",
+      "review_status": "no_numeric_rule"
+    },
+    "triglyceride_hdl_ratio": {
+      "metric_id": "triglyceride_hdl_ratio",
+      "name": "Triglycerides / HDL cholesterol ratio",
+      "unit": "1",
+      "loinc": "44733-4",
+      "reason": "Use the original laboratory reference interval for this assay.",
+      "sources": [
+        "lab_context"
+      ],
+      "rules": [],
+      "note": "Use the original laboratory reference interval for this assay.",
+      "review_status": "no_numeric_rule"
+    },
+    "ldl_hdl_ratio": {
+      "metric_id": "ldl_hdl_ratio",
+      "name": "LDL / HDL cholesterol ratio",
+      "unit": "1",
+      "loinc": "11054-4",
+      "reason": "Use the original laboratory reference interval for this assay.",
+      "sources": [
+        "lab_context"
+      ],
+      "rules": [],
+      "note": "Use the original laboratory reference interval for this assay.",
+      "review_status": "no_numeric_rule"
+    },
+    "vldl_cholesterol": {
+      "metric_id": "vldl_cholesterol",
+      "name": "VLDL cholesterol, calculated",
+      "unit": "mg/dL",
+      "loinc": "13458-5",
+      "reason": "Use the original laboratory reference interval for this assay.",
+      "sources": [
+        "lab_context"
+      ],
+      "rules": [],
+      "note": "Use the original laboratory reference interval for this assay.",
+      "review_status": "no_numeric_rule"
+    },
+    "ldh": {
+      "metric_id": "ldh",
+      "name": "Lactate dehydrogenase (LDH)",
+      "unit": "U/L",
+      "loinc": "14804-9",
+      "reason": "Use the original laboratory reference interval for this assay.",
+      "sources": [
+        "lab_context"
+      ],
+      "rules": [],
+      "note": "Use the original laboratory reference interval for this assay.",
+      "review_status": "no_numeric_rule"
+    },
+    "total_t4": {
+      "metric_id": "total_t4",
+      "name": "Total thyroxine (T4)",
+      "unit": "µg/dL",
+      "loinc": "3026-2",
+      "reason": "Use the original laboratory reference interval for this assay.",
+      "sources": [
+        "lab_context"
+      ],
+      "rules": [],
+      "note": "Use the original laboratory reference interval for this assay.",
+      "review_status": "no_numeric_rule"
+    },
     "total_cholesterol": {
       "metric_id": "total_cholesterol",
       "name": "Total cholesterol",
@@ -973,7 +1051,7 @@
     },
     "vitamin_d_unspecified": {
       "metric_id": "vitamin_d_unspecified",
-      "name": "Vitamin D",
+      "name": "Vitamin D (form unspecified)",
       "unit": "ng/mL",
       "reason": "Vitamin D metabolite is unspecified. 25-hydroxy and 1,25-dihydroxy vitamin D require different intervals.",
       "sources": [
@@ -3639,6 +3717,19 @@
       "reason": "Qualitative or categorical result. Preserve the printed interpretation rather than assign a numeric normal range.",
       "sources": [
         "lab_context"
+      ],
+      "rules": [],
+      "note": "Qualitative or categorical result. Preserve the printed interpretation rather than assign a numeric normal range.",
+      "review_status": "no_numeric_rule"
+    },
+    "urine_clarity": {
+      "metric_id": "urine_clarity",
+      "name": "Clarity - urine",
+      "unit": "1",
+      "reason": "Qualitative or categorical result. Preserve the printed interpretation rather than assign a numeric normal range.",
+      "sources": [
+        "lab_context",
+        "urine"
       ],
       "rules": [],
       "note": "Qualitative or categorical result. Preserve the printed interpretation rather than assign a numeric normal range.",
@@ -7284,9 +7375,9 @@
       "note": "Published reference guide; use the laboratory interval and clinical context.",
       "review_status": "guide_available"
     },
-    "clinical:cba92749dfff0342bdf57a4ac09165636d5d94eb4695b2798c0bb9499782b817": {
-      "metric_id": "clinical:cba92749dfff0342bdf57a4ac09165636d5d94eb4695b2798c0bb9499782b817",
-      "name": "Phosphate",
+    "serum_phosphate": {
+      "metric_id": "serum_phosphate",
+      "name": "Phosphate (serum or plasma)",
       "unit": "mg/dL",
       "loinc": "2777-1",
       "reason": "",
@@ -7295,7 +7386,7 @@
       ],
       "rules": [
         {
-          "id": "clinical:cba92749dfff0342bdf57a4ac09165636d5d94eb4695b2798c0bb9499782b817-1",
+          "id": "serum_phosphate-1",
           "kind": "reference_interval",
           "source": "abim",
           "min_age": 18,
@@ -7312,9 +7403,9 @@
       "note": "Published reference guide; use the laboratory interval and clinical context.",
       "review_status": "guide_available"
     },
-    "clinical:edd89ae78ca4fa80bef33fcbf1acceca239aba400eab37d16677d13d83293271": {
-      "metric_id": "clinical:edd89ae78ca4fa80bef33fcbf1acceca239aba400eab37d16677d13d83293271",
-      "name": "Total 25-hydroxyvitamin D (D2 + D3)",
+    "vitamin_d_25_oh_total": {
+      "metric_id": "vitamin_d_25_oh_total",
+      "name": "Total 25-hydroxyvitamin D (25-OH)",
       "unit": "ng/mL",
       "loinc": "62292-8",
       "reason": "",
@@ -7323,7 +7414,7 @@
       ],
       "rules": [
         {
-          "id": "clinical:edd89ae78ca4fa80bef33fcbf1acceca239aba400eab37d16677d13d83293271-1",
+          "id": "vitamin_d_25_oh_total-1",
           "kind": "decision_threshold",
           "source": "vitd",
           "min_age": 18,
@@ -7681,8 +7772,19 @@
       "note": "GFR category only, not a CKD diagnosis. CKD requires persistence or other kidney-damage evidence. Historical race-adjusted equations are retained as recorded, not recommended for new calculations.",
       "review_status": "guide_available"
     },
-    "clinical:e4c1ef2c51dac3bd5240dc82556330573bee7e98f8fceefa03c70bf38cc9bf0d": {
-      "metric_id": "clinical:e4c1ef2c51dac3bd5240dc82556330573bee7e98f8fceefa03c70bf38cc9bf0d",
+    "vitamin_d_25_oh_d2": {
+      "metric_id": "vitamin_d_25_oh_d2",
+      "name": "25-hydroxyvitamin D2",
+      "unit": "ng/mL",
+      "loinc": "49054-0",
+      "reason": "This is the D2 fraction. Total 25-hydroxyvitamin D guidance does not apply.",
+      "sources": ["vitd"],
+      "rules": [],
+      "note": "Use the original laboratory reference interval for this fraction.",
+      "review_status": "no_numeric_rule"
+    },
+    "vitamin_d_25_oh_d3": {
+      "metric_id": "vitamin_d_25_oh_d3",
       "name": "25-hydroxyvitamin D3",
       "unit": "ng/mL",
       "sources": [
@@ -7717,9 +7819,9 @@
       "note": "No automatic in-range judgment without an applicable interval.",
       "review_status": "no_numeric_rule"
     },
-    "clinical:b9eea2a3f386e9c03fa55e1b9dd53f349c18f4d5b0ea10ce29617c7d2ec6ce9f": {
-      "metric_id": "clinical:b9eea2a3f386e9c03fa55e1b9dd53f349c18f4d5b0ea10ce29617c7d2ec6ce9f",
-      "name": "Absolute NRBC",
+    "nrbc_count": {
+      "metric_id": "nrbc_count",
+      "name": "Absolute nucleated red blood cell count",
       "unit": "10^9/L",
       "sources": [
         "lab_context"
@@ -7753,10 +7855,10 @@
       "note": "No automatic in-range judgment without an applicable interval.",
       "review_status": "no_numeric_rule"
     },
-    "clinical:7ab8a8adb6b2f4ec5ec4cb6fe7c9842f952dfea139183dc8c21d15a887f1c44e": {
-      "metric_id": "clinical:7ab8a8adb6b2f4ec5ec4cb6fe7c9842f952dfea139183dc8c21d15a887f1c44e",
+    "bun_creatinine_ratio": {
+      "metric_id": "bun_creatinine_ratio",
       "name": "BUN / creatinine ratio",
-      "unit": "Not reported",
+      "unit": "1",
       "sources": [
         "lab_context"
       ],
@@ -7765,9 +7867,9 @@
       "note": "No automatic in-range judgment without an applicable interval.",
       "review_status": "no_numeric_rule"
     },
-    "clinical:c4984e4189742ffb054258b800419c3906005e3971d0832dddb9f0feb36853e8": {
-      "metric_id": "clinical:c4984e4189742ffb054258b800419c3906005e3971d0832dddb9f0feb36853e8",
-      "name": "Imm Gran %",
+    "immature_granulocyte_percent": {
+      "metric_id": "immature_granulocyte_percent",
+      "name": "Immature granulocytes %",
       "unit": "%",
       "sources": [
         "lab_context"
@@ -7777,9 +7879,9 @@
       "note": "No automatic in-range judgment without an applicable interval.",
       "review_status": "no_numeric_rule"
     },
-    "clinical:96feb2056ce4641c5589c7dcabebbb4c6c95eea22df875b679d3f5d8a76b27ab": {
-      "metric_id": "clinical:96feb2056ce4641c5589c7dcabebbb4c6c95eea22df875b679d3f5d8a76b27ab",
-      "name": "Imm Gran Abs",
+    "immature_granulocyte_count": {
+      "metric_id": "immature_granulocyte_count",
+      "name": "Absolute immature granulocyte count",
       "unit": "10^9/L",
       "sources": [
         "lab_context"
@@ -7789,8 +7891,8 @@
       "note": "No automatic in-range judgment without an applicable interval.",
       "review_status": "no_numeric_rule"
     },
-    "clinical:e72d76d9f5efb4586c214350591df35164ed183acb1ead4ef5d79a15351775bb": {
-      "metric_id": "clinical:e72d76d9f5efb4586c214350591df35164ed183acb1ead4ef5d79a15351775bb",
+    "intact_pth": {
+      "metric_id": "intact_pth",
       "name": "Intact parathyroid hormone",
       "unit": "pg/mL",
       "sources": [
@@ -7799,7 +7901,7 @@
       ],
       "rules": [
         {
-          "id": "clinical:e72d76d9f5efb4586c214350591df35164ed183acb1ead4ef5d79a15351775bb-1",
+          "id": "intact_pth-1",
           "kind": "reference_interval",
           "source": "pth",
           "min_age": 18,
@@ -7831,8 +7933,8 @@
       "note": "No automatic in-range judgment without an applicable interval.",
       "review_status": "no_numeric_rule"
     },
-    "clinical:a335f19f51d64583e1f1f6152dc993c69bdbd1147c4d35663472d81acc74e7da": {
-      "metric_id": "clinical:a335f19f51d64583e1f1f6152dc993c69bdbd1147c4d35663472d81acc74e7da",
+    "serum_magnesium": {
+      "metric_id": "serum_magnesium",
       "name": "Magnesium (serum or plasma)",
       "unit": "mg/dL",
       "sources": [
@@ -7843,9 +7945,9 @@
       "note": "No automatic in-range judgment without an applicable interval.",
       "review_status": "no_numeric_rule"
     },
-    "clinical:ef3b2d1f3d722a6d1b7d3306571a53a84560630f527c8127befcebbd735aa509": {
-      "metric_id": "clinical:ef3b2d1f3d722a6d1b7d3306571a53a84560630f527c8127befcebbd735aa509",
-      "name": "Nucleated RBC Auto",
+    "nrbc_per_100_wbc": {
+      "metric_id": "nrbc_per_100_wbc",
+      "name": "Nucleated red blood cells per 100 white blood cells",
       "unit": "/100 WBC's",
       "sources": [
         "lab_context"
@@ -7963,8 +8065,8 @@
       "note": "No automatic in-range judgment without an applicable interval.",
       "review_status": "no_numeric_rule"
     },
-    "clinical:599284c9549c3c631d6aee4ddabe2a400a698996e714ffe4cc69e767b6245417": {
-      "metric_id": "clinical:599284c9549c3c631d6aee4ddabe2a400a698996e714ffe4cc69e767b6245417",
+    "thyroglobulin": {
+      "metric_id": "thyroglobulin",
       "name": "Thyroglobulin",
       "unit": "ng/mL",
       "sources": [

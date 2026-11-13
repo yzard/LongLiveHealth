@@ -19,13 +19,13 @@ lease_seconds = 120
 maximum_attempts = 3
 
 [extraction]
-output_tokens = 8192
+output_tokens = 16384
 image_pixel_budget = 2097152
 
 # One shared inference service for document extraction and Analytics.
 [llm]
 base_url = "http://192.168.1.20:8080/v1"
-model = "qwen3.8-flash-next-iq3_s"
+model = "qwen3.8-flash-next-nvfp4"
 adapter = "openai_chat"
 api_key = "" # Set the local_llm credential in this service's operator config.toml.
 timeout_seconds = 900

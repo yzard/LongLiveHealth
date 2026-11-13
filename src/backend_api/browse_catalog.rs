@@ -120,8 +120,9 @@ pub fn assemble(sources: &[Value], labs: &[Value]) -> Value {
     }
     for metric in labs {
         let kind = metric["metric_id"].as_str().unwrap_or("");
-        let title = metric["name"].as_str().unwrap_or(kind);
-        entries.push(json!({"id":format!("lab:{kind}"),"kind":kind,"title":title,"category_id":classify(kind,title,true),"presentation":"lab","definition":metric}));
+        let name = metric["name"].as_str().unwrap_or(kind);
+        let aliases: Vec<_> = crate::laboratory::metric_aliases(kind).collect();
+        entries.push(json!({"id":format!("lab:{kind}"),"kind":kind,"title":name,"aliases":aliases,"category_id":classify(kind,name,true),"presentation":"lab","definition":metric}));
     }
     entries.sort_by_key(|e| e["title"].as_str().unwrap_or("").to_lowercase());
     let categories: Vec<_> = taxonomy()["categories"]

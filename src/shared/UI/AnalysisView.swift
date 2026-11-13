@@ -58,7 +58,7 @@ struct AnalysisDetail: View {
                     lines("Questions for your clinician", finding["questions_for_clinician"])
                     ForEach(finding["observation_ids"].arrayValue, id: \.stringValue) { id in
                         if let observation = run["input"]["observations"].arrayValue.first(where: { $0["observation_id"] == id }) {
-                            NavigationLink("Source: \(observation["payload"]["raw_name"].stringValue) · \(observation["payload"]["raw_result"].stringValue)") { ReportView(model: model, reportID: observation["report_id"].stringValue) }
+                            NavigationLink("Source: \(laboratoryResultName(observation)) · \(observation["payload"]["raw_result"].stringValue)") { ReportView(model: model, reportID: observation["report_id"].stringValue) }
                         }
                     }
                 }

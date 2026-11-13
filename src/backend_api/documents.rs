@@ -28,6 +28,15 @@ pub struct PageEvidence {
     pub text_layer: Option<TextLayer>,
     pub raw_bbox_xml: Option<String>,
     pub error_code: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report_collection_date: Option<ReportCollectionDate>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct ReportCollectionDate {
+    pub date: String,
+    pub source_page: i64,
+    pub source_quote: String,
 }
 impl PageEvidence {
     pub fn image() -> Self {
@@ -37,6 +46,7 @@ impl PageEvidence {
             text_layer: None,
             raw_bbox_xml: None,
             error_code: None,
+            report_collection_date: None,
         }
     }
     fn failure(status: &str, code: &'static str, xml: Option<String>) -> Self {
@@ -50,6 +60,7 @@ impl PageEvidence {
             }),
             raw_bbox_xml: xml,
             error_code: Some(code),
+            report_collection_date: None,
         }
     }
 }
@@ -62,6 +73,7 @@ pub fn parse_pdf_layer(xml: String) -> PageEvidence {
             text_layer: Some(layer),
             raw_bbox_xml: Some(xml),
             error_code: None,
+            report_collection_date: None,
         },
         Err("text_layer_limit") => {
             PageEvidence::failure("limit_exceeded", "text_layer_limit", Some(xml))
@@ -112,14 +124,25 @@ fn parse_layer(xml: &str) -> Result<TextLayer, &'static str> {
         let mut pieces = Vec::new();
         for word in line.children().filter(|node| node.has_tag_name("word")) {
             let text = word.text().ok_or("text_layer_invalid")?.to_owned();
+            let [left, top, right, bottom] = [
+                number(word, "xMin")?,
+                number(word, "yMin")?,
+                number(word, "xMax")?,
+                number(word, "yMax")?,
+            ];
+            // Poppler glyph boxes in browser printouts can extend slightly past the page edge.
+            const EDGE_TOLERANCE_PT: f64 = 0.25;
             let bounds = [
-                number(word, "xMin")? / width,
-                number(word, "yMin")? / height,
-                number(word, "xMax")? / width,
-                number(word, "yMax")? / height,
+                (left / width).max(0.0),
+                (top / height).max(0.0),
+                (right / width).min(1.0),
+                (bottom / height).min(1.0),
             ];
             if text.len() > 4096
-                || bounds.iter().any(|value| !(0.0..=1.0).contains(value))
+                || left < -EDGE_TOLERANCE_PT
+                || top < -EDGE_TOLERANCE_PT
+                || right > width + EDGE_TOLERANCE_PT
+                || bottom > height + EDGE_TOLERANCE_PT
                 || bounds[0] >= bounds[2]
                 || bounds[1] >= bounds[3]
             {
@@ -246,4 +269,101 @@ pub async fn pdf_evidence(
             }
         }
     }
+}
+
+fn mdland_print_url(layer: &TextLayer, page: i64, total: i64) -> Option<&str> {
+    let page_label = format!("{page} of {total}");
+    let mut header = layer.text.lines().take(5);
+    if !header
+        .clone()
+        .any(|line| line.trim().eq_ignore_ascii_case(&page_label))
+    {
+        return None;
+    }
+    header.find(|line| {
+        reqwest::Url::parse(line.trim())
+            .is_ok_and(|url| url.scheme() == "https" && url.host_str() == Some("pati.mdland.net"))
+    })
+}
+
+fn collection_label(line: &str) -> bool {
+    let label = line.split_once(':').map_or(line, |(label, _)| label).trim();
+    [
+        "Collected",
+        "Date Collected",
+        "Collection Date",
+        "Specimen Collection Date",
+    ]
+    .iter()
+    .any(|candidate| label.eq_ignore_ascii_case(candidate))
+}
+
+/// MDLand browser printouts have one specimen header and repeat the same report URL
+/// and explicit page numbering. Keep the heading as provenance for continuation rows.
+pub async fn pdf_collection_date(
+    cpu: &crate::execution::CpuExecutor,
+    path: &Path,
+    pages: i64,
+    first: &PageEvidence,
+) -> Result<Option<ReportCollectionDate>, AppError> {
+    let Some(layer) = first.text_layer.as_ref() else {
+        return Ok(None);
+    };
+    let Some(report_url) = mdland_print_url(layer, 1, pages) else {
+        return Ok(None);
+    };
+    let mut lines = layer.text.lines().peekable();
+    let mut specimen_count = 0;
+    let mut collected = None;
+    while let Some(line) = lines.next() {
+        let line = line.trim();
+        if line.eq_ignore_ascii_case("Specimen:") {
+            specimen_count += 1;
+        }
+        if collection_label(line) {
+            if collected.is_some() || specimen_count != 1 || line != "Collected" {
+                return Ok(None);
+            }
+            let Some(printed) = lines.peek().map(|line| line.trim()) else {
+                return Ok(None);
+            };
+            let mut parts = printed.split_whitespace();
+            let Some(date) = parts
+                .next()
+                .and_then(|date| chrono::NaiveDate::parse_from_str(date, "%m/%d/%Y").ok())
+            else {
+                return Ok(None);
+            };
+            if parts
+                .next()
+                .is_some_and(|time| chrono::NaiveTime::parse_from_str(time, "%H:%M:%S").is_err())
+                || parts.next().is_some()
+            {
+                return Ok(None);
+            }
+            collected = Some(ReportCollectionDate {
+                date: date.format("%Y-%m-%d").to_string(),
+                source_page: 1,
+                source_quote: format!("{line} {printed}"),
+            });
+        }
+    }
+    if specimen_count != 1 || collected.is_none() {
+        return Ok(None);
+    }
+    for page in 2..=pages {
+        let evidence = pdf_evidence(cpu, path, page).await?;
+        let Some(layer) = evidence.text_layer.as_ref() else {
+            return Ok(None);
+        };
+        if mdland_print_url(layer, page, pages) != Some(report_url)
+            || layer
+                .text
+                .lines()
+                .any(|line| collection_label(line) || line.trim().eq_ignore_ascii_case("Specimen:"))
+        {
+            return Ok(None);
+        }
+    }
+    Ok(collected)
 }

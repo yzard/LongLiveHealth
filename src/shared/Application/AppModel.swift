@@ -24,6 +24,7 @@ final class AppModel {
     var jobs: [JSONValue] = []
     var drafts: [UploadDraft] = []
     var metrics: [JSONValue] = []
+    private(set) var reportDataRevision = 0
     private(set) var sourcePreferences: JSONValue = .null
     private(set) var sourceCatalog: [JSONValue] = []
     var capabilities: JSONValue = .null
@@ -83,9 +84,12 @@ final class AppModel {
     func request(_ path: String, body: JSONValue) async throws -> JSONValue {
         guard let client, let responseCache, let token = session?.token else { throw APIError.invalidResponse }
         let cacheable = Self.cachedReads.contains(path)
+        let reportRevision = ["browse/catalog", "metrics/history/get", "wellness/trends"].contains(path)
+            ? reportDataRevision : nil
         do {
             let result = try await client.post(path, body: body)
-            guard !Task.isCancelled, session?.token == token else { throw CancellationError() }
+            guard !Task.isCancelled, session?.token == token,
+                  reportRevision == nil || reportRevision == reportDataRevision else { throw CancellationError() }
             if path == "wellness/preferences/get" || path == "wellness/preferences/save" {
                 if (result["version"].numberValue ?? 0) >= (sourcePreferences["version"].numberValue ?? -1) {
                     sourcePreferences = result
@@ -97,17 +101,26 @@ final class AppModel {
             }
             if cacheable {
                 try await responseCache.save(result, path: path, body: body)
+                if let reportRevision, reportRevision != reportDataRevision {
+                    try responseCache.remove(path, body: body)
+                    throw CancellationError()
+                }
             } else if !["jobs/list", "health/coverage", "user/get"].contains(path) {
                 try clearReadCache()
                 if path == "wellness/preferences/save" { try await responseCache.save(result, path: "wellness/preferences/get", body: .object([:])) }
             }
             guard !Task.isCancelled, session?.token == token else { throw CancellationError() }
+            if path == "reports/delete" || path == "reports/rescan" || path == "reports/relate"
+                || (path == "reports/review" && !body["observations"].arrayValue.isEmpty) {
+                reportDataRevision += 1
+            }
             if path == "wellness/entries/save" || path == "wellness/entries/delete" {
                 entryMutation = EntryMutation(recordID: result["record_id"].stringValue, record: result["record"] == .null ? nil : result["record"])
             }
             return result
         } catch {
-            guard !Task.isCancelled, session?.token == token else { throw CancellationError() }
+            guard !Task.isCancelled, session?.token == token,
+                  reportRevision == nil || reportRevision == reportDataRevision else { throw CancellationError() }
             if case APIError.status(401, _) = error { try expireLocalSession(); throw error }
             if case APIError.status(404, _) = error { try responseCache.remove(path, body: body) }
             if cacheable, let network = error as? URLError,

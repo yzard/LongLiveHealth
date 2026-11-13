@@ -9,6 +9,15 @@ CREATE TABLE users (
     data_revision INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE custom_lab_metrics (
+    metric_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    name_key TEXT NOT NULL,
+    standard_unit TEXT NOT NULL,
+    UNIQUE (user_id, name_key, standard_unit)
+);
+
 CREATE TABLE sessions (
     token_hash TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,

@@ -372,6 +372,16 @@ fn write_zip(directory: &Path, raw: &Path) -> Result<(), AppError> {
         .map_err(|_| AppError::Internal)?;
     let mut csv_member = DigestMember::new(&mut archive);
     csv_member.write_all(b"observation_id,revision,status,name,result,unit,sampled_at,standardized_result,standard_unit,result_status,original_reference,standardized_reference,reference_status,conversion_version\n")?;
+    let custom_metrics = std::io::BufReader::new(std::fs::File::open(
+        directory.join("custom_lab_metrics.jsonl"),
+    )?)
+    .lines()
+    .map(|line| {
+        Ok(serde_json::from_str::<crate::laboratory::CustomMetric>(
+            &line?,
+        )?)
+    })
+    .collect::<Result<Vec<_>, AppError>>()?;
     for line in
         std::io::BufReader::new(std::fs::File::open(directory.join("observations.jsonl"))?).lines()
     {
@@ -379,7 +389,10 @@ fn write_zip(directory: &Path, raw: &Path) -> Result<(), AppError> {
         let payload: Value =
             serde_json::from_str(row["payload_json"].as_str().ok_or(AppError::Internal)?)?;
         let typed: crate::reports::ObservationPayload = serde_json::from_value(payload.clone())?;
-        let interpreted = crate::laboratory::interpret(&typed);
+        let custom = custom_metrics
+            .iter()
+            .find(|metric| Some(metric.metric_id.as_str()) == typed.metric_id.as_deref());
+        let interpreted = crate::laboratory::interpret_with_custom(&typed, custom);
         let fields = [
             row["observation_id"].as_str().unwrap_or("").to_string(),
             row["current_revision"].to_string(),
@@ -389,7 +402,7 @@ fn write_zip(directory: &Path, raw: &Path) -> Result<(), AppError> {
             payload["raw_unit"].as_str().unwrap_or("").to_string(),
             payload["sampled_at"].as_str().unwrap_or("").to_string(),
             interpreted.result.display.unwrap_or_default(),
-            interpreted.result.unit.unwrap_or("").into(),
+            interpreted.result.unit.unwrap_or_default(),
             interpreted.result.status.into(),
             payload["reference_range"]
                 .as_str()
