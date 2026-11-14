@@ -9,6 +9,7 @@ struct InsightPanelSelection: Identifiable {
 struct InsightsView: View {
     var model: AppModel
     @State var response: JSONValue = .null
+    @State var responseRevision: Int?
     @State var loading = false
     @State var refreshRequested = false
     @State var failure: String?
@@ -20,7 +21,7 @@ struct InsightsView: View {
             VStack(alignment: .leading, spacing: 18) {
                 if loading { ProgressView("Reviewing your health data") }
                 if let failure { Text(failure).foregroundStyle(.secondary) }
-                ForEach(Array(response["dashboard"].arrayValue.enumerated()), id: \.offset) { _, panel in
+                ForEach(Array((responseRevision == model.reportDataRevision ? response["dashboard"].arrayValue : []).enumerated()), id: \.offset) { _, panel in
                     Button {
                         selectedPanel = InsightPanelSelection(panel: panel)
                     } label: {
@@ -36,7 +37,7 @@ struct InsightsView: View {
             }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
         }
         .mobileNavigationTitle("Insights")
-        .initialTask { await reload() }
+        .initialTask(id: model.reportDataRevision) { await reload() }
         .refreshable { await reload() }
         .sheet(item: $selectedPanel) { selection in NavigationStack { InsightDetail(model: model, panel: selection.panel, response: response) } }
         .onChange(of: model.sourcePreferences["preferences"]["cardiovascular"]) { _, _ in Task { await reload() } }
@@ -47,6 +48,7 @@ struct InsightsView: View {
     private func reload() async {
         if loading { refreshRequested = true; return }
         guard let token = model.session?.token else { return }
+        let revision = model.reportDataRevision
         loading = true
         defer {
             loading = false
@@ -56,11 +58,14 @@ struct InsightsView: View {
             }
         }
         do {
-            if response == .null { response = try model.cachedResponse("insights/get", body: bodyRequest) ?? .null }
+            if response == .null {
+                response = try model.cachedResponse("insights/get", body: bodyRequest) ?? .null
+                responseRevision = revision
+            }
             let next = try await model.request("insights/get", body: bodyRequest)
-            guard !Task.isCancelled, model.session?.token == token else { return }
-            response = next; failure = nil
-        } catch { if !Task.isCancelled, model.session?.token == token { failure = error.localizedDescription } }
+            guard !Task.isCancelled, model.session?.token == token, model.reportDataRevision == revision else { return }
+            response = next; responseRevision = revision; failure = nil
+        } catch { if !Task.isCancelled, model.session?.token == token, model.reportDataRevision == revision { failure = error.localizedDescription } }
     }
 }
 

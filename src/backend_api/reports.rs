@@ -179,6 +179,8 @@ pub struct Observation {
     pub resolved_metric_id: Option<String>,
     pub display_name: String,
     pub lab_test_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lab_test_name: Option<&'static str>,
     pub browse_issues: Vec<BrowseIssue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metric_suggestions: Option<Value>,
@@ -334,6 +336,7 @@ impl StoredObservation {
             } else {
                 None
             };
+        let lab_test_code = crate::laboratory::split_test_code(&payload.raw_name).1;
         Ok(Observation {
             display_name: custom
                 .map_or_else(
@@ -346,9 +349,8 @@ impl StoredObservation {
                     |metric| metric.name.as_str(),
                 )
                 .to_owned(),
-            lab_test_code: crate::laboratory::split_test_code(&payload.raw_name)
-                .1
-                .map(str::to_owned),
+            lab_test_code: lab_test_code.map(str::to_owned),
+            lab_test_name: lab_test_code.and_then(crate::loinc::long_common_name),
             browse_issues,
             metric_suggestions,
             observation_id: self.observation_id,

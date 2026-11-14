@@ -79,6 +79,7 @@ struct ObservationEditor: View {
 
     @ViewBuilder private var reviewSections: some View {
         Section("Mapping") {
+            recommendedName
             if creatingMetric {
                 TextField("Metric name", text: $newMetricName)
                 TextField("Standard unit", text: $newMetricUnit)
@@ -91,6 +92,7 @@ struct ObservationEditor: View {
                     choices: metrics.map { MenuChoice(id: $0["metric_id"].stringValue, title: $0["name"].stringValue) }
                         .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending })
             }
+            mappingIssues
         }
         Section("As printed on the report") {
             TextField("Name", text: $printedName, axis: .vertical).autocorrectionDisabled()
@@ -122,14 +124,10 @@ struct ObservationEditor: View {
             if !loincCode.isEmpty {
                 Text("LOINC \(loincCode)").font(.caption).foregroundStyle(.secondary)
             }
+            recommendedName
             Text([payload["raw_result"].stringValue, payload["raw_unit"].stringValue]
                 .filter { !$0.isEmpty }.joined(separator: " "))
-            let messages = observation["browse_issues"].arrayValue
-                .filter { $0["scope"] == .string("browse") }
-                .map { $0["message"].stringValue }
-            if !messages.isEmpty {
-                Text(messages.joined(separator: "\n")).font(.caption).foregroundStyle(.secondary)
-            }
+            mappingIssues
         }
         Section {
             Button("Create new metric") {
@@ -166,6 +164,25 @@ struct ObservationEditor: View {
                 }
             }
             Button("Review with the full metric list") { choosingMetric = false }
+        }
+    }
+
+    @ViewBuilder private var recommendedName: some View {
+        let name = observation["lab_test_name"].stringValue
+        if !name.isEmpty && loincCode == observation["lab_test_code"].stringValue {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Recommended name (LOINC)").font(.caption).foregroundStyle(.secondary)
+                Text(name).accessibilityIdentifier("review-result-loinc-name")
+            }
+        }
+    }
+
+    @ViewBuilder private var mappingIssues: some View {
+        let messages = observation["browse_issues"].arrayValue
+            .filter { $0["scope"] == .string("browse") }
+            .map { $0["message"].stringValue }
+        if !messages.isEmpty {
+            Text(messages.joined(separator: "\n")).font(.caption).foregroundStyle(.secondary)
         }
     }
 

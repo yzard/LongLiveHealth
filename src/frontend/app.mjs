@@ -315,6 +315,7 @@ async function reportView(id) {
     heading.append(el('h3', observation.display_name || payload.raw_name), badge(observation.status));
     item.append(heading);
     if (observation.lab_test_code) item.append(el('p', `LOINC ${observation.lab_test_code}`, 'muted'));
+    if (observation.lab_test_name) item.append(el('p', `Recommended name: ${observation.lab_test_name}`, 'muted'));
     item.append(el('p', `${payload.raw_result} ${payload.raw_unit ?? ''}`, 'result-value'),
       el('p', `Standardized: ${quantity(observation.interpretation.result)}`),
       el('p', `Printed reference: ${originalReference(payload, observation.interpretation.reference)}`, 'muted'),

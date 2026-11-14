@@ -710,6 +710,69 @@ async fn rescan_replaces_results_preserves_original_and_rejects_stale_or_active_
 }
 
 #[tokio::test]
+async fn stored_results_display_loinc_long_common_name_without_remapping() {
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "loinc-names").await;
+    let report = archive(&state, "loinc-names").await;
+    let mut polys = observation_payload();
+    polys.raw_name = "POLYS (31160-5)".into();
+    polys.raw_unit = Some("%".into());
+    polys.metric_id = None;
+    let mut unknown = polys.clone();
+    unknown.raw_name = "Unknown test (9999999-9)".into();
+    state
+        .database
+        .review(
+            &user.user_id,
+            ReviewRequest {
+                new_metric: None,
+                report_id: report.clone(),
+                expected_revision: 1,
+                context: None,
+                observations: vec![polys, unknown]
+                    .into_iter()
+                    .map(|payload| ReviewItem {
+                        observation_id: None,
+                        expected_revision: None,
+                        status: "pending".into(),
+                        payload,
+                    })
+                    .collect(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let rows = state
+        .database
+        .observations(&user.user_id, &report)
+        .await
+        .unwrap();
+    let polys = rows
+        .iter()
+        .find(|row| row.lab_test_code.as_deref() == Some("31160-5"))
+        .unwrap();
+    assert_eq!(
+        polys.lab_test_name,
+        Some("Granulocytes/Leukocytes in Blood by Manual count")
+    );
+    assert_eq!(polys.payload.raw_name, "POLYS (31160-5)");
+    assert_eq!(polys.status, "pending");
+    assert!(polys.resolved_metric_id.is_none());
+    assert!(
+        polys
+            .browse_issues
+            .iter()
+            .any(|issue| issue.code == "lab_test_code_conflict")
+    );
+    let unknown = rows
+        .iter()
+        .find(|row| row.lab_test_code.as_deref() == Some("9999999-9"))
+        .unwrap();
+    assert!(unknown.lab_test_name.is_none());
+}
+
+#[tokio::test]
 async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues() {
     let (_directory, state) = fixture().await;
     let user = add_user(&state, "review-flags").await;

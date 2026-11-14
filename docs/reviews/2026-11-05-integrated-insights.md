@@ -181,3 +181,23 @@ Final Android rebuild was rechecked against the deployed API: all six detail
 screens, Back, Browse/Data switching and retained Insights scroll passed. Public
 APK SHA-256 matches the installed build artifact. Temporary Android stay-awake
 was restored to the original value (0). Desk local-llm.service is active again.
+
+## Recovery on 2026-11-14
+
+The Mac working tree contained the integrated six-card Insights dashboard and
+three-tab clients, but those changes had not been committed. Desk builds from
+`5319b28` included newer OCR work while still using the earlier five-tab UI.
+The recovered Mac state is preserved in commit `9e63bc4`, then merged with
+`5319b28`. Desk's uncommitted OCR/LOINC changes were also copied into the recovery
+without modifying Desk's active working tree.
+
+Both clients use Insights, Browse, Data, with Insights selected at launch.
+Android native tab icons use the same three-position order. The latest OCR
+report revision invalidation now refreshes Insights instead of the removed
+Trends screen. Android smoke checks reject the retired Overview/Trends tabs.
+
+Recovery verification: 72 shared Swift tests, 9 browser client tests, 4 Android
+package checks, the 69-route mobile API inventory, and an iOS Simulator build
+passed. Android package compilation and physical-device installation have not
+been performed for this recovery. The local Mac has no Rust toolchain or Docker
+runtime, so backend compilation was not rerun in this recovery session.

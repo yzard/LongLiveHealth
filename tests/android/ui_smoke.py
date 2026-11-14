@@ -89,6 +89,10 @@ def navigation():
     adb("shell", "wm", "density", "reset")
     adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
     wait_for("Insights")
+    current = labels()
+    assert all(tab in current for tab in ("Insights", "Browse", "Data")), current
+    assert "Overview" not in current and "Trends" not in current, "Retired tabs returned"
+    wait_for("Sleep")
     tap("Browse"); wait_for("Health Categories"); tap("Heart")
     wait_for("Heart rate"); tap("Heart rate"); wait_for("RANGE")
     assert sum((text or "").casefold() == "heart rate" for text in labels()) == 1, "Duplicate chart heading"
@@ -186,7 +190,7 @@ def browse_switch():
 
 
 def report_date():
-    wait_for("Overview")
+    wait_for("Insights")
     tap("Data")
     wait_for("Blood Work")
     tap("Blood Work")
@@ -336,7 +340,7 @@ def report_metric_review():
         control(scenario)
         adb("shell", "am", "force-stop", "dev.longlivehealth.android")
         adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
-        wait_for("Overview")
+        wait_for("Insights")
         wait_for("Data")
         tap("Data")
         wait_for("Blood Work")
@@ -399,7 +403,7 @@ def report_mapping_layout():
     control("test/report-urine-mapping")
     adb("shell", "am", "force-stop", "dev.longlivehealth.android")
     adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
-    wait_for("Overview")
+    wait_for("Insights")
     wait_for("Data")
     tap("Data")
     wait_for("Blood Work")
@@ -450,7 +454,7 @@ def report_status_actions(check_chart=False):
         control("test/enable-report-status-chart")
     adb("shell", "am", "force-stop", "dev.longlivehealth.android")
     adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
-    wait_for("Overview")
+    wait_for("Insights")
     if check_chart:
         tap("Browse")
         wait_for("Health Categories")
@@ -612,7 +616,7 @@ def edge_scroll():
             # Restore actions/back buttons by scrolling down.
             adb("shell", "input", "swipe", "540", "450", "540", "1400", "500")
             assert any(bounds(n)[1] < 500 for n in matches(title)), f"{title} title did not return"
-        print("PASS: all five tab navigation bars follow the same scroll policy")
+        print("PASS: all three tab navigation bars follow the same scroll policy")
     finally:
         adb("shell", "wm", "size", "reset")
         adb("shell", "wm", "density", "reset")

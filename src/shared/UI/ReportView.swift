@@ -392,6 +392,11 @@ struct ReportObservationRow: View {
                             Text("LOINC \(code)").font(.caption).foregroundStyle(.secondary)
                                 .accessibilityIdentifier("report-result-loinc")
                         }
+                        let name = observation["lab_test_name"].stringValue
+                        if !name.isEmpty {
+                            Text("Recommended name: \(name)").font(.caption).foregroundStyle(.secondary)
+                                .accessibilityIdentifier("report-result-loinc-name")
+                        }
                         Text(resultLabel).foregroundStyle(.primary)
                             .fixedSize(horizontal: false, vertical: true)
                     }.frame(maxWidth: .infinity, alignment: .leading)

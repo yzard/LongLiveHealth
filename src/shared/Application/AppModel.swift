@@ -85,7 +85,7 @@ final class AppModel {
     func request(_ path: String, body: JSONValue) async throws -> JSONValue {
         guard let client, let responseCache, let token = session?.token else { throw APIError.invalidResponse }
         let cacheable = Self.cachedReads.contains(path)
-        let reportRevision = ["browse/catalog", "metrics/history/get", "wellness/trends"].contains(path)
+        let reportRevision = ["browse/catalog", "metrics/history/get", "insights/get"].contains(path)
             ? reportDataRevision : nil
         do {
             let result = try await client.post(path, body: body)

@@ -23,6 +23,7 @@ pub mod insights;
 pub mod jobs;
 pub mod laboratory;
 mod laboratory_names;
+mod loinc;
 pub mod maintenance;
 pub mod metric_history;
 pub mod middleware;
