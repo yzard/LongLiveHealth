@@ -473,6 +473,7 @@ async fn clinical_model_requires_complete_reviewed_collection_and_explicit_resea
         .review(
             &user.user_id,
             ReviewRequest {
+                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: revision,
                 context: None,

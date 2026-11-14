@@ -31,6 +31,7 @@ async fn metric_history_preserves_three_sources_normalizes_and_isolates_users() 
             .review(
                 &alice.user_id,
                 ReviewRequest {
+                    new_metric: None,
                     report_id: report,
                     expected_revision: 1,
                     context: Some(serde_json::from_value(json!({"source_name":name})).unwrap()),
@@ -177,6 +178,7 @@ async fn report_source_rejects_empty_or_reserved_names_without_changing_revision
             .review(
                 &alice.user_id,
                 ReviewRequest {
+                    new_metric: None,
                     report_id: report.clone(),
                     expected_revision: 1,
                     observations: vec![],
@@ -215,6 +217,7 @@ async fn quantity_glucose_and_clinical_component_share_report_units_and_dates() 
         .review(
             &alice.user_id,
             ReviewRequest {
+                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: 1,
                 context: Some(serde_json::from_value(json!({"source_name":"Clinic"})).unwrap()),
@@ -281,6 +284,7 @@ async fn quantity_glucose_and_clinical_component_share_report_units_and_dates() 
         .review(
             &alice.user_id,
             ReviewRequest {
+                new_metric: None,
                 report_id: report,
                 expected_revision: 2,
                 observations: vec![],
@@ -486,7 +490,7 @@ async fn browse_discovers_clinical_items_groups_codes_and_retains_text_and_bound
         .unwrap();
     let entries = catalog["metrics"].as_array().unwrap();
     assert_eq!(entries.len(), 3); // LOINC across hospitals, local codes scoped to each source.
-    let calcium = entries.iter().find(|m| m["record_count"] == 6).unwrap();
+    let calcium = entries.iter().find(|m| m["record_count"] == 5).unwrap();
     let id = calcium["metric_id"].as_str().unwrap();
     let result = history(
         &state.database,
@@ -497,7 +501,7 @@ async fn browse_discovers_clinical_items_groups_codes_and_retains_text_and_bound
     )
     .await
     .unwrap();
-    assert_eq!(result["records"].as_array().unwrap().len(), 6);
+    assert_eq!(result["records"].as_array().unwrap().len(), 5);
     assert_eq!(result["points"].as_array().unwrap().len(), 3);
     assert!(
         result["records"]
@@ -748,6 +752,7 @@ async fn report_aliases_share_history_and_browse_without_rewriting_stored_eviden
             .review(
                 &user.user_id,
                 ReviewRequest {
+                    new_metric: None,
                     report_id: report,
                     expected_revision: 1,
                     context: Some(serde_json::from_value(json!({"source_name":source})).unwrap()),
@@ -814,6 +819,7 @@ async fn browse_unifies_sodium_sources_and_excludes_workflow_fields() {
         .review(
             &user.user_id,
             ReviewRequest {
+                new_metric: None,
                 report_id: report,
                 expected_revision: 1,
                 context: None,
@@ -947,6 +953,7 @@ async fn report_history_keeps_undated_and_non_numeric_results() {
         .review(
             &alice.user_id,
             ReviewRequest {
+                new_metric: None,
                 report_id: report,
                 expected_revision: 1,
                 context: Some(
@@ -1016,6 +1023,7 @@ async fn every_function_health_marker_is_available_in_browse_after_confirmation(
         .review(
             &user.user_id,
             longlivehealth::reports::ReviewRequest {
+                new_metric: None,
                 report_id: report,
                 expected_revision: 1,
                 context: None,
@@ -1048,4 +1056,667 @@ async fn every_function_health_marker_is_available_in_browse_after_confirmation(
     assert_eq!(globulin["points"][0]["unit"], "g/dL");
     assert_eq!(globulin["points"][0]["value"], "1");
     assert_eq!(globulin["records"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn pdf_lab_codes_and_names_share_history_without_rewriting_evidence() {
+    let (_directory, state) = fixture().await;
+    let alice = add_user(&state, "alice").await;
+    for (source, name, date, unit) in [
+        ("Portal A", "Test (11580-8)", "2026-08-01", "uIU/mL"),
+        ("Portal B", "TSH", "2026-09-01", "mIU/L"),
+    ] {
+        let report = archive(&state, "alice").await;
+        let mut payload = observation_payload();
+        payload.raw_name = name.into();
+        payload.raw_result = "1.5".into();
+        payload.raw_unit = Some(unit.into());
+        payload.sampled_at = Some(date.into());
+        payload.metric_id = None;
+        payload.source.quote = format!("{name} 1.5 {unit}");
+        let document = state
+            .database
+            .review(
+                &alice.user_id,
+                ReviewRequest {
+                    new_metric: None,
+                    report_id: report,
+                    expected_revision: 1,
+                    context: Some(serde_json::from_value(json!({"source_name": source})).unwrap()),
+                    observations: vec![ReviewItem {
+                        observation_id: None,
+                        expected_revision: None,
+                        status: "confirmed".into(),
+                        payload,
+                    }],
+                },
+            )
+            .await
+            .unwrap();
+        let row = &document["observations"][0];
+        assert_eq!(row["display_name"], "Thyroid-stimulating hormone");
+        assert_eq!(row["payload"]["raw_name"], name);
+        assert!(
+            row["payload"]["source"]["quote"]
+                .as_str()
+                .unwrap()
+                .starts_with(name)
+        );
+        if source == "Portal A" {
+            assert_eq!(row["lab_test_code"], "11580-8");
+        }
+    }
+    let result = history(
+        &state.database,
+        &alice.user_id,
+        HistoryRequest {
+            metric_id: "tsh".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let points = result["points"].as_array().unwrap();
+    assert_eq!(points.len(), 2);
+    assert_eq!(points[0]["source_name"], "Portal A");
+    assert_eq!(points[1]["source_name"], "Portal B");
+    assert_eq!(points[0]["unit"], "mIU/L");
+    assert_eq!(points[1]["unit"], "mIU/L");
+}
+
+#[test]
+fn numeric_suffixes_preserve_qualifiers_and_reject_code_conflicts() {
+    use longlivehealth::laboratory::{infer_metric, split_test_code};
+    assert_eq!(
+        split_test_code("TSH (3rd Generation) (11580-8)"),
+        ("TSH (3rd Generation)", Some("11580-8"))
+    );
+    assert_eq!(
+        split_test_code("Vitamin D (25-OH)"),
+        ("Vitamin D (25-OH)", None)
+    );
+    assert_eq!(
+        infer_metric("TSH (3rd Generation) (11580-8)", Some("mIU/L")),
+        Some("tsh")
+    );
+    assert_eq!(infer_metric("Glucose (11580-8)", Some("mg/dL")), None);
+    assert_eq!(infer_metric("Test (11580-8)", Some("mg/dL")), None);
+    assert_eq!(infer_metric("Urine TSH (11580-8)", Some("mIU/L")), None);
+}
+
+#[tokio::test]
+async fn browse_hides_drafts_but_reports_keep_review_issues() {
+    let (_directory, state) = fixture().await;
+    let alice = add_user(&state, "alice").await;
+    let bob = add_user(&state, "bob").await;
+    let report = archive(&state, "alice").await;
+    let mut items = Vec::new();
+    for (name, note) in [
+        ("Unlisted test (99999-9)", None),
+        ("TSH (11580-8)", Some("The code is difficult to read.")),
+        ("Glucose (11580-8)", None),
+        ("Unreadable label (11580-8)", None),
+    ] {
+        let mut payload = observation_payload();
+        payload.raw_name = name.into();
+        payload.raw_unit = Some("mIU/L".into());
+        payload.metric_id = None;
+        payload.ocr_mapping_note = note.map(str::to_owned);
+        items.push(ReviewItem {
+            observation_id: None,
+            expected_revision: None,
+            status: "pending".into(),
+            payload,
+        });
+    }
+    let response = state
+        .database
+        .review(
+            &alice.user_id,
+            ReviewRequest {
+                new_metric: None,
+                report_id: report.clone(),
+                expected_revision: 1,
+                context: None,
+                observations: items,
+            },
+        )
+        .await
+        .unwrap();
+    let observations = response["observations"].as_array().unwrap();
+    let find = |name: &str| {
+        observations
+            .iter()
+            .find(|row| row["payload"]["raw_name"] == name)
+            .unwrap()
+    };
+    let unknown = find("Unlisted test (99999-9)");
+    let uncertain = find("TSH (11580-8)");
+    assert_eq!(unknown["browse_issues"][0]["code"], "unmapped_metric");
+    assert_eq!(
+        uncertain["browse_issues"][0]["code"],
+        "ocr_mapping_uncertain"
+    );
+    assert!(
+        uncertain["browse_issues"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("difficult to read")
+    );
+    assert_eq!(
+        find("Glucose (11580-8)")["browse_issues"][0]["code"],
+        "lab_test_code_conflict"
+    );
+    let possible = find("Unreadable label (11580-8)");
+    assert_eq!(
+        possible["browse_issues"][0]["code"],
+        "metric_identity_uncertain"
+    );
+    assert!(
+        possible["browse_issues"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Thyroid-stimulating hormone")
+    );
+    let catalog = longlivehealth::browse_catalog::get(&state.database, &alice.user_id)
+        .await
+        .unwrap();
+    assert!(catalog["entries"].as_array().unwrap().is_empty());
+    let id = uncertain["observation_id"].as_str().unwrap();
+    let metric_id = format!("report-review:{id}");
+    for user in [&alice, &bob] {
+        assert!(matches!(
+            history(
+                &state.database,
+                &user.user_id,
+                HistoryRequest {
+                    metric_id: metric_id.clone()
+                },
+            )
+            .await,
+            Err(longlivehealth::error::AppError::NotFound)
+        ));
+    }
+
+    let mut payload: longlivehealth::reports::ObservationPayload =
+        serde_json::from_value(uncertain["payload"].clone()).unwrap();
+    payload.metric_id = Some("tsh".into());
+    let confirmed = state
+        .database
+        .review(
+            &alice.user_id,
+            ReviewRequest {
+                new_metric: None,
+                report_id: report.clone(),
+                expected_revision: response["report"]["revision"].as_i64().unwrap(),
+                context: None,
+                observations: vec![ReviewItem {
+                    observation_id: Some(id.into()),
+                    expected_revision: Some(1),
+                    status: "confirmed".into(),
+                    payload: payload.clone(),
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        history(
+            &state.database,
+            &alice.user_id,
+            HistoryRequest { metric_id }
+        )
+        .await
+        .is_err()
+    );
+    let mapped = history(
+        &state.database,
+        &alice.user_id,
+        HistoryRequest {
+            metric_id: "tsh".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(mapped["points"].as_array().unwrap().len(), 1);
+    let catalog = longlivehealth::browse_catalog::get(&state.database, &alice.user_id)
+        .await
+        .unwrap();
+    assert_eq!(catalog["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(catalog["entries"][0]["kind"], "tsh");
+    state
+        .database
+        .review(
+            &alice.user_id,
+            ReviewRequest {
+                new_metric: None,
+                report_id: report,
+                expected_revision: confirmed["report"]["revision"].as_i64().unwrap(),
+                context: None,
+                observations: vec![ReviewItem {
+                    observation_id: Some(id.into()),
+                    expected_revision: Some(2),
+                    status: "pending".into(),
+                    payload,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    let catalog = longlivehealth::browse_catalog::get(&state.database, &alice.user_id)
+        .await
+        .unwrap();
+    assert!(catalog["entries"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn browse_unifies_total_vitamin_d_without_combining_its_fractions() {
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "vitamin-d-browse").await;
+    let connection = state
+        .database
+        .create_connection(
+            &user.user_id,
+            ConnectionRequest {
+                platform: "apple_health".into(),
+                installation_id: uuid::Uuid::new_v4().to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let mut records = Vec::new();
+    for (id, name, code, status, quest, value, unit) in [
+        (
+            "total",
+            "Vitamin D,25-OH, Total, IA",
+            "62292-8",
+            "final",
+            true,
+            20,
+            "ng/mL",
+        ),
+        (
+            "legacy-quest",
+            "Vitamin D,25-OH, Total, IA",
+            "1989-3",
+            "final",
+            true,
+            20,
+            "ng/mL",
+        ),
+        (
+            "total-molar",
+            "25(OH)D",
+            "68438-1",
+            "final",
+            false,
+            60,
+            "nmol/L",
+        ),
+        (
+            "d3",
+            "25-hydroxyvitamin D3",
+            "1989-3",
+            "final",
+            false,
+            20,
+            "ng/mL",
+        ),
+        (
+            "d2",
+            "25-hydroxyvitamin D2",
+            "49054-0",
+            "final",
+            false,
+            20,
+            "ng/mL",
+        ),
+        (
+            "preliminary",
+            "Unverified Test",
+            "99999-8",
+            "preliminary",
+            false,
+            20,
+            "ng/mL",
+        ),
+    ] {
+        let mut codings = vec![json!({"system":"http://loinc.org","code":code})];
+        if quest {
+            codings.push(json!({"system":"urn:oid:1.2.840.114350.1.13.535.2.7.5.737384.334307","code":"55182715"}));
+        }
+        let r = json!({"resourceType":"Observation","status":status,"effectiveDateTime":"2026-08-02T12:00:00Z","code":{"text":name,"coding":codings},"valueQuantity":{"value":value,"code":unit}});
+        records.push(HealthRecordInput {
+            record_id:id.into(),source_id:"hospital".into(),record_type:"HKClinicalTypeIdentifierLabResultRecord".into(),
+            start_at:1785672000,end_at:1785672000,version:1,deleted:false,
+            payload:json!({"source_name":"Hospital","fhir":{"data_base64":STANDARD.encode(serde_json::to_vec(&r).unwrap())}}),
+        });
+    }
+    state
+        .database
+        .sync_health(
+            &user.user_id,
+            SyncRequest {
+                connection_id: connection.connection_id,
+                batch_id: uuid::Uuid::new_v4().to_string(),
+                record_type: "HKClinicalTypeIdentifierLabResultRecord".into(),
+                coverage_status: "observed".into(),
+                records,
+            },
+        )
+        .await
+        .unwrap();
+    for (source, name, expected) in [
+        ("Function Health", "Vitamin D", "vitamin_d_25_oh_total"),
+        ("Other Clinic", "Vitamin D", "vitamin_d_unspecified"),
+        ("Other Clinic", "25 OH Vitamin D", "vitamin_d_25_oh_total"),
+        (
+            "Other Clinic",
+            "25-hydroxyvitamin D",
+            "vitamin_d_25_oh_total",
+        ),
+    ] {
+        let mut payload = observation_payload();
+        payload.raw_name = name.into();
+        payload.raw_unit = Some("ng/mL".into());
+        payload.raw_result = "22".into();
+        payload.metric_id = None;
+        let report = archive(&state, "vitamin-d-browse").await;
+        let response = state
+            .database
+            .review(
+                &user.user_id,
+                ReviewRequest {
+                    new_metric: None,
+                    report_id: report,
+                    expected_revision: 1,
+                    context: Some(serde_json::from_value(json!({"source_name":source})).unwrap()),
+                    observations: vec![ReviewItem {
+                        observation_id: None,
+                        expected_revision: None,
+                        status: "confirmed".into(),
+                        payload,
+                    }],
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(response["observations"][0]["resolved_metric_id"], expected);
+    }
+    let catalog = longlivehealth::browse_catalog::get(&state.database, &user.user_id)
+        .await
+        .unwrap();
+    let entries = catalog["entries"].as_array().unwrap();
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|entry| entry["presentation"] == "lab")
+            .count(),
+        4,
+        "{entries:?}"
+    );
+    for (id, count) in [
+        ("vitamin_d_25_oh_total", 5),
+        ("vitamin_d_25_oh_d2", 1),
+        ("vitamin_d_25_oh_d3", 1),
+        ("vitamin_d_unspecified", 1),
+    ] {
+        assert_eq!(entries.iter().filter(|e| e["kind"] == id).count(), 1);
+        let result = history(
+            &state.database,
+            &user.user_id,
+            HistoryRequest {
+                metric_id: id.into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(result["points"].as_array().unwrap().len(), count, "{id}");
+        assert_eq!(result["records"].as_array().unwrap().len(), count, "{id}");
+        if id == "vitamin_d_25_oh_total" {
+            assert!(result["points"].as_array().unwrap().iter().any(|point| {
+                point["value"] == "24"
+                    && point["unit"] == "ng/mL"
+                    && point["original"]["clinical_observation"]["valueQuantity"]["code"]
+                        == "nmol/L"
+            }));
+        }
+    }
+}
+
+#[test]
+fn equivalent_vitamin_d_names_preserve_analyte_and_specimen_qualifiers() {
+    use longlivehealth::laboratory::infer_metric;
+    for label in [
+        "25 OH",
+        "25 OH Vitamin D",
+        "25‑OH Vit D",
+        "25-hydroxy vitamin D",
+        "25-hydroxyvitamin D",
+        "25(OH)D",
+        "Vitamin D, 25-Hydroxy, Total (62292-8)",
+        "25(OH)D (68438-1)",
+    ] {
+        assert_eq!(
+            infer_metric(label, Some("ng/mL")),
+            Some("vitamin_d_25_oh_total"),
+            "{label}"
+        );
+    }
+    assert_eq!(
+        infer_metric("25(OH)D2", Some("ng/mL")),
+        Some("vitamin_d_25_oh_d2")
+    );
+    assert_eq!(
+        infer_metric("25(OH)D3", Some("ng/mL")),
+        Some("vitamin_d_25_oh_d3")
+    );
+    for label in [
+        "1,25-dihydroxyvitamin D",
+        "25-hydroxyvitamin D, urine",
+        "25(OH)D (1989-3)",
+    ] {
+        assert_eq!(infer_metric(label, Some("ng/mL")), None, "{label}");
+    }
+}
+
+#[test]
+fn catalog_normalizes_reviewed_report_aliases_and_units() {
+    use longlivehealth::laboratory::{infer_metric, test_code_conflicts};
+    for (name, unit, id) in [
+        (
+            "IG, ABS. COUNT (53115-2)",
+            "x10(3)/uL",
+            "immature_granulocyte_count",
+        ),
+        (
+            "Imm Gran Abs (51584-1)",
+            "10^9/L",
+            "immature_granulocyte_count",
+        ),
+        (
+            "Immature Granulocytes (71695-1)",
+            "Percent",
+            "immature_granulocyte_percent",
+        ),
+        ("Imm Gran % (38518-7)", "%", "immature_granulocyte_percent"),
+        ("Absolute NRBC (771-6)", "x10(3)/uL", "nrbc_count"),
+        ("NRBC Count (30392-5)", "x10E3/uL", "nrbc_count"),
+        ("NRBC % (18309-5)", "/100WBC", "nrbc_per_100_wbc"),
+        (
+            "Nucleated RBC Auto (58413-6)",
+            "/100 WBC's",
+            "nrbc_per_100_wbc",
+        ),
+        ("Thyroxine(T4) (3026-2)", "ug/dL", "total_t4"),
+        ("Thyroxine (T4), Total (83119-8)", "µg/dL", "total_t4"),
+        ("T4, Free (3024-7)", "ng/dL", "free_t4"),
+        ("LD (14804-9)", "U/L", "ldh"),
+        ("LDH", "U/L", "ldh"),
+        (
+            "VLDL Cholesterol, Calc. (13458-5)",
+            "mg/dL",
+            "vldl_cholesterol",
+        ),
+        ("VLDL, CALCULATED", "mg/dL", "vldl_cholesterol"),
+        ("Chol/HDL Ratio (9830-1)", "Ratio", "cholesterol_hdl_ratio"),
+        ("LDL/HDL Ratio (11054-4)", "1", "ldl_hdl_ratio"),
+        ("Trig/HDL Ratio (44733-4)", "1", "triglyceride_hdl_ratio"),
+        (
+            "HDL as % of Cholesterol (2095-8)",
+            "%",
+            "hdl_percent_total_cholesterol",
+        ),
+        ("Alk Phos (6768-6)", "U/L", "alp"),
+        ("GGTP (2324-2)", "U/L", "ggt"),
+        ("Urate (3084-1)", "mg/dL", "uric_acid"),
+        ("ANTI-TPO Ab (8099-4)", "[IU]/mL", "tpo_antibodies"),
+        ("TSH (3016-3)", "u[IU]/mL", "tsh"),
+        ("Protein (20454-5)", "1", "urine_protein"),
+        ("Glucose (25428-4)", "1", "urine_glucose"),
+    ] {
+        assert_eq!(infer_metric(name, Some(unit)), Some(id), "{name} {unit}");
+    }
+    for (name, unit) in [
+        ("Free T4 (83119-8)", "ng/dL"),
+        ("NRBC Count (18309-5)", "/100WBC"),
+        ("ANTI-THYROGLOBULIN (15210-8)", "[IU]/mL"),
+        ("ANTI-TPO Ab (32786-6)", "[IU]/mL"),
+        ("Neutrophils (31160-5)", "%"),
+        ("Monocytes (51384-6)", "%"),
+    ] {
+        assert_eq!(infer_metric(name, Some(unit)), None, "{name}");
+        assert!(test_code_conflicts(name), "{name}");
+    }
+    assert_eq!(
+        infer_metric("Cast, Hyaline, Urine (50231-0)", Some("/[LPF]")),
+        None
+    );
+}
+
+#[tokio::test]
+async fn blood_count_aliases_join_pdf_and_clinical_history() {
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "blood-count-aliases").await;
+    let connection = state
+        .database
+        .create_connection(
+            &user.user_id,
+            ConnectionRequest {
+                platform: "apple_health".into(),
+                installation_id: uuid::Uuid::new_v4().to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let tests = [
+        (
+            "Imm Gran Abs",
+            "51584-1",
+            "IG, ABS. COUNT (53115-2)",
+            "x10(3)/uL",
+            "10^9/L",
+            "immature_granulocyte_count",
+        ),
+        (
+            "Nucleated RBC Auto",
+            "58413-6",
+            "NRBC % (18309-5)",
+            "/100WBC",
+            "/100 WBC's",
+            "nrbc_per_100_wbc",
+        ),
+    ];
+    let report = archive(&state, "blood-count-aliases").await;
+    let mut records = Vec::new();
+    let mut observations = Vec::new();
+    for (clinical, code, printed, unit, standard_unit, id) in tests {
+        let resource = json!({"resourceType":"Observation","status":"final","effectiveDateTime":"2026-08-02T12:00:00Z",
+            "code":{"text":clinical,"coding":[{"system":"http://loinc.org","code":code}]},
+            "valueQuantity":{"value":2,"code":standard_unit}});
+        records.push(HealthRecordInput {
+            record_id:id.into(),source_id:"hospital".into(),record_type:"HKClinicalTypeIdentifierLabResultRecord".into(),
+            start_at:1785672000,end_at:1785672000,version:1,deleted:false,
+            payload:json!({"fhir":{"data_base64":STANDARD.encode(serde_json::to_vec(&resource).unwrap())}}),
+        });
+        let mut payload = observation_payload();
+        payload.metric_id = None;
+        payload.raw_name = printed.into();
+        payload.raw_result = "1".into();
+        payload.raw_unit = Some(unit.into());
+        observations.push(ReviewItem {
+            observation_id: None,
+            expected_revision: None,
+            status: "confirmed".into(),
+            payload,
+        });
+    }
+    state
+        .database
+        .sync_health(
+            &user.user_id,
+            SyncRequest {
+                connection_id: connection.connection_id,
+                batch_id: uuid::Uuid::new_v4().to_string(),
+                record_type: "HKClinicalTypeIdentifierLabResultRecord".into(),
+                coverage_status: "observed".into(),
+                records,
+            },
+        )
+        .await
+        .unwrap();
+    state
+        .database
+        .review(
+            &user.user_id,
+            ReviewRequest {
+                new_metric: None,
+                report_id: report,
+                expected_revision: 1,
+                context: None,
+                observations,
+            },
+        )
+        .await
+        .unwrap();
+
+    let browse = longlivehealth::browse_catalog::get(&state.database, &user.user_id)
+        .await
+        .unwrap();
+    let entries = browse["entries"].as_array().unwrap();
+    for (clinical, _, printed, unit, standard_unit, id) in tests {
+        assert_eq!(
+            entries.iter().filter(|entry| entry["kind"] == id).count(),
+            1
+        );
+        let entry = entries.iter().find(|entry| entry["kind"] == id).unwrap();
+        assert!(
+            entry["aliases"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(clinical))
+        );
+        let result = history(
+            &state.database,
+            &user.user_id,
+            HistoryRequest {
+                metric_id: id.into(),
+            },
+        )
+        .await
+        .unwrap();
+        let points = result["points"].as_array().unwrap();
+        assert_eq!(points.len(), 2, "{id}");
+        assert!(points.iter().all(|point| point["unit"] == standard_unit));
+        assert!(
+            points
+                .iter()
+                .any(|point| point["original"]["raw_name"] == printed
+                    && point["original"]["raw_unit"] == unit)
+        );
+        assert!(
+            points
+                .iter()
+                .any(|point| point["original"]["clinical_observation"]["code"]["text"] == clinical)
+        );
+    }
 }

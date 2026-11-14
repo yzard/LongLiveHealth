@@ -30,6 +30,12 @@ pub(crate) fn groups(records: &[Value]) -> BTreeMap<String, Group> {
         if resource["resourceType"] != "Observation" {
             continue;
         }
+        if !matches!(
+            resource["status"].as_str(),
+            Some("final" | "amended" | "corrected")
+        ) {
+            continue;
+        }
         let candidates = std::iter::once((&resource, "root".to_owned())).chain(
             resource["component"]
                 .as_array()
@@ -73,10 +79,6 @@ pub(crate) fn groups(records: &[Value]) -> BTreeMap<String, Group> {
                 record["record_id"].as_str().unwrap_or("")
             );
             let mut entry = json!({"point_id":point_id,"metric_id":metric,"source_name":provider,"source_id":record["source_id"],"source_key":format!("apple_health:{}", record["source_id"].as_str().unwrap_or("")),"method":resource["method"],"specimen":resource["specimen"],"channel":"Apple Health","sampled_at":date,"timestamp":timestamp,"display_value":display_value(candidate),"unit":unit,"status":resource["status"],"original":candidate});
-            let final_result = matches!(
-                resource["status"].as_str(),
-                Some("final" | "amended" | "corrected")
-            );
             let valid_system = quantity["system"]
                 .as_str()
                 .is_none_or(|s| s == "http://unitsofmeasure.org");
@@ -98,8 +100,7 @@ pub(crate) fn groups(records: &[Value]) -> BTreeMap<String, Group> {
             if unit.is_empty() && numeric.is_some() {
                 entry["unit"] = json!("Not reported");
             }
-            if final_result
-                && valid_system
+            if valid_system
                 && quantity["comparator"].is_null()
                 && timestamp.is_some()
                 && let Some(value) = numeric
@@ -128,6 +129,11 @@ pub(crate) fn groups(records: &[Value]) -> BTreeMap<String, Group> {
                             bounding_box: None,
                         },
                         notes: None,
+                        ocr_mapping_note: None,
+                        ocr_metric_candidate: None,
+                        ocr_section_heading: None,
+                        ocr_new_metric: None,
+                        ocr_normalization: None,
                     })
                     .filter(|_| {
                         metric != "hba1c" || crate::laboratory::canonical_unit(unit) == Some("%")
@@ -148,6 +154,9 @@ pub(crate) fn groups(records: &[Value]) -> BTreeMap<String, Group> {
                     entry["plotted"] = json!(true);
                 }
             }
+            if metric == "vitamin_d_25_oh_total" && quest_total_vitamin_d(candidate, record) {
+                entry["quest_total_vitamin_d"] = json!(true);
+            }
             group.records.push(entry);
         }
     }
@@ -163,6 +172,11 @@ pub(crate) fn groups(records: &[Value]) -> BTreeMap<String, Group> {
         let mut unique: Vec<Value> = Vec::new();
         for mut record in group.records.drain(..) {
             // Display-only coalescing. Preserve source, status, method and specimen boundaries.
+            let quest_total = record
+                .as_object_mut()
+                .expect("clinical record")
+                .remove("quest_total_vitamin_d")
+                .is_some();
             let key = if record["plotted"] == true {
                 Some(
                     json!([
@@ -180,10 +194,22 @@ pub(crate) fn groups(records: &[Value]) -> BTreeMap<String, Group> {
                             .as_array()
                             .into_iter()
                             .flatten()
-                            .filter_map(|coding| Some((
-                                coding["system"].as_str()?,
-                                coding["code"].as_str()?
-                            )))
+                            .filter_map(|coding| {
+                                let system = coding["system"].as_str()?;
+                                let code = coding["code"].as_str()?;
+                                Some(
+                                    if quest_total
+                                        && matches!(
+                                            system,
+                                            "http://loinc.org" | "https://loinc.org"
+                                        )
+                                    {
+                                        (system, "62292-8")
+                                    } else {
+                                        (system, code)
+                                    },
+                                )
+                            })
                             .collect::<BTreeSet<_>>()
                     ])
                     .to_string(),
@@ -272,11 +298,14 @@ fn identity(candidate: &Value, record: &Value, suffix: &str) -> (String, String)
         })
         .unwrap_or("Unnamed lab result")
         .to_owned();
+    if quest_total_vitamin_d(candidate, record) {
+        return ("vitamin_d_25_oh_total".into(), name);
+    }
     if loinc.len() == 1
         && let Some(metric) = loinc
             .iter()
             .next()
-            .and_then(|c| crate::metric_history::loinc_metric(c))
+            .and_then(|c| crate::laboratory::loinc_metric(c))
     {
         return (metric.into(), name);
     }
@@ -284,18 +313,11 @@ fn identity(candidate: &Value, record: &Value, suffix: &str) -> (String, String)
     // Prefer reviewed titles for codes whose source text omits the analyte/formula.
     let name = if loinc.len() == 1 {
         match loinc.iter().next().copied().unwrap_or("") {
-            "1989-3" => "25-hydroxyvitamin D3",
-            "62292-8" => "Total 25-hydroxyvitamin D (D2 + D3)",
             "88293-6" => "eGFR (historical CKD-EPI, Black population adjustment)",
             "88294-4" => "eGFR (historical CKD-EPI, non-Black population adjustment)",
             "77147-7" => "eGFR (historical MDRD)",
             "69405-9" => "eGFR (formula not specified)",
-            "3013-0" => "Thyroglobulin",
-            "2731-8" => "Intact parathyroid hormone",
-            "19123-9" => "Magnesium (serum or plasma)",
-            "2777-1" => "Phosphate",
             "33037-3" => "Anion gap",
-            "3097-3" => "BUN / creatinine ratio",
             "1968-7" => "Direct bilirubin",
             "1971-1" => "Indirect bilirubin",
             _ => &name,
@@ -328,6 +350,38 @@ fn identity(candidate: &Value, record: &Value, suffix: &str) -> (String, String)
         name
     };
     (metric, name)
+}
+
+// Quest's total 25(OH)D result code 55182715 is sometimes exported with
+// the D3-only LOINC. A known portal also exports the exact assay name alone.
+pub(crate) fn quest_total_vitamin_d(candidate: &Value, record: &Value) -> bool {
+    let Some(codes) = candidate["code"]["coding"].as_array() else {
+        return false;
+    };
+    let loinc: BTreeSet<_> = codes
+        .iter()
+        .filter(|coding| {
+            matches!(
+                coding["system"].as_str(),
+                Some("http://loinc.org" | "https://loinc.org")
+            )
+        })
+        .filter_map(|coding| coding["code"].as_str())
+        .collect();
+    loinc == BTreeSet::from(["1989-3"])
+        && candidate["code"]["text"]
+            .as_str()
+            .is_some_and(|name| crate::laboratory_names::key(name) == "vitamind25ohtotalia")
+        && (codes.iter().any(|coding| {
+            coding["system"] == "urn:oid:1.2.840.114350.1.13.535.2.7.5.737384.334307"
+                && coding["code"] == "55182715"
+        }) || (record["payload"]["source_name"] == "NewYork-Presbyterian"
+            && codes.len() == 1
+            && candidate["valueQuantity"]["code"]
+                .as_str()
+                .or_else(|| candidate["valueQuantity"]["unit"].as_str())
+                .and_then(crate::laboratory::canonical_unit)
+                == Some("ng/mL")))
 }
 
 fn display_value(candidate: &Value) -> String {

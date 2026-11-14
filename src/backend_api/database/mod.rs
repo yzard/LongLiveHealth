@@ -80,6 +80,10 @@ impl Database {
             sqlx::raw_sql(include_str!("schema.sql"))
                 .execute(&mut *transaction)
                 .await?;
+        } else {
+            sqlx::query(queries::CREATE_CUSTOM_LAB_METRICS)
+                .execute(&mut *transaction)
+                .await?;
         }
         sqlx::query(queries::SET_SCHEMA_VERSION)
             .execute(&mut *transaction)

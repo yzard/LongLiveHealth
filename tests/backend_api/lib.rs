@@ -65,6 +65,7 @@ pub async fn confirm(state: &AppState, user_id: &str, report_id: &str) -> String
         .review(
             user_id,
             longlivehealth::reports::ReviewRequest {
+                new_metric: None,
                 report_id: report_id.into(),
                 expected_revision: report.revision,
                 context: None,

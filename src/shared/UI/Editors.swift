@@ -4,57 +4,191 @@ struct ObservationEditor: View {
     let observation: JSONValue
     let metrics: [JSONValue]
     let pageCount: Int
-    let save: (JSONValue) async throws -> Void
+    let save: (JSONValue, JSONValue) async throws -> Void
     @State var payload: JSONValue
+    @State var printedName: String
+    @State var loincCode: String
+    @State var choosingMetric: Bool
+    @State var creatingMetric = false
+    @State var usesResolvedMapping = true
+    @State var newMetricName: String
+    @State var newMetricUnit: String
     @State var status: String
     @State var saving = false
     @State var error: String?
     @Environment(\.dismiss) var dismiss
-    init(observation: JSONValue, metrics: [JSONValue], pageCount: Int, save: @escaping (JSONValue) async throws -> Void) {
+    init(observation: JSONValue, metrics: [JSONValue], pageCount: Int, choosingMetric: Bool, save: @escaping (JSONValue, JSONValue) async throws -> Void) {
         self.observation = observation; self.metrics = metrics; self.pageCount = pageCount; self.save = save
         _payload = State(initialValue: observation == .null ? .object(["source": .object(["page": .number(1), "quote": .string("")])]) : observation["payload"])
+        let code = observation["lab_test_code"].stringValue
+        _printedName = State(initialValue: LaboratoryPresentation.printedName(observation["payload"]["raw_name"].stringValue, code: code))
+        _loincCode = State(initialValue: code)
+        _choosingMetric = State(initialValue: choosingMetric)
+        _newMetricName = State(initialValue: observation["payload"]["ocr_new_metric"]["name"].stringValue.isEmpty ? laboratoryResultName(observation) : observation["payload"]["ocr_new_metric"]["name"].stringValue)
+        _newMetricUnit = State(initialValue: observation["payload"]["ocr_new_metric"] == .null ? observation["payload"]["raw_unit"].stringValue : observation["payload"]["ocr_new_metric"]["standard_unit"].stringValue)
         _status = State(initialValue: observation["status"].stringValue.isEmpty ? "pending" : observation["status"].stringValue)
     }
     var body: some View {
         NavigationStack {
             Form {
-                Section("As printed on the report") {
-                    field("Name", "raw_name"); field("Result, including < or >", "raw_result"); field("Unit", "raw_unit")
-                    field("Reference range", "reference_range"); field("Report flag", "report_flag")
-                    field("Collection date: YYYY-MM-DD or ISO timestamp", "sampled_at")
+                if choosingMetric {
+                    metricOptions
+                } else {
+                    reviewSections
                 }
-                Section("Comparison") {
-                    SelectionPicker(title: "Metric", selection: text("metric_id"), placeholder: "Automatic from report name", choices: metrics.map { MenuChoice(id: $0["metric_id"].stringValue, title: $0["name"].stringValue) })
-                    if payload["metric_id"] == .null,
-                       let match = metrics.first(where: { $0["metric_id"] == observation["resolved_metric_id"] }) {
-                        Text("Matched metric: \(match["name"].stringValue)").font(.caption)
-                    }
-                    InfoHelp(title: "Metric mapping", message: "Check the printed test, value and unit before mapping. The server handles supported unit conversions; unknown units and bounded or text results remain in the archive without an exact numeric trend.")
-                }
-                Section("Source") {
-                    Stepper("Page \(Int(payload["source"]["page"].numberValue ?? 1))", value: Binding(get: { Int(payload["source"]["page"].numberValue ?? 1) }, set: { payload["source"]["page"] = .number(Double($0)) }), in: 1...max(1, pageCount))
-                    TextField("Exact source text", text: Binding(get: { payload["source"]["quote"].stringValue }, set: { payload["source"]["quote"] = .string($0) }), axis: .vertical)
-                    field("Your notes", "notes")
-                }
-                Section("Review decision") {
-                    Picker("Status", selection: $status) { Text("Pending").tag("pending"); Text("Confirmed").tag("confirmed"); Text("Rejected").tag("rejected") }
-                    InfoHelp(title: "Review decision", message: "Confirm after checking the original report. Each save retains the previous revision.")
-                }
-                if let error { Section { Text(error).foregroundStyle(.red) } }
-            }.mobileNavigationTitle(observation == .null ? "Add result" : "Review result")
+            }.mobileNavigationTitle(choosingMetric ? "Choose a Browse metric" : observation == .null ? "Add result" : "Review result")
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }
-                    ToolbarItem(placement: .confirmationAction) { Button("Save") { Task {
-                        saving = true; defer { saving = false }
-                        do {
-                            try await save(.object(["observation_id": observation["observation_id"], "expected_revision": observation["revision"], "status": .string(status), "payload": payload]))
-                            dismiss()
-                        } catch { self.error = error.localizedDescription }
-                    } }.disabled(saving || payload["raw_name"].stringValue.isEmpty || payload["raw_result"].stringValue.isEmpty) }
+                    if !choosingMetric {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Save") { Task { await submit() } }.disabled(saveDisabled)
+                        }
+                    }
                 }.interactiveDismissDisabled()
         }
     }
-    private func text(_ key: String) -> Binding<String> { Binding(get: { payload[key].stringValue }, set: { payload[key] = ["raw_name", "raw_result"].contains(key) ? .string($0) : .optional($0) }) }
+    private var saveDisabled: Bool {
+        saving || printedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || payload["raw_result"].stringValue.isEmpty
+            || (creatingMetric && (newMetricName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || status == "rejected"))
+    }
+
+    private func submit() async {
+        saving = true
+        defer { saving = false }
+        do {
+            let metric: JSONValue = creatingMetric
+                ? .object(["name": .string(newMetricName), "standard_unit": .string(newMetricUnit)])
+                : .null
+            let originalCode = observation["lab_test_code"].stringValue
+            let originalName = LaboratoryPresentation.printedName(payload["raw_name"].stringValue, code: originalCode)
+            var reviewedPayload = payload
+            if printedName != originalName || loincCode != originalCode {
+                let code = loincCode.trimmingCharacters(in: .whitespacesAndNewlines)
+                reviewedPayload["raw_name"] = .string(code.isEmpty ? printedName : "\(printedName) (\(code))")
+            }
+            let change: JSONValue = .object([
+                "observation_id": observation["observation_id"],
+                "expected_revision": observation["revision"],
+                "status": .string(status),
+                "payload": reviewedPayload,
+            ])
+            try await save(change, metric)
+            dismiss()
+        } catch { self.error = error.localizedDescription }
+    }
+
+    @ViewBuilder private var reviewSections: some View {
+        Section("Mapping") {
+            if creatingMetric {
+                TextField("Metric name", text: $newMetricName)
+                TextField("Standard unit", text: $newMetricUnit)
+                Button("Choose an existing metric") {
+                    creatingMetric = false
+                    choosingMetric = true
+                }
+            } else {
+                SelectionPicker(title: "Metric mapping", selection: mapping, placeholder: "Unmapped",
+                    choices: metrics.map { MenuChoice(id: $0["metric_id"].stringValue, title: $0["name"].stringValue) }
+                        .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending })
+            }
+        }
+        Section("As printed on the report") {
+            TextField("Name", text: $printedName, axis: .vertical).autocorrectionDisabled()
+            if !observation["lab_test_code"].stringValue.isEmpty {
+                TextField("LOINC code", text: $loincCode).autocorrectionDisabled()
+            }
+            field("Result, including < or >", "raw_result"); field("Unit", "raw_unit")
+            field("Reference range", "reference_range"); field("Report flag", "report_flag")
+            field("Collection date: YYYY-MM-DD or ISO timestamp", "sampled_at")
+        }
+        Section("Source") {
+            Stepper("Page \(Int(payload["source"]["page"].numberValue ?? 1))", value: Binding(get: { Int(payload["source"]["page"].numberValue ?? 1) }, set: { payload["source"]["page"] = .number(Double($0)) }), in: 1...max(1, pageCount))
+            TextField("Exact source text", text: Binding(get: { payload["source"]["quote"].stringValue }, set: { payload["source"]["quote"] = .string($0) }), axis: .vertical)
+            field("Your notes", "notes")
+        }
+        Section {
+            Picker("Review decision status", selection: $status) {
+                Text("Pending").tag("pending")
+                Text("Confirmed").tag("confirmed")
+                Text("Rejected").tag("rejected")
+            }
+        }
+        if let error { Section { Text(error).foregroundStyle(.red) } }
+    }
+
+    @ViewBuilder private var metricOptions: some View {
+        Section("As printed on the report") {
+            Text(printedName)
+            if !loincCode.isEmpty {
+                Text("LOINC \(loincCode)").font(.caption).foregroundStyle(.secondary)
+            }
+            Text([payload["raw_result"].stringValue, payload["raw_unit"].stringValue]
+                .filter { !$0.isEmpty }.joined(separator: " "))
+            let messages = observation["browse_issues"].arrayValue
+                .filter { $0["scope"] == .string("browse") }
+                .map { $0["message"].stringValue }
+            if !messages.isEmpty {
+                Text(messages.joined(separator: "\n")).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        Section {
+            Button("Create new metric") {
+                payload["metric_id"] = .null
+                usesResolvedMapping = false
+                creatingMetric = true
+                choosingMetric = false
+            }.accessibilityIdentifier("create-browse-metric")
+            let proposal = observation["payload"]["ocr_new_metric"]
+            if proposal != .null {
+                let proposed = [proposal["name"].stringValue, proposal["standard_unit"].stringValue]
+                    .filter { !$0.isEmpty }.joined(separator: " · ")
+                Text("OCR suggestion: \(proposed)").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        Section("Closest matches") {
+            let suggestions = observation["metric_suggestions"].arrayValue
+            if suggestions.isEmpty {
+                Text("No similar Browse metrics found.").foregroundStyle(.secondary)
+            }
+            ForEach(Array(suggestions.enumerated()), id: \.offset) { _, suggestion in
+                Button {
+                    payload["metric_id"] = suggestion["metric_id"]
+                    creatingMetric = false
+                    choosingMetric = false
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(suggestion["name"].stringValue)
+                        Text([suggestion["standard_unit"].stringValue, matchLabel(suggestion["unit_match"].stringValue),
+                              suggestion["metric_id"] == observation["payload"]["ocr_metric_candidate"] ? "OCR suggestion" : ""]
+                            .filter { !$0.isEmpty }.joined(separator: " · "))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Button("Review with the full metric list") { choosingMetric = false }
+        }
+    }
+
+    private var mapping: Binding<String> {
+        Binding(get: {
+            let selected = payload["metric_id"].stringValue
+            return selected.isEmpty && usesResolvedMapping ? observation["resolved_metric_id"].stringValue : selected
+        }, set: {
+            usesResolvedMapping = false
+            payload["metric_id"] = .optional($0)
+        })
+    }
+
+    private func matchLabel(_ match: String) -> String {
+        switch match {
+        case "exact": "Unit matches"
+        case "convertible": "Unit can be converted"
+        case "incompatible": "Unit does not match"
+        default: "Unit not reported"
+        }
+    }
+
+    private func text(_ key: String) -> Binding<String> { Binding(get: { payload[key].stringValue }, set: { payload[key] = key == "raw_result" ? .string($0) : .optional($0) }) }
     private func field(_ label: String, _ key: String) -> some View { TextField(label, text: text(key), axis: .vertical).autocorrectionDisabled() }
 }
 

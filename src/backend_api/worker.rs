@@ -8,8 +8,28 @@ use crate::{
     provider,
 };
 use base64::Engine;
+use std::collections::HashMap;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
+
+type ObservationPayload = crate::reports::ObservationPayload;
+
+#[derive(sqlx::FromRow)]
+struct StoredCandidate {
+    observation_id: String,
+    candidate_key: Option<String>,
+    current_revision: i64,
+    status: String,
+    payload_json: String,
+}
+
+fn same_printed_result(a: &ObservationPayload, b: &ObservationPayload) -> bool {
+    a.source.page == b.source.page
+        && crate::laboratory_names::key(&a.raw_name) == crate::laboratory_names::key(&b.raw_name)
+        && a.raw_result.trim() == b.raw_result.trim()
+        && a.raw_unit.as_deref().map(str::trim) == b.raw_unit.as_deref().map(str::trim)
+        && a.sampled_at == b.sampled_at
+}
 
 pub async fn run(state: AppState, stop: CancellationToken) {
     let tasks = async {
@@ -134,14 +154,36 @@ async fn extract(state: &AppState, job: &ClaimedJob) -> Result<(), AppError> {
         )
         .await?;
     }
+    let database_metrics = crate::ocr::database_metrics(&state.database, &job.user_id).await?;
     let run_id = uuid::Uuid::new_v4().to_string();
     let mut failed = false;
+    let pdf = file.content_type == "application/pdf";
+    let mut first_evidence = if pdf {
+        Some(crate::documents::pdf_evidence(&state.database.cpu, &source, 1).await?)
+    } else {
+        None
+    };
+    let report_collection_date = match &first_evidence {
+        Some(evidence) => {
+            crate::documents::pdf_collection_date(
+                &state.database.cpu,
+                &source,
+                file.page_count,
+                evidence,
+            )
+            .await?
+        }
+        None => None,
+    };
     for page in 1..=file.page_count {
-        let evidence = if file.content_type == "application/pdf" {
-            crate::documents::pdf_evidence(&state.database.cpu, &source, page).await?
-        } else {
-            crate::documents::PageEvidence::image()
+        let mut evidence = match first_evidence.take() {
+            Some(evidence) => evidence,
+            None if pdf => {
+                crate::documents::pdf_evidence(&state.database.cpu, &source, page).await?
+            }
+            None => crate::documents::PageEvidence::image(),
         };
+        evidence.report_collection_date = report_collection_date.clone();
         save_input(state, job, &run_id, page, &evidence).await?;
         let image = if file.content_type == "application/pdf" {
             let prefix = scratch.path().join(format!("page-{page}"));
@@ -198,7 +240,8 @@ async fn extract(state: &AppState, job: &ClaimedJob) -> Result<(), AppError> {
             &run_id,
             page,
             image_url,
-            evidence.text_layer.as_ref(),
+            &evidence,
+            database_metrics.clone(),
         )
         .await;
         let mut identity = (None, None);
@@ -206,7 +249,12 @@ async fn extract(state: &AppState, job: &ClaimedJob) -> Result<(), AppError> {
             Ok((page_output, content, model)) => {
                 identity = (page_output.report_title, page_output.source_name);
                 let mut valid = Vec::new();
-                let incomplete = !crate::ocr::validation_issues(&content, page).is_empty();
+                let incomplete = !crate::ocr::validation_issues(
+                    &content,
+                    page,
+                    report_collection_date.is_some(),
+                )
+                .is_empty();
                 let mut page_failed = evidence.error_code.is_some() || incomplete;
                 failed |= incomplete;
                 if page_output.observations.len() > 2000 {
@@ -217,6 +265,18 @@ async fn extract(state: &AppState, job: &ClaimedJob) -> Result<(), AppError> {
                         continue;
                     }
                     observation.source.page = page;
+                    page_failed |= observation
+                        .ocr_mapping_note
+                        .as_ref()
+                        .is_some_and(|note| !note.trim().is_empty());
+                    if observation
+                        .sampled_at
+                        .as_ref()
+                        .is_none_or(|date| date.trim().is_empty())
+                        && let Some(collection) = &report_collection_date
+                    {
+                        observation.sampled_at = Some(collection.date.clone());
+                    }
                     // Model-supplied IDs are not trusted. The shared deterministic catalog
                     // derives resolved_metric_id while retaining the printed payload.
                     observation.metric_id = None;
@@ -263,8 +323,21 @@ async fn extract(state: &AppState, job: &ClaimedJob) -> Result<(), AppError> {
         if active != 1 {
             return Err(AppError::Conflict("Task was canceled or lease expired"));
         }
-        // Revision changes are allowed: extraction only appends unseen candidates and never edits reviewed rows.
-        let mut occurrences = std::collections::HashMap::new();
+        // OCR may revise its suggestions, while user-reviewed payloads stay intact.
+        let stored: Vec<StoredCandidate> = sqlx::query_as(queries::REPORT_CANDIDATES)
+            .bind(&job.user_id)
+            .bind(&job.file_id)
+            .fetch_all(&mut *transaction)
+            .await?;
+        let stored: Vec<_> = stored
+            .into_iter()
+            .map(|row| {
+                let payload: ObservationPayload = serde_json::from_str(&row.payload_json)?;
+                Ok::<_, AppError>((row, payload))
+            })
+            .collect::<Result<_, _>>()?;
+        let mut occurrences = HashMap::new();
+        let mut used = std::collections::HashSet::new();
         for observation in candidates {
             let occurrence = occurrences
                 .entry((
@@ -280,13 +353,44 @@ async fn extract(state: &AppState, job: &ClaimedJob) -> Result<(), AppError> {
                 )
                 .as_bytes(),
             );
-            let exists: i64 = sqlx::query_scalar(queries::CANDIDATE_EXISTS)
-                .bind(&job.user_id)
-                .bind(&job.file_id)
-                .bind(&key)
-                .fetch_one(&mut *transaction)
-                .await?;
-            if exists > 0 {
+            let exact = stored
+                .iter()
+                .find(|(row, _)| row.candidate_key.as_ref() == Some(&key));
+            let existing = exact.or_else(|| {
+                let mut matching = stored.iter().filter(|(row, previous)| {
+                    !used.contains(&row.observation_id)
+                        && same_printed_result(previous, &observation)
+                });
+                let first = matching.next()?;
+                matching.next().is_none().then_some(first)
+            });
+            if let Some((row, previous)) = existing {
+                if used.insert(row.observation_id.clone())
+                    && row.current_revision == 1
+                    && row.status == "pending"
+                    && row.candidate_key.is_some()
+                {
+                    let mut updated = previous.clone();
+                    // Normalization belongs to the printed value and unit from this row.
+                    if same_printed_result(previous, &observation) {
+                        updated.ocr_normalization = observation.ocr_normalization;
+                    }
+                    updated.ocr_mapping_note = observation.ocr_mapping_note;
+                    updated.ocr_metric_candidate = observation.ocr_metric_candidate;
+                    updated.ocr_section_heading = observation.ocr_section_heading;
+                    updated.ocr_new_metric = observation.ocr_new_metric;
+                    let payload = serde_json::to_string(&updated)?;
+                    if payload != row.payload_json {
+                        sqlx::query(queries::REFRESH_OCR_CANDIDATE)
+                            .bind(payload)
+                            .bind(now()?)
+                            .bind(&job.user_id)
+                            .bind(&job.file_id)
+                            .bind(&row.observation_id)
+                            .execute(&mut *transaction)
+                            .await?;
+                    }
+                }
                 continue;
             }
             let id = uuid::Uuid::new_v4().to_string();
@@ -351,7 +455,8 @@ async fn extract_page(
     run_id: &str,
     page: i64,
     image_url: String,
-    text_layer: Option<&crate::documents::TextLayer>,
+    evidence: &crate::documents::PageEvidence,
+    database_metrics: std::sync::Arc<[crate::laboratory::CustomMetric]>,
 ) -> Result<(ExtractedPage, String, String), AppError> {
     let _permit = state
         .inference_slots
@@ -360,12 +465,11 @@ async fn extract_page(
         .map_err(|_| AppError::Internal)?;
     let reply = crate::ocr::extract(
         &state.database.cpu,
-        &state.config.llm,
-        &state.config.extraction,
-        state.config.storage.maximum_image_pixels,
+        &state.config,
         page,
         image_url,
-        text_layer.cloned(),
+        evidence,
+        database_metrics,
     )
     .await?;
     let body = reply.response_body.clone();

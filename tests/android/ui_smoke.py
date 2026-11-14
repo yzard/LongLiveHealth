@@ -14,8 +14,12 @@ def adb(*arguments):
 
 
 def tree():
-    adb("shell", "uiautomator", "dump", "/sdcard/window.xml")
-    return ET.fromstring(adb("shell", "cat", "/sdcard/window.xml"))
+    for _ in range(5):
+        output = adb("shell", "uiautomator", "dump", "/sdcard/window.xml")
+        if "dumped to" in output:
+            return ET.fromstring(adb("shell", "cat", "/sdcard/window.xml"))
+        time.sleep(.25)
+    raise AssertionError("Android UI hierarchy is unavailable")
 
 
 def inspect():
@@ -181,6 +185,37 @@ def browse_switch():
         adb("shell", "wm", "density", "reset")
 
 
+def report_date():
+    wait_for("Overview")
+    tap("Data")
+    wait_for("Blood Work")
+    tap("Blood Work")
+    wait_for("Example Laboratory")
+    nodes = list(tree().iter("node"))
+
+    def bounds(node):
+        return tuple(map(int, re.findall(r"\d+", node.get("bounds"))))
+
+    source = next(n for n in nodes if n.get("text") == "Example Laboratory")
+    collection = next(n for n in nodes if any("2026-10-01" in (n.get(key) or "") for key in ("text", "content-desc")))
+    _, top, _, bottom = bounds(collection)
+    upload = next(n for n in nodes if n is not collection and "2026" in (n.get("text") or "")
+                  and bounds(n)[1] <= bottom and bounds(n)[3] >= top)
+    assert bounds(source)[0] < bounds(collection)[0] < bounds(upload)[0]
+    print("PASS: source, YYYY-MM-DD collection date, then upload date in the report row")
+    tap_node(source)
+    wait_for("Thyroid-stimulating hormone")
+    wait_for("LOINC 11580-8")
+    assert all(label == "LOINC 11580-8" for label in labels() if "11580-8" in (label or ""))
+    tap("Thyroid-stimulating hormone")
+    wait_for("Review result")
+    wait_for("TSH")
+    wait_for("11580-8")
+    assert "TSH (11580-8)" not in labels()
+    tap("Cancel")
+    print("PASS: standardized laboratory title and separate LOINC line and editor field")
+
+
 def chart_scroll():
     adb("shell", "am", "force-stop", "dev.longlivehealth.android")
     adb("shell", "wm", "size", "reset")
@@ -285,6 +320,194 @@ def blood_work_categories():
     wait_for("Blood Work"); tap("Blood Work")
     wait_for("LDL"); wait_for("Calcium")
     print("PASS: Heart keeps heart rate; Blood Work contains LDL and Calcium")
+
+
+def report_metric_review():
+    def control(path):
+        return json.loads(subprocess.check_output([
+            "docker", "exec", CONTAINER, "curl", "-fsS", "-X", "POST",
+            "http://127.0.0.1:18765/api/v1/" + path,
+        ], text=True))
+
+    issue = "No matching Browse metric. Review this result."
+    for scenario in ("test/report-metric-suggestions", "test/report-no-metric-suggestions"):
+        control("test/reset")
+        control("test/seed-report")
+        control(scenario)
+        adb("shell", "am", "force-stop", "dev.longlivehealth.android")
+        adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
+        wait_for("Overview")
+        wait_for("Data")
+        tap("Data")
+        wait_for("Blood Work")
+        tap("Blood Work")
+        wait_for("Example Laboratory")
+        tap("Example Laboratory")
+        if scenario == "test/report-metric-suggestions":
+            wait_for("99.1 mg/dL (5.5 mmol/L)")
+        else:
+            wait_for("5.5 mmol/L")
+        wait_for(issue)
+        tap(issue)
+        wait_for("Create new metric")
+        if scenario == "test/report-metric-suggestions":
+            wait_for("Blood glucose")
+            nodes = list(tree().iter("node"))
+            def top(label):
+                return int(re.findall(r"\d+", next(
+                    node.get("bounds") for node in nodes if node.get("text") == label
+                ))[1])
+            assert top("Create new metric") < top("Blood glucose")
+            wait_for("mg/dL · Unit can be converted")
+            tap("Blood glucose")
+            wait_for("Save")
+            tap("Save")
+            wait_for("5.5 mmol/L")
+            assert control("reports/get")["observations"][0]["payload"]["metric_id"] == "glucose"
+        else:
+            wait_for("No similar Browse metrics found.")
+            wait_for("OCR suggestion: Zyphorin panel activity · mmol/L")
+            tap("Create new metric")
+            wait_for("Save")
+            assert any(n.get("class") == "android.widget.EditText" for n in tree().iter("node"))
+            tap("Cancel")
+            wait_for(issue)
+            assert control("reports/get")["observations"][0]["payload"]["metric_id"] is None
+            tap(issue)
+            wait_for("Create new metric")
+            tap("Create new metric")
+            wait_for("Save")
+            tap("Save")
+            wait_for("Zyphorin activity")
+            saved = control("reports/get")["observations"][0]
+            assert saved["created_metric"] == {
+                "name": "Zyphorin panel activity", "standard_unit": "mmol/L", "metric_id": "custom:fixture",
+            }
+            assert saved["payload"]["raw_result"] == "5.5"
+    print("PASS: converted result with original, candidate mapping, and cancel/create when no match exists")
+
+
+def report_mapping_layout():
+    def control(path):
+        return json.loads(subprocess.check_output([
+            "docker", "exec", CONTAINER, "curl", "-fsS", "-X", "POST",
+            "http://127.0.0.1:18765/api/v1/" + path,
+        ], text=True))
+
+    control("test/reset")
+    control("test/seed-report")
+    control("test/report-urine-mapping")
+    adb("shell", "am", "force-stop", "dev.longlivehealth.android")
+    adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
+    wait_for("Overview")
+    wait_for("Data")
+    tap("Data")
+    wait_for("Blood Work")
+    tap("Blood Work")
+    wait_for("Example Laboratory")
+    tap("Example Laboratory")
+    wait_for("Appearance - urine")
+    tap("Appearance - urine")
+    wait_for("Review result")
+    wait_for("Metric mapping")
+    wait_for("Appearance - urine")
+    nodes = list(tree().iter("node"))
+    position = {n.get("text"): int(re.findall(r"\d+", n.get("bounds"))[1]) for n in nodes if n.get("text")}
+    assert position["MAPPING"] < position["Metric mapping"] < position["AS PRINTED ON THE REPORT"]
+    assert "COMPARISON" not in position and "About Metric mapping" not in labels()
+    tap("Appearance - urine")
+    wait_for("Glucose")
+    tap("Glucose")
+    size = adb("shell", "wm", "size")
+    width, height = map(int, re.findall(r"(\d+)x(\d+)", size)[-1])
+    for _ in range(4):
+        if "Review decision status" in labels():
+            break
+        adb("shell", "input", "swipe", str(width // 2), str(height * 3 // 4),
+            str(width // 2), str(height // 3), "400")
+    wait_for("Review decision status")
+    assert not {"REVIEW DECISION", "About Review decision"}.intersection(labels())
+    wait_for("Save")
+    tap("Save")
+    wait_for("Clear")
+    row = control("reports/get")["observations"][0]
+    assert row["payload"]["metric_id"] == "glucose"
+    assert row["payload"]["raw_name"] == "Appearance (5767-9)"
+    print("PASS: Mapping first, resolved metric selected, and picker can change the mapping")
+
+
+def report_status_actions(check_chart=False):
+    def control(path):
+        return json.loads(subprocess.check_output([
+            "docker", "exec", CONTAINER, "curl", "-fsS", "-X", "POST",
+            "http://127.0.0.1:18765/api/v1/" + path,
+        ], text=True))
+
+    control("test/reset")
+    control("test/seed-report")
+    original = control("reports/get")["observations"][0]
+    if check_chart:
+        control("test/enable-report-status-chart")
+    adb("shell", "am", "force-stop", "dev.longlivehealth.android")
+    adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
+    wait_for("Overview")
+    if check_chart:
+        tap("Browse")
+        wait_for("Health Categories")
+        for _ in range(5):
+            if "Blood Work" in labels():
+                break
+            size = adb("shell", "wm", "size")
+            width, height = map(int, re.findall(r"(\d+)x(\d+)", size)[-1])
+            adb("shell", "input", "swipe", str(width // 4), str(height * 3 // 4), str(width // 4), str(height // 3), "350")
+        wait_for("Blood Work")
+        tap("Blood Work")
+        wait_for("LDL")
+        tap("LDL")
+        wait_for("mg/dL")
+    tap("Data")
+    wait_for("Blood Work")
+    tap("Blood Work")
+    wait_for("Example Laboratory")
+    tap("Example Laboratory")
+
+    for action, initial, next_status, next_action in (
+        ("Hold", "Confirmed", "Pending", "Confirm"),
+        ("Confirm", "Pending", "Confirmed", "Hold"),
+        ("Hold", "Confirmed", "Pending", "Confirm"),
+    ):
+        wait_for(initial)
+        wait_for(action)
+        assert next_action not in labels()
+        tap(action)
+        wait_for(next_status)
+        wait_for(next_action)
+        assert action not in labels()
+        assert "Review result" not in labels()
+        current = control("reports/get")["observations"][0]
+        assert current["observation_id"] == original["observation_id"]
+        assert current["payload"] == original["payload"]
+        assert current["status"] == next_status.lower()
+        if check_chart:
+            tap("Browse")
+            if next_status == "Pending":
+                wait_for("No comparable measurements yet. Confirm imported results with a metric, unit and collection date.")
+            else:
+                wait_for("mg/dL")
+            tap("Data")
+    control("test/fail-review")
+    tap("Confirm")
+    for _ in range(15):
+        if "Could not complete the action" in labels():
+            break
+        time.sleep(.2)
+    else:
+        raise AssertionError("A failed status change did not show an error")
+    tap("OK")
+    wait_for("Pending")
+    wait_for("Confirm")
+    assert control("reports/get")["observations"][0]["status"] == "pending"
+    print("PASS: separate status and single Confirm/Hold action, repeated toggles, failed-write recovery")
 
 
 def report_settings():
@@ -445,7 +668,7 @@ def paired_charts():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("inspect", "login", "tap", "navigation", "browse-switch", "camera", "selectors", "chart-scroll", "original-preview", "rescan", "blood-work", "report-settings", "edge-scroll", "paired-charts"))
+    parser.add_argument("action", choices=("inspect", "login", "tap", "navigation", "browse-switch", "camera", "selectors", "chart-scroll", "original-preview", "rescan", "blood-work", "report-date", "report-metric-review", "report-mapping-layout", "report-status-actions", "report-status-chart", "report-settings", "edge-scroll", "paired-charts"))
     parser.add_argument("text", nargs="?")
     args = parser.parse_args()
     if args.action == "inspect":
@@ -462,6 +685,14 @@ if __name__ == "__main__":
         chart_scroll()
     elif args.action == "selectors":
         selectors()
+    elif args.action == "report-date":
+        report_date()
+    elif args.action == "report-metric-review":
+        report_metric_review()
+    elif args.action == "report-mapping-layout":
+        report_mapping_layout()
+    elif args.action in ("report-status-actions", "report-status-chart"):
+        report_status_actions(check_chart=args.action == "report-status-chart")
     elif args.action == "report-settings":
         report_settings()
     elif args.action == "blood-work":

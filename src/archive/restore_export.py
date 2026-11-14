@@ -55,7 +55,7 @@ def restore(archive_path, destination, username, max_bytes):
                     connection.execute('BEGIN IMMEDIATE')
                     connection.execute(queries.DEFER_KEYS)
                     connection.execute(queries.CREATE_OWNER, (manifest['user_id'], username, created, revision))
-                    for table in sorted(check_export.TABLES):
+                    for table in sorted(audit["tables"]):
                         definitions = queries.columns(connection, table)
                         expected = [
                             dict(name=name, sqlite_type=kind, not_null=bool(required), primary_key_position=key)

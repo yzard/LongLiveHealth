@@ -53,6 +53,7 @@ pub fn catalog() -> &'static Value {
     &CATALOG
 }
 pub fn guide(metric: &str) -> Value {
+    let metric = crate::laboratory::canonical_history_id(metric);
     let mut result = CATALOG["metrics"][metric].clone();
     if result.is_null() {
         result = json!({"metric_id":metric,"rules":[],"reason":"No verified guide for this metric identity; use its original laboratory reference interval.","sources":[]});
@@ -102,7 +103,7 @@ pub fn evaluate(request: &EvaluationRequest, profile: &Profile) -> Value {
     if !request.value.is_finite() || request.value < 0.0 {
         return unknown("A finite, nonnegative numeric measurement is required");
     }
-    let entry = &CATALOG["metrics"][&request.metric_id];
+    let entry = &CATALOG["metrics"][crate::laboratory::canonical_history_id(&request.metric_id)];
     if entry["rules"].as_array().is_none_or(Vec::is_empty) {
         return unknown(entry["reason"].as_str().unwrap_or("No verified interval"));
     }

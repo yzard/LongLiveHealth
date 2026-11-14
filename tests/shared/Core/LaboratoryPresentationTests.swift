@@ -14,3 +14,9 @@ import Testing
     #expect(LaboratoryPresentation.standardizedReference(reference) == "Reference retained as printed: Contextual reference requires review.")
     #expect(LaboratoryPresentation.originalReference(.object(["reference_range": .string("Age dependent")]), reference: reference).contains("unit unknown"))
 }
+
+@Test func printedNamesKeepQualifiersAndShowLoincSeparately() {
+    #expect(LaboratoryPresentation.printedName("TSH (3rd Generation) ( 11580-8 )", code: "11580-8") == "TSH (3rd Generation)")
+    #expect(LaboratoryPresentation.printedName("TSH (3rd Generation)", code: "11580-8") == "TSH (3rd Generation)")
+    #expect(LaboratoryPresentation.printedName("TSH (11580-8)", code: "") == "TSH (11580-8)")
+}

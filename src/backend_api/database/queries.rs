@@ -16,6 +16,18 @@ pub const RECOVER_ANALYSIS: &str =
 pub const RETRY_ANALYSIS: &str = "UPDATE analysis_runs SET status = 'queued', error_code = NULL WHERE user_id = ? AND run_id = ? AND status = 'failed'";
 pub const INSERT_FEEDBACK: &str = "INSERT INTO analysis_feedback (user_id, run_id, feedback_id, note, created_at) VALUES (?, ?, ?, ?, ?)";
 pub const ANALYSIS_FEEDBACK: &str = "SELECT feedback_id, note, created_at FROM analysis_feedback WHERE user_id = ? AND run_id = ? ORDER BY created_at";
+pub const CREATE_CUSTOM_LAB_METRICS: &str = r#"
+CREATE TABLE IF NOT EXISTS custom_lab_metrics (
+    metric_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    name_key TEXT NOT NULL,
+    standard_unit TEXT NOT NULL,
+    UNIQUE (user_id, name_key, standard_unit)
+)
+"#;
+pub const CUSTOM_LAB_METRICS: &str = "SELECT metric_id, name, standard_unit FROM custom_lab_metrics WHERE user_id = ? ORDER BY name, metric_id";
+pub const INSERT_CUSTOM_LAB_METRIC: &str = "INSERT INTO custom_lab_metrics (metric_id,user_id,name,name_key,standard_unit) VALUES (?,?,?,?,?) ON CONFLICT (user_id,name_key,standard_unit) DO NOTHING";
 pub const EXPORT_TABLES: &[(&str, &str)] = &[
     ("daily_views", "SELECT * FROM daily_views WHERE user_id = ?"),
     (
@@ -31,6 +43,10 @@ pub const EXPORT_TABLES: &[(&str, &str)] = &[
         "SELECT * FROM sync_batches WHERE user_id = ?",
     ),
     ("reports", "SELECT * FROM reports WHERE user_id = ?"),
+    (
+        "custom_lab_metrics",
+        "SELECT * FROM custom_lab_metrics WHERE user_id = ?",
+    ),
     ("raw_files", "SELECT * FROM raw_files WHERE user_id = ?"),
     (
         "extraction_inputs",
@@ -145,16 +161,55 @@ pub const SET_HEALTH_ORIGINAL: &str = "UPDATE health_records SET raw_id = ? WHER
 pub const CURRENT_HEALTH_ORIGINAL: &str = "SELECT r.raw_path, r.raw_offset, r.raw_length FROM health_records h JOIN health_originals r ON r.user_id=h.user_id AND r.raw_id=h.raw_id WHERE h.user_id=? AND h.platform=? AND h.source_id=? AND h.record_id=? AND h.deleted=0";
 pub const INSERT_REPORT: &str =
     "INSERT INTO reports (report_id, user_id, file_id, created_at) VALUES (?, ?, ?, ?)";
-pub const REPORT: &str = "SELECT r.report_id, r.revision, r.context_json, f.original_name, f.page_count, r.created_at FROM reports r JOIN raw_files f ON f.user_id = r.user_id AND f.file_id = r.file_id WHERE r.user_id = ? AND r.report_id = ?";
-pub const REPORTS: &str = "SELECT r.report_id, r.revision, r.context_json, f.original_name, f.page_count, r.created_at FROM reports r JOIN raw_files f ON f.user_id = r.user_id AND f.file_id = r.file_id WHERE r.user_id = ? AND (? IS NULL OR r.report_id > ?) ORDER BY r.report_id LIMIT ?";
-pub const OBSERVATIONS: &str = "SELECT o.observation_id, o.report_id, o.current_revision AS revision, o.status, o.payload_json FROM review_observations o WHERE o.user_id = ? AND o.report_id = ? ORDER BY o.observation_id";
+macro_rules! report_summary_query {
+    ($predicate:literal) => {
+        concat!(
+            r#"
+SELECT r.report_id, r.revision, r.context_json, f.original_name, f.page_count, r.created_at,
+       COALESCE(
+           (SELECT json_extract(i.input_json, '$.report_collection_date.date')
+              FROM extraction_inputs i
+             WHERE i.user_id = r.user_id AND i.report_id = r.report_id AND i.page_number = 1
+             ORDER BY i.created_at DESC, i.run_id DESC LIMIT 1),
+           (SELECT MAX(SUBSTR(json_extract(o.payload_json, '$.sampled_at'), 1, 10))
+              FROM review_observations o
+             WHERE o.user_id = r.user_id AND o.report_id = r.report_id AND o.status != 'rejected'
+               AND SUBSTR(json_extract(o.payload_json, '$.sampled_at'), 1, 10)
+                   GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')
+       ) AS collection_date
+  FROM reports r JOIN raw_files f ON f.user_id = r.user_id AND f.file_id = r.file_id
+ WHERE r.user_id = ? AND "#,
+            $predicate
+        )
+    };
+}
+pub const REPORT: &str = report_summary_query!("r.report_id = ?");
+pub const REPORTS: &str =
+    report_summary_query!("(? IS NULL OR r.report_id > ?) ORDER BY r.report_id LIMIT ?");
+pub const OBSERVATIONS: &str = "SELECT o.observation_id, o.report_id, o.current_revision AS revision, o.status, o.payload_json, r.context_json FROM review_observations o JOIN reports r ON r.user_id = o.user_id AND r.report_id = o.report_id WHERE o.user_id = ? AND o.report_id = ? ORDER BY o.observation_id";
 pub const OBSERVATION: &str = "SELECT o.current_revision FROM review_observations o WHERE o.user_id = ? AND o.report_id = ? AND o.observation_id = ?";
 pub const INSERT_OBSERVATION: &str = "INSERT INTO draft.observations (observation_id, user_id, report_id, current_revision, candidate_key) VALUES (?, ?, ?, 1, ?)";
 pub const SAVE_OBSERVATION: &str = "INSERT INTO draft.observations (user_id,observation_id,current_revision,status,payload_json,updated_at,report_id,candidate_key) SELECT ?1,?2,?3,?4,?5,?6,report_id,candidate_key FROM review_observations WHERE user_id=?1 AND observation_id=?2 ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision,status=excluded.status,payload_json=excluded.payload_json,updated_at=excluded.updated_at";
 pub const CONFIRM_OBSERVATION: &str = "INSERT INTO main.observations (user_id,observation_id,current_revision,status,payload_json,updated_at,report_id,candidate_key) SELECT ?1,?2,?3,?4,?5,?6,report_id,candidate_key FROM review_observations WHERE user_id=?1 AND observation_id=?2 ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision,status=excluded.status,payload_json=excluded.payload_json,updated_at=excluded.updated_at";
 pub const UPDATE_REPORT: &str = "UPDATE reports SET revision = revision + 1, context_json = COALESCE(?, context_json) WHERE user_id = ? AND report_id = ? AND revision = ?";
 pub const OBSERVATION_HISTORY: &str = "SELECT observation_id, current_revision AS revision, status, payload_json, updated_at AS created_at FROM review_observations WHERE user_id = ? AND observation_id = ?";
-pub const CONFIRMED_OBSERVATIONS: &str = "SELECT o.observation_id, o.report_id, o.current_revision AS revision, o.status, o.payload_json FROM review_observations o WHERE o.user_id = ? AND o.status = 'confirmed' AND NOT EXISTS (SELECT 1 FROM report_relations r WHERE r.user_id = o.user_id AND r.report_id = o.report_id) ORDER BY o.observation_id LIMIT 10001";
+pub const CONFIRMED_OBSERVATIONS: &str = r#"
+SELECT o.observation_id
+     , o.report_id
+     , o.current_revision AS revision
+     , o.status
+     , o.payload_json
+     , report.context_json
+  FROM review_observations o
+  JOIN reports report ON report.user_id = o.user_id AND report.report_id = o.report_id
+ WHERE o.user_id = ?
+   AND o.status = 'confirmed'
+   AND NOT EXISTS (
+       SELECT 1 FROM report_relations r WHERE r.user_id = o.user_id AND r.report_id = o.report_id
+   )
+ ORDER BY o.observation_id
+ LIMIT 10001
+"#;
 pub const REPORT_RELATION: &str =
     "SELECT preferred_report_id, kind FROM report_relations WHERE user_id = ? AND report_id = ?";
 pub const RELATION_DEPENDENTS: &str =
@@ -164,7 +219,17 @@ pub const CLEAR_RELATION: &str = "DELETE FROM report_relations WHERE user_id = ?
 pub const INVALIDATE_ANALYSES: &str = "UPDATE analysis_runs SET status = 'stale', input_json = '{}', output_json = NULL, error_code = 'data_changed' WHERE user_id = ? AND status != 'stale'";
 pub const INVALIDATE_EXPORTS: &str =
     "UPDATE exports SET status = 'stale' WHERE user_id = ? AND status != 'stale'";
-pub const CANDIDATE_EXISTS: &str = "SELECT COUNT(*) FROM review_observations WHERE user_id = ? AND report_id = ? AND candidate_key = ?";
+pub const REPORT_CANDIDATES: &str = r#"
+SELECT observation_id, candidate_key, current_revision, status, payload_json
+  FROM review_observations
+ WHERE user_id = ? AND report_id = ?
+"#;
+pub const REFRESH_OCR_CANDIDATE: &str = r#"
+UPDATE draft.observations
+   SET payload_json = ?, updated_at = ?, current_revision = current_revision + 1
+ WHERE user_id = ? AND report_id = ? AND observation_id = ?
+   AND status = 'pending' AND current_revision = 1 AND candidate_key IS NOT NULL
+"#;
 pub const INSERT_PAGE: &str = "INSERT INTO extraction_pages (user_id, report_id, run_id, page_number, status, content, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
 pub const EXTRACTION_PAGES: &str = "SELECT run_id, page_number, status, content, model, created_at FROM extraction_pages WHERE user_id = ? AND report_id = ? ORDER BY created_at DESC, run_id, page_number";
 
@@ -711,7 +776,16 @@ SELECT ?1, 'apple_health'
   FROM json_each(?2)
 "#;
 
-pub const EXTRACTION_VALIDATION_CONTENT: &str = "SELECT page_number, content FROM extraction_outputs WHERE user_id = ?1 AND report_id = ?2 AND run_id = (SELECT run_id FROM extraction_outputs WHERE user_id = ?1 AND report_id = ?2 ORDER BY created_at DESC, run_id LIMIT 1) ORDER BY page_number";
+pub const EXTRACTION_VALIDATION_CONTENT: &str = r#"
+SELECT o.page_number, o.content,
+       json_extract(i.input_json, '$.report_collection_date.date') IS NOT NULL AS has_report_collection_date
+  FROM extraction_outputs o
+  LEFT JOIN extraction_inputs i USING (user_id, report_id, run_id, page_number)
+ WHERE o.user_id = ?1 AND o.report_id = ?2 AND o.run_id = (
+       SELECT run_id FROM extraction_outputs WHERE user_id = ?1 AND report_id = ?2
+       ORDER BY created_at DESC, run_id LIMIT 1)
+ ORDER BY o.page_number
+"#;
 
 pub const APPLE_QUANTITY_REINDEX: &str = "SELECT h.rowid AS archive_row,h.user_id,h.platform,h.source_id,h.record_id,h.raw_id,h.record_type,h.payload_json,o.raw_path,o.raw_offset,o.raw_length FROM health_records h JOIN health_originals o ON o.user_id=h.user_id AND o.raw_id=h.raw_id WHERE h.rowid>? AND h.platform='apple_health' AND h.deleted=0 AND ((h.record_type GLOB 'HKQuantityTypeIdentifier*' AND json_type(h.payload_json,'$.payload.value') IS NULL) OR (json_extract(h.payload_json,'$.payload.quantity_count')>1 AND json_type(h.payload_json,'$.payload.quantity_samples') IS NULL)) ORDER BY h.rowid LIMIT 500";
 

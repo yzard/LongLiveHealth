@@ -21,6 +21,7 @@ upload_ids = []
 fail_upload = False
 upload_delay = 0
 fail_review = False
+report_status_chart = False
 observations = []
 context = {}
 analysis_enabled = False
@@ -38,13 +39,14 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_POST(self):
-        global fail_upload, upload_delay, fail_review, context, analysis_enabled, relation, admin_password_changed, refresh_failure, source_preferences, fail_preferences
+        global fail_upload, upload_delay, fail_review, context, analysis_enabled, relation, admin_password_changed, refresh_failure, source_preferences, fail_preferences, report_status_chart
         length = int(self.headers.get('Content-Length', 0))
         raw = self.rfile.read(length)
         body = json.loads(raw) if self.headers.get('Content-Type') == 'application/json' else {}
         route = self.path.removeprefix('/api/v1/')
         request_counts[route] = request_counts.get(route, 0) + 1
         status = 200
+        created_metric = None
         if route == 'health/sync' and self.headers.get('Authorization') == 'Bearer reject-sync':
             status = 503
         if route == 'test/unauthorized':
@@ -72,12 +74,16 @@ class Handler(BaseHTTPRequestHandler):
             fail_upload = False
             upload_delay = 0
             fail_review = False
+            report_status_chart = False
+        if route == 'test/enable-report-status-chart':
+            report_status_chart = True
         if route == 'test/seed-report':
             reports[:] = [
                 {
                     'report_id': 'fixture-report',
                     'original_name': 'fixture.png',
                     'context': {'source_name': 'Example Laboratory'},
+                    'collection_date': '2026-10-01',
                     'page_count': 1,
                     'revision': 1,
                     'created_at': 1790985600,
@@ -100,8 +106,37 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 }
             ]
+        if route == 'test/report-test-code':
+            row = observations[0]
+            row['display_name'] = 'Thyroid-stimulating hormone'
+            row['lab_test_code'] = '11580-8'
+            row['payload']['raw_name'] = 'TSH (11580-8)'
+        if route == 'test/report-urine-mapping':
+            row = observations[0]
+            row['display_name'] = 'Appearance - urine'
+            row['lab_test_code'] = '5767-9'
+            row['resolved_metric_id'] = 'urine_appearance'
+            row['interpretation'] = {}
+            row['payload'].update(metric_id=None, raw_name='Appearance (5767-9)', raw_result='Clear',
+                                  raw_unit=None, source={'page': 1, 'quote': 'Appearance (5767-9) Clear'})
         if route == 'test/report-issue':
             observations[0]['browse_issues'] = [{'code': 'unsupported_unit', 'scope': 'browse', 'message': 'Cannot appear in Browse: unit invalid-unit is not supported for this test.'}]
+        if route in ('test/report-metric-suggestions', 'test/report-no-metric-suggestions'):
+            row = observations[0]
+            row['status'] = 'pending'
+            row['payload']['metric_id'] = None
+            row['browse_issues'] = [{
+                'code': 'unmapped_metric', 'scope': 'browse',
+                'message': 'No matching Browse metric. Review this result.',
+            }]
+            row['metric_suggestions'] = [] if route == 'test/report-no-metric-suggestions' else [{
+                'metric_id': 'glucose', 'name': 'Blood glucose', 'standard_unit': 'mg/dL',
+                'unit_match': 'convertible',
+            }]
+            if route == 'test/report-no-metric-suggestions':
+                row['payload']['raw_name'] = 'Zyphorin activity'
+                row['payload']['ocr_new_metric'] = {'name': 'Zyphorin panel activity', 'standard_unit': 'mmol/L'}
+                row['interpretation'] = {}
         if route == 'test/expand-report':
             template = observations[0]
             observations[:] = [
@@ -118,6 +153,8 @@ class Handler(BaseHTTPRequestHandler):
             fail_review = False
             status = 503
         if route == 'reports/review' and status == 200:
+            if body.get('new_metric'):
+                created_metric = dict(body['new_metric'], metric_id='custom:fixture')
             if body.get('context') is not None:
                 context = body['context']
             for change in body.get('observations', []):
@@ -131,6 +168,9 @@ class Handler(BaseHTTPRequestHandler):
                     'status': change['status'],
                     'payload': change['payload'],
                 }
+                if created_metric:
+                    revised['payload']['metric_id'] = created_metric['metric_id']
+                    revised['created_metric'] = created_metric
                 if old:
                     observations.remove(old)
                 observations.append(revised)
@@ -207,6 +247,7 @@ class Handler(BaseHTTPRequestHandler):
                     {'metric_id': 'ldl_cholesterol', 'name': 'LDL', 'standard_unit': 'mg/dL'},
                     {'metric_id': 'hdl_cholesterol', 'name': 'HDL'},
                     {'metric_id': 'glucose', 'name': 'Glucose'},
+                    {'metric_id': 'urine_appearance', 'name': 'Appearance - urine', 'standard_unit': '1'},
                 ]
             },
             'metrics/history/get': {
@@ -270,6 +311,7 @@ class Handler(BaseHTTPRequestHandler):
                 'extraction_outputs': [{'page': 1, 'stage': 'ocr', 'run_id': 'fixture-ocr', 'model': 'synthetic'}],
             },
             'reports/review': {
+                'created_metric': created_metric,
                 'report': reports[0] if reports else {},
                 'observations': observations,
                 'context': context,
@@ -284,6 +326,15 @@ class Handler(BaseHTTPRequestHandler):
             'reports/extraction/get': {'content': 'Synthetic OCR output', 'response_body': '{"synthetic": true}'},
             'test/state': {'upload_ids': upload_ids, 'context': context},
         }.get(route, {})
+        if route == 'metrics/history/get' and report_status_chart and body.get('metric_id') == 'ldl_cholesterol':
+            response = {'points': [
+                {
+                    'point_id': row['observation_id'], 'report_id': row['report_id'],
+                    'source_id': 'fixture-report', 'source_name': 'Example Laboratory',
+                    'timestamp': int(time.time()), 'value': '99.1', 'unit': 'mg/dL',
+                }
+                for row in observations if row['status'] == 'confirmed'
+            ], 'excluded_count': 0}
         if route == 'metrics/history/get' and body.get('metric_id') == 'clinical:calcium':
             response = {
                 'points': [],

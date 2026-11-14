@@ -2,6 +2,7 @@ use crate::{
     authentication::now,
     database::{Database, queries},
     error::AppError,
+    laboratory::CustomMetric,
     models::ListRequest,
 };
 use chrono::{DateTime, NaiveDate};
@@ -30,6 +31,23 @@ pub struct ObservationPayload {
     pub metric_id: Option<String>,
     pub source: Source,
     pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ocr_mapping_note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ocr_metric_candidate: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ocr_section_heading: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ocr_new_metric: Option<NewMetric>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ocr_normalization: Option<OcrNormalization>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OcrNormalization {
+    pub result: String,
+    pub unit: String,
 }
 
 impl ObservationPayload {
@@ -61,6 +79,38 @@ impl ObservationPayload {
                 return Err(AppError::Invalid("Observation field too long"));
             }
         }
+        if self
+            .ocr_mapping_note
+            .as_ref()
+            .is_some_and(|note| note.len() > 512)
+        {
+            return Err(AppError::Invalid("OCR mapping note exceeds limit"));
+        }
+        if self
+            .ocr_section_heading
+            .as_ref()
+            .is_some_and(|heading| heading.len() > 160 || heading.chars().any(char::is_control))
+        {
+            return Err(AppError::Invalid("Invalid OCR section heading"));
+        }
+        if self
+            .ocr_metric_candidate
+            .as_ref()
+            .is_some_and(|id| id.len() > 128)
+            || self
+                .ocr_new_metric
+                .as_ref()
+                .is_some_and(|metric| !metric.is_valid())
+        {
+            return Err(AppError::Invalid("Invalid OCR metric suggestion"));
+        }
+        if self
+            .ocr_normalization
+            .as_ref()
+            .is_some_and(|hint| hint.result.len() > 128 || hint.unit.len() > 128)
+        {
+            return Err(AppError::Invalid("OCR normalization hint exceeds limit"));
+        }
         if let Some(date) = &self.sampled_at {
             if date.len() > 64 {
                 return Err(AppError::Invalid("Collection date exceeds limit"));
@@ -68,6 +118,9 @@ impl ObservationPayload {
             parse_time(date)?;
         }
         if let Some(metric) = &self.metric_id
+            && !metric
+                .strip_prefix("custom:")
+                .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok())
             && !crate::laboratory::metrics()
                 .iter()
                 .any(|definition| definition.metric_id == metric)
@@ -112,6 +165,7 @@ pub struct ReportSummary {
     pub original_name: String,
     pub page_count: i64,
     pub created_at: i64,
+    pub collection_date: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -123,7 +177,11 @@ pub struct Observation {
     pub payload: ObservationPayload,
     pub interpretation: crate::laboratory::Interpretation,
     pub resolved_metric_id: Option<String>,
+    pub display_name: String,
+    pub lab_test_code: Option<String>,
     pub browse_issues: Vec<BrowseIssue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metric_suggestions: Option<Value>,
 }
 
 #[derive(Serialize)]
@@ -137,21 +195,57 @@ fn browse_issues(
     payload: &ObservationPayload,
     interpretation: &crate::laboratory::Interpretation,
     metric: Option<&str>,
+    custom: Option<&CustomMetric>,
 ) -> Vec<BrowseIssue> {
     let mut issues = Vec::new();
-    if metric.is_none_or(|id| {
-        !crate::laboratory::metrics()
-            .iter()
-            .any(|definition| definition.metric_id == id)
-    }) {
-        let known_name =
-            metric.is_none() && crate::laboratory::infer_metric(&payload.raw_name, None).is_some();
-        issues.push(BrowseIssue {
-            code: if known_name { "unsupported_unit" } else { "unmapped_metric" }, scope: "browse",
-            message: if known_name {
-                format!("Cannot appear in Browse: unit ‘{}’ is not supported for this test. Check the original report and edit the result.", payload.raw_unit.as_deref().unwrap_or("not provided"))
-            } else { "Cannot appear in Browse: this test has no recognized metric mapping. Check its name and selected metric against the original report.".into() },
-        });
+    if custom.is_none()
+        && metric.is_none_or(|id| {
+            !crate::laboratory::metrics()
+                .iter()
+                .any(|definition| definition.metric_id == id)
+        })
+    {
+        let known_name = crate::laboratory::infer_metric(&payload.raw_name, None).is_some();
+        if let Some(note) = payload
+            .ocr_mapping_note
+            .as_deref()
+            .map(str::trim)
+            .filter(|note| !note.is_empty())
+        {
+            issues.push(BrowseIssue {
+                code: "ocr_mapping_uncertain", scope: "browse",
+                message: format!("OCR is uncertain about the test identity: {note} Check the original report before mapping this result."),
+            });
+        }
+        if crate::laboratory::test_code_conflicts(&payload.raw_name) {
+            issues.push(BrowseIssue {
+                code: "lab_test_code_conflict", scope: "browse",
+                message: "The printed test name and test code do not identify the same metric. Review the original before mapping this result.".into(),
+            });
+        } else if !known_name {
+            let code_match = crate::laboratory::split_test_code(&payload.raw_name)
+                .1
+                .and_then(crate::laboratory::loinc_metric);
+            let (code, message) = match code_match {
+                Some(id) => {
+                    let name = crate::laboratory::display_name(&payload.raw_name, Some(id));
+                    ("metric_identity_uncertain", format!("The test code suggests {name}, but the printed test name could not be verified. Review the original before mapping this result."))
+                }
+                None => ("unmapped_metric", "No existing Browse metric reliably matches this test. It appears separately for review. Check the original and select a metric if appropriate.".into()),
+            };
+            issues.push(BrowseIssue {
+                code,
+                scope: "browse",
+                message,
+            });
+        } else if crate::laboratory::infer_metric(&payload.raw_name, payload.raw_unit.as_deref())
+            .is_none()
+        {
+            issues.push(BrowseIssue {
+                code: "unsupported_unit", scope: "browse",
+                message: format!("Unit ‘{}’ does not match this metric. The result appears separately in Browse. Check the original report and edit the result.", payload.raw_unit.as_deref().unwrap_or("not provided")),
+            });
+        }
     } else if ["missing_unit", "unsupported_unit", "overflow"]
         .contains(&interpretation.result.status)
     {
@@ -198,15 +292,65 @@ struct StoredObservation {
     revision: i64,
     status: String,
     payload_json: String,
+    context_json: String,
 }
 impl StoredObservation {
-    fn decode(self) -> Result<Observation, AppError> {
+    fn decode(
+        self,
+        custom_metrics: &[CustomMetric],
+        include_suggestions: bool,
+    ) -> Result<Observation, AppError> {
         let payload: ObservationPayload = serde_json::from_str(&self.payload_json)?;
-        let interpretation = crate::laboratory::interpret(&payload);
-        let resolved_metric_id = crate::laboratory::resolved_metric(&payload).map(str::to_owned);
-        let browse_issues = browse_issues(&payload, &interpretation, resolved_metric_id.as_deref());
+        let context: Value = serde_json::from_str(&self.context_json)?;
+        let source_name = context["source_name"].as_str();
+        let resolved_metric_id = crate::laboratory::resolved_report_metric(&payload, source_name)
+            .filter(|id| {
+                !id.starts_with("custom:")
+                    || custom_metrics.iter().any(|metric| metric.metric_id == *id)
+            })
+            .or_else(|| crate::laboratory::verified_custom_candidate(&payload, custom_metrics))
+            .map(str::to_owned);
+        let custom = custom_metrics
+            .iter()
+            .find(|metric| Some(metric.metric_id.as_str()) == resolved_metric_id.as_deref());
+        let interpretation =
+            crate::laboratory::interpret_metric(&payload, resolved_metric_id.as_deref(), custom);
+        let browse_issues = browse_issues(
+            &payload,
+            &interpretation,
+            resolved_metric_id.as_deref(),
+            custom,
+        );
+        let metric_suggestions =
+            if include_suggestions && browse_issues.iter().any(|issue| issue.scope == "browse") {
+                Some(serde_json::to_value(
+                    crate::laboratory::metric_suggestions(
+                        &payload.raw_name,
+                        payload.raw_unit.as_deref(),
+                        payload.ocr_metric_candidate.as_deref(),
+                        custom_metrics,
+                    ),
+                )?)
+            } else {
+                None
+            };
         Ok(Observation {
+            display_name: custom
+                .map_or_else(
+                    || {
+                        crate::laboratory::display_name(
+                            &payload.raw_name,
+                            resolved_metric_id.as_deref(),
+                        )
+                    },
+                    |metric| metric.name.as_str(),
+                )
+                .to_owned(),
+            lab_test_code: crate::laboratory::split_test_code(&payload.raw_name)
+                .1
+                .map(str::to_owned),
             browse_issues,
+            metric_suggestions,
             observation_id: self.observation_id,
             report_id: self.report_id,
             revision: self.revision,
@@ -233,6 +377,27 @@ pub struct ReviewRequest {
     pub expected_revision: i64,
     pub context: Option<ReportContext>,
     pub observations: Vec<ReviewItem>,
+    pub new_metric: Option<NewMetric>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct NewMetric {
+    pub name: String,
+    pub standard_unit: String,
+}
+
+impl NewMetric {
+    pub(crate) fn is_valid(&self) -> bool {
+        let name = self.name.trim();
+        !crate::laboratory_names::key(name).is_empty()
+            && name.len() <= 160
+            && self.standard_unit.len() <= 64
+            && !name.chars().any(char::is_control)
+            && !self.standard_unit.chars().any(char::is_control)
+            && !crate::laboratory::is_administrative_name(name)
+            && crate::laboratory::split_test_code(name).1.is_none()
+    }
 }
 
 pub fn parse_time(input: &str) -> Result<i64, AppError> {
@@ -249,6 +414,13 @@ pub fn parse_time(input: &str) -> Result<i64, AppError> {
 }
 
 impl Database {
+    pub async fn custom_metrics(&self, user_id: &str) -> Result<Vec<CustomMetric>, AppError> {
+        Ok(sqlx::query_as(queries::CUSTOM_LAB_METRICS)
+            .bind(user_id)
+            .fetch_all(&self.pool)
+            .await?)
+    }
+
     pub async fn rescan_report(
         &self,
         user_id: &str,
@@ -346,7 +518,7 @@ impl Database {
             .bind(report_id)
             .fetch_all(&self.pool)
             .await?;
-        decode_observations(&self.cpu, rows).await
+        decode_observations(&self.cpu, rows, self.custom_metrics(user_id).await?, false).await
     }
     pub async fn report(&self, user_id: &str, report_id: &str) -> Result<Value, AppError> {
         let mut transaction = self.pool.begin().await?;
@@ -362,7 +534,12 @@ impl Database {
             .bind(report_id)
             .fetch_all(&mut *transaction)
             .await?;
-        let observations = decode_observations(&self.cpu, observations).await?;
+        let custom_metrics = sqlx::query_as(queries::CUSTOM_LAB_METRICS)
+            .bind(user_id)
+            .fetch_all(&mut *transaction)
+            .await?;
+        let observations =
+            decode_observations(&self.cpu, observations, custom_metrics, true).await?;
         let relation=sqlx::query(queries::REPORT_RELATION).bind(user_id).bind(report_id).fetch_optional(&mut *transaction).await?
             .map(|row| json!({"preferred_report_id":row.get::<String,_>("preferred_report_id"),"kind":row.get::<String,_>("kind")}));
         let pages=sqlx::query(queries::EXTRACTION_PAGES).bind(user_id).bind(report_id).fetch_all(&mut *transaction).await?.into_iter()
@@ -388,6 +565,7 @@ impl Database {
                 (
                     row.get::<i64, _>("page_number"),
                     row.get::<Option<String>, _>("content"),
+                    row.get::<bool, _>("has_report_collection_date"),
                 )
             })
             .collect::<Vec<_>>();
@@ -396,8 +574,12 @@ impl Database {
             .run(move || {
                 Ok(evidence
                     .into_iter()
-                    .flat_map(|(page, content)| {
-                        crate::ocr::validation_issues(content.as_deref().unwrap_or(""), page)
+                    .flat_map(|(page, content, has_report_collection_date)| {
+                        crate::ocr::validation_issues(
+                            content.as_deref().unwrap_or(""),
+                            page,
+                            has_report_collection_date,
+                        )
                     })
                     .collect::<Vec<_>>())
             })
@@ -469,6 +651,7 @@ impl Database {
                 .review(
                     user_id,
                     ReviewRequest {
+                        new_metric: None,
                         report_id: report_id.into(),
                         expected_revision: report.revision,
                         context: Some(context),
@@ -486,6 +669,16 @@ impl Database {
     }
     pub async fn review(&self, user_id: &str, request: ReviewRequest) -> Result<Value, AppError> {
         let report = self.report_summary(user_id, &request.report_id).await?;
+        if request.new_metric.is_some()
+            && (request.observations.len() != 1
+                || request.observations[0].observation_id.is_none()
+                || request.observations[0].status == "rejected"
+                || request.observations[0].payload.metric_id.is_some())
+        {
+            return Err(AppError::Invalid(
+                "Create a metric while reviewing one existing result",
+            ));
+        }
         if request.observations.len() > 2000 {
             return Err(AppError::TooLarge);
         }
@@ -603,7 +796,66 @@ impl Database {
                     .await?;
             }
         }
-        for observation in request.observations {
+        let created_metric = if let Some(metric) = request.new_metric {
+            let name = metric.name.trim();
+            let name_key = crate::laboratory_names::key(name);
+            let standard_unit = crate::laboratory::custom_unit(&metric.standard_unit);
+            if !metric.is_valid() {
+                return Err(AppError::Invalid(
+                    "Use a metric name without the printed test code and a unit of up to 64 bytes",
+                ));
+            }
+            if crate::laboratory::infer_metric(
+                name,
+                (!standard_unit.is_empty()).then_some(standard_unit),
+            )
+            .is_some()
+            {
+                return Err(AppError::Conflict(
+                    "A matching Browse metric already exists. Select it instead.",
+                ));
+            }
+            let custom = CustomMetric {
+                metric_id: format!("custom:{}", uuid::Uuid::new_v4()),
+                name: name.to_owned(),
+                standard_unit: standard_unit.to_owned(),
+            };
+            let inserted = sqlx::query(queries::INSERT_CUSTOM_LAB_METRIC)
+                .bind(&custom.metric_id)
+                .bind(user_id)
+                .bind(&custom.name)
+                .bind(name_key)
+                .bind(&custom.standard_unit)
+                .execute(&mut *transaction)
+                .await?;
+            if inserted.rows_affected() != 1 {
+                return Err(AppError::Conflict(
+                    "You already have a metric with this name and unit",
+                ));
+            }
+            Some(custom)
+        } else {
+            None
+        };
+        let custom_metrics: Vec<CustomMetric> = sqlx::query_as(queries::CUSTOM_LAB_METRICS)
+            .bind(user_id)
+            .fetch_all(&mut *transaction)
+            .await?;
+        for mut observation in request.observations {
+            if let Some(metric) = &created_metric {
+                observation.payload.metric_id = Some(metric.metric_id.clone());
+            }
+            if let Some(id) = observation
+                .payload
+                .metric_id
+                .as_deref()
+                .filter(|id| id.starts_with("custom:"))
+                && !custom_metrics.iter().any(|metric| metric.metric_id == id)
+            {
+                return Err(AppError::Invalid(
+                    "Custom metric is not available for this account",
+                ));
+            }
             let (id, revision) = if let Some(id) = observation.observation_id {
                 let current: Option<i64> = sqlx::query_scalar(queries::OBSERVATION)
                     .bind(user_id)
@@ -656,7 +908,11 @@ impl Database {
             .await?;
         transaction.commit().await?;
         self.reconcile_report_drafts().await?;
-        self.report(user_id, &request.report_id).await
+        let mut document = self.report(user_id, &request.report_id).await?;
+        if let Some(metric) = created_metric {
+            document["created_metric"] = serde_json::to_value(metric)?;
+        }
+        Ok(document)
     }
     pub async fn observation_history(
         &self,
@@ -684,7 +940,7 @@ impl Database {
         if rows.len() > 10000 {
             return Err(AppError::TooLarge);
         }
-        decode_observations(&self.cpu, rows).await
+        decode_observations(&self.cpu, rows, self.custom_metrics(user_id).await?, false).await
     }
     pub async fn relate_reports(
         &self,
@@ -759,6 +1015,13 @@ impl Database {
     }
 }
 
+pub(crate) fn history_record(observation: &Observation) -> Value {
+    json!({"point_id":format!("report:{}", observation.observation_id),
+            "observation_id":observation.observation_id,"report_id":observation.report_id,
+            "sampled_at":observation.payload.sampled_at,"display_value":observation.payload.raw_result,
+            "unit":observation.payload.raw_unit,"status":observation.status,"original":observation.payload})
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrendRequest {
@@ -801,10 +1064,7 @@ pub async fn trends(
         {
             continue;
         }
-        records.push(json!({"point_id":format!("report:{}", observation.observation_id),
-            "observation_id":observation.observation_id,"report_id":observation.report_id,
-            "sampled_at":observation.payload.sampled_at,"display_value":observation.payload.raw_result,
-            "unit":observation.payload.raw_unit,"status":observation.status,"original":observation.payload}));
+        records.push(history_record(&observation));
         let Some(date) = observation.payload.sampled_at.as_deref() else {
             excluded.push(json!({"observation_id":observation.observation_id,"reason":"missing_collection_date"}));
             incomparable += 1;
@@ -814,7 +1074,11 @@ pub async fn trends(
         if timestamp < start || timestamp > end {
             continue;
         }
-        let Some((number, unit)) = crate::laboratory::normalized(&observation.payload) else {
+        let quantity = &observation.interpretation.result;
+        let Some((number, unit)) = (quantity.status == "exact")
+            .then(|| quantity.value.as_ref().zip(quantity.unit.as_ref()))
+            .flatten()
+        else {
             excluded.push(json!({"observation_id":observation.observation_id,"reason":observation.interpretation.result.status}));
             incomparable += 1;
             continue;
@@ -849,10 +1113,12 @@ pub struct ExtractionInputRequest {
 async fn decode_observations(
     cpu: &crate::execution::CpuExecutor,
     rows: Vec<StoredObservation>,
+    custom_metrics: Vec<CustomMetric>,
+    include_suggestions: bool,
 ) -> Result<Vec<Observation>, AppError> {
     cpu.run(move || {
         rows.into_iter()
-            .map(StoredObservation::decode)
+            .map(|row| row.decode(&custom_metrics, include_suggestions))
             .filter(|row| {
                 !row.as_ref()
                     .is_ok_and(|o| crate::laboratory::is_administrative_name(&o.payload.raw_name))

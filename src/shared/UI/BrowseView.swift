@@ -7,13 +7,16 @@ struct BrowseView: View {
     @State var loading = false
     @State var search = ""
     private var categories: [BrowseCategory] { catalog["categories"].arrayValue.map { BrowseCategory($0) } }
-    private func matches(_ texts: String...) -> Bool {
-        let words = search.split(whereSeparator: { $0.isWhitespace }).map(String.init)
-        return words.allSatisfy { word in texts.contains { $0.localizedStandardContains(word) } }
+    private var entries: [BrowseEntry] {
+        catalog["entries"].arrayValue.map { BrowseEntry(value: $0) }.filter { !$0.kind.hasPrefix("report-review:") }
     }
-    private var entries: [BrowseEntry] { catalog["entries"].arrayValue.map { BrowseEntry(value: $0) } }
     private var searchedEntries: [BrowseEntry] {
-        entries.filter { entry in matches(entry.title, entry.kind, categories.first { $0.id == entry.categoryID }?.title ?? "") }
+        let words = search.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        return entries.filter { entry in
+            let category = categories.first { $0.id == entry.categoryID }?.title ?? ""
+            let terms = [entry.title, entry.kind, category] + entry.aliases
+            return words.allSatisfy { word in terms.contains { $0.localizedStandardContains(word) } }
+        }
     }
     #if os(Android)
     @State var detailPath: [BrowseChoice] = []
@@ -57,7 +60,8 @@ struct BrowseView: View {
             }.padding()
         }.mobileNavigationTitle("Browse")
             .metricsSearch($search)
-            .initialTask { await reload() }.refreshable { await reload() }
+            .initialTask(id: model.reportDataRevision) { await reload() }
+            .refreshable { await reload() }
     }
     private func categoryGrid(title: String) -> some View {
         let categories = categories.filter { $0.section == title }
@@ -128,17 +132,18 @@ struct BrowseView: View {
     }
     private func reload() async {
         guard let token = model.session?.token else { return }
+        let revision = model.reportDataRevision
         loading = true; failure = nil
-        defer { loading = false }
+        defer { if model.reportDataRevision == revision { loading = false } }
         do {
             if catalog == .null, let snapshot = try model.cachedResponse("browse/catalog", body: .object([:])) {
                 catalog = snapshot
             }
             let result = try await model.request("browse/catalog", body: .object([:]))
-            guard !Task.isCancelled, model.session?.token == token else { return }
+            guard !Task.isCancelled, model.session?.token == token, model.reportDataRevision == revision else { return }
             catalog = result
         } catch {
-            guard !Task.isCancelled, model.session?.token == token else { return }
+            guard !Task.isCancelled, model.session?.token == token, model.reportDataRevision == revision else { return }
             failure = error.localizedDescription
         }
     }
@@ -171,6 +176,7 @@ private struct BrowseEntry: Identifiable {
     var title: String { value["title"].stringValue }
     var kind: String { value["kind"].stringValue }
     var categoryID: String { value["category_id"].stringValue }
+    var aliases: [String] { value["aliases"].arrayValue.map { $0.stringValue } }
     var choice: BrowseChoice {
         let definition = value["definition"]
         switch value["presentation"].stringValue {

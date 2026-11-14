@@ -1,5 +1,16 @@
+import Foundation
+
 /// Formats server-derived laboratory evidence without implementing conversion rules on the phone.
 public nonisolated enum LaboratoryPresentation {
+    public static func printedName(_ rawName: String, code: String) -> String {
+        guard !code.isEmpty else { return rawName }
+        let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.last == ")", let opening = trimmed.lastIndex(of: "("),
+              trimmed[trimmed.index(after: opening)..<trimmed.index(before: trimmed.endIndex)]
+                .trimmingCharacters(in: .whitespacesAndNewlines) == code else { return rawName }
+        return String(trimmed[..<opening]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     public static func originalReference(_ payload: JSONValue, reference: JSONValue) -> String {
         let text = payload["reference_range"].stringValue
         guard !text.isEmpty else { return "Original reference: not provided" }

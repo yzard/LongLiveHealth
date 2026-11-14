@@ -662,6 +662,7 @@ nonisolated final class SmokeTests: XCTestCase {
         let report = app.buttons["report-row-fixture-report"]
         XCTAssertTrue(report.waitForExistence(timeout: 10))
         XCTAssertTrue(report.label.contains("Example Laboratory"))
+        XCTAssertTrue(report.label.contains("2026-10-01"))
         XCTAssertFalse(app.staticTexts["Your reports"].exists)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Last refreshed")).firstMatch.exists)
         report.tap()

@@ -430,8 +430,16 @@ async fn relate_reports(
         .await?;
     Ok(Json(json!({"updated":true})))
 }
-async fn list_metrics(_current: CurrentUser) -> Json<serde_json::Value> {
-    Json(json!({"metrics":crate::laboratory::metrics()}))
+async fn list_metrics(
+    State(state): State<AppState>,
+    current: CurrentUser,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let mut metrics = serde_json::to_value(crate::laboratory::metrics())?;
+    let entries = metrics.as_array_mut().ok_or(AppError::Internal)?;
+    for metric in state.database.custom_metrics(&current.user.user_id).await? {
+        entries.push(serde_json::to_value(metric)?);
+    }
+    Ok(Json(json!({"metrics":metrics})))
 }
 async fn browse_catalog(
     State(state): State<AppState>,

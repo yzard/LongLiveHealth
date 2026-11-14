@@ -26,6 +26,11 @@ struct ReportsView: View {
                             let source = report["context"]["source_name"].stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
                             Text(source.isEmpty ? "Source not set" : source).font(.headline)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                            let collectionDate = report["collection_date"].stringValue
+                            Text(collectionDate.isEmpty ? "—" : collectionDate)
+                                .font(.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .accessibilityLabel(Text(collectionDate.isEmpty ? "Collection date unavailable" : "Collection date \(collectionDate)"))
                             Text(report["created_at"].numberValue.map { Date(timeIntervalSince1970: $0).formatted(date: .abbreviated, time: .shortened) } ?? "—")
                                 .font(.caption).foregroundStyle(.secondary)
                                 .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)

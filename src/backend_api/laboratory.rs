@@ -4,7 +4,7 @@ use rust_decimal::Decimal;
 use serde::Serialize;
 use std::str::FromStr;
 
-pub const CONVERSION_VERSION: &str = "lab-units-v8";
+pub const CONVERSION_VERSION: &str = "lab-units-v11";
 pub const CANONICAL_UNITS: &[&str] = &[
     "mg/dL",
     "mg/L",
@@ -41,6 +41,7 @@ pub const CANONICAL_UNITS: &[&str] = &[
     "U/mL",
     "Angstrom",
     "% by wt",
+    "/100 WBC's",
     "1",
     "mL/min/1.73m2",
 ];
@@ -93,12 +94,203 @@ pub fn metrics() -> Vec<MetricDefinition> {
     .collect()
 }
 
+static DEFINITIONS: std::sync::LazyLock<
+    std::collections::BTreeMap<&'static str, MetricDefinition>,
+> = std::sync::LazyLock::new(|| {
+    metrics()
+        .into_iter()
+        .map(|metric| (metric.metric_id, metric))
+        .collect()
+});
+
+pub(crate) fn metric_aliases(id: &str) -> impl Iterator<Item = &'static str> {
+    crate::laboratory_names::EXISTING_ALIASES
+        .iter()
+        .filter(move |(metric, _)| *metric == id)
+        .flat_map(|(_, aliases)| aliases.iter().copied())
+        .chain(
+            crate::laboratory_names::EXTRA
+                .iter()
+                .filter(move |(metric, _, _, _)| *metric == id)
+                .flat_map(|(_, _, _, aliases)| aliases.iter().copied()),
+        )
+}
+
+pub(crate) fn ocr_metric_catalog(
+    account_metrics: &[CustomMetric],
+) -> Vec<(&str, &str, &str, Vec<&str>)> {
+    let mut catalog: std::collections::BTreeMap<_, _> = DEFINITIONS
+        .values()
+        .map(|metric| (metric.metric_id, (metric.name, metric.standard_unit)))
+        .collect();
+    for metric in account_metrics {
+        catalog.insert(&metric.metric_id, (&metric.name, &metric.standard_unit));
+    }
+    catalog
+        .into_iter()
+        .map(|(id, (name, unit))| {
+            let aliases = metric_aliases(id)
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            (id, name, unit, aliases)
+        })
+        .collect()
+}
+
+pub(crate) fn known_ocr_metric(id: &str, account_metrics: &[CustomMetric]) -> bool {
+    DEFINITIONS.contains_key(id) || account_metrics.iter().any(|metric| metric.metric_id == id)
+}
+
+pub(crate) fn verified_custom_candidate<'a>(
+    payload: &ObservationPayload,
+    custom: &'a [CustomMetric],
+) -> Option<&'a str> {
+    if payload
+        .ocr_mapping_note
+        .as_ref()
+        .is_some_and(|note| !note.trim().is_empty())
+    {
+        return None;
+    }
+    let id = payload.ocr_metric_candidate.as_deref()?;
+    let (name, code) = split_test_code(&payload.raw_name);
+    if code.and_then(loinc_metric).is_some() {
+        return None;
+    }
+    let unit = payload
+        .raw_unit
+        .as_deref()
+        .map(custom_unit)
+        .unwrap_or_default();
+    let key = crate::laboratory_names::key(name);
+    let mut exact = custom.iter().filter(|metric| {
+        metric.standard_unit == unit && crate::laboratory_names::key(&metric.name) == key
+    });
+    let matched = exact.next()?;
+    (matched.metric_id == id && exact.next().is_none()).then_some(matched.metric_id.as_str())
+}
+
+/// A numeric test code in the final parentheses is separate from the printed name.
+pub fn split_test_code(name: &str) -> (&str, Option<&str>) {
+    let name = name.trim();
+    if let Some((label, code)) = name
+        .strip_suffix(')')
+        .and_then(|value| value.rsplit_once('('))
+        && !label.trim().is_empty()
+        && let Some((number, check_digit)) = code.trim().split_once('-')
+        && (1..=7).contains(&number.len())
+        && number.bytes().all(|byte| byte.is_ascii_digit())
+        && check_digit.len() == 1
+        && check_digit.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return (label.trim_end(), Some(code.trim()));
+    }
+    (name, None)
+}
+
+pub fn display_name<'a>(raw_name: &'a str, metric_id: Option<&str>) -> &'a str {
+    metric_id
+        .and_then(|id| DEFINITIONS.get(id))
+        .map_or_else(|| split_test_code(raw_name).0, |metric| metric.name)
+}
+
+// Closed LOINC mapping, verified against https://loinc.org/<code>/.
+// Unknown codes remain in the raw archive; labels are never guessed from display text.
+pub(crate) fn loinc_metric(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "2089-1" | "13457-7" | "18262-6" => "ldl_cholesterol",
+        "2093-3" => "total_cholesterol",
+        "2085-9" => "hdl_cholesterol",
+        "2571-8" => "triglycerides",
+        "1884-6" => "apob",
+        "4548-4" => "hba1c",
+        "2345-7" => "glucose",
+        "718-7" => "hemoglobin",
+        "2160-0" => "creatinine",
+        "2276-4" => "ferritin",
+        "1751-7" => "albumin",
+        "1988-5" => "crp",
+        "736-9" => "lymphocyte_percent",
+        "787-2" => "mcv",
+        "788-0" => "rdw",
+        "6768-6" => "alp",
+        "6690-2" => "wbc",
+        "1742-6" => "alt",
+        "1920-8" => "ast",
+        "2951-2" => "sodium",
+        "2823-3" => "potassium",
+        "2075-0" => "chloride",
+        "2028-9" => "carbon_dioxide",
+        "17861-6" => "calcium",
+        "3094-0" => "bun",
+        "2336-6" | "10834-0" => "globulin",
+        "3097-3" => "bun_creatinine_ratio",
+        "2777-1" => "serum_phosphate",
+        "3013-0" => "thyroglobulin",
+        "19123-9" => "serum_magnesium",
+        "2731-8" => "intact_pth",
+        "62292-8" | "68438-1" => "vitamin_d_25_oh_total",
+        "49054-0" => "vitamin_d_25_oh_d2",
+        "1989-3" => "vitamin_d_25_oh_d3",
+        "2885-2" => "total_protein",
+        "1975-2" => "total_bilirubin",
+        "4544-3" => "hematocrit",
+        "785-6" => "mch",
+        "786-4" => "mchc",
+        "32623-1" => "mpv",
+        "777-3" => "platelets",
+        "789-8" => "rbc",
+        "5767-9" => "urine_appearance",
+        "32167-9" => "urine_clarity",
+        "704-7" => "basophil_count",
+        "706-2" => "basophil_percent",
+        "711-2" => "eosinophil_count",
+        "713-8" => "eosinophil_percent",
+        "731-0" => "lymphocyte_count",
+        "742-7" => "monocyte_count",
+        "5905-5" => "monocyte_percent",
+        "751-8" => "neutrophil_count",
+        "770-8" => "neutrophil_percent",
+        "3040-3" => "lipase",
+        "3024-7" => "free_t4",
+        "3016-3" => "tsh",
+        "11580-8" => "tsh",
+        "8098-6" => "thyroglobulin_antibodies",
+        "38518-7" | "71695-1" => "immature_granulocyte_percent",
+        "51584-1" | "53115-2" => "immature_granulocyte_count",
+        "771-6" | "30392-5" => "nrbc_count",
+        "58413-6" | "18309-5" => "nrbc_per_100_wbc",
+        "3026-2" | "83119-8" => "total_t4",
+        "14804-9" => "ldh",
+        "13458-5" => "vldl_cholesterol",
+        "11054-4" => "ldl_hdl_ratio",
+        "44733-4" => "triglyceride_hdl_ratio",
+        "2095-8" => "hdl_percent_total_cholesterol",
+        "9830-1" => "cholesterol_hdl_ratio",
+        "3084-1" => "uric_acid",
+        "2324-2" => "ggt",
+        "2498-4" => "iron",
+        "8099-4" => "tpo_antibodies",
+        "17856-6" => "hba1c",
+        "2514-8" => "urine_ketones",
+        "5794-3" => "urine_occult_blood",
+        "5802-4" => "urine_nitrite",
+        "5799-2" => "urine_leukocyte_esterase",
+        "5778-6" => "urine_color",
+        "20454-5" => "urine_protein",
+        "25428-4" => "urine_glucose",
+        "50231-0" => "urine_hyaline_casts",
+        _ => return None,
+    })
+}
+
 /// Explicit user mappings take precedence. Inference never modifies printed payloads.
 /// Administrative fields are archive context, never patient measurements.
 /// Exact field names avoid dropping real tests such as an antibody screen or specimen creatinine.
 pub fn is_administrative_name(name: &str) -> bool {
     matches!(
-        crate::laboratory_names::key(name).as_str(),
+        crate::laboratory_names::key(split_test_code(name).0).as_str(),
         "specimenexpirationdate"
             | "specimenexpirationdateofblood"
             | "specimenexpirydate"
@@ -138,49 +330,238 @@ pub fn resolved_metric(payload: &ObservationPayload) -> Option<&str> {
     if is_administrative_name(&payload.raw_name) {
         return None;
     }
-    payload
-        .metric_id
-        .as_deref()
-        .or_else(|| infer_metric(&payload.raw_name, payload.raw_unit.as_deref()))
+    payload.metric_id.as_deref().or_else(|| {
+        if payload
+            .ocr_mapping_note
+            .as_ref()
+            .is_some_and(|note| !note.trim().is_empty())
+        {
+            return None;
+        }
+        infer_metric(&payload.raw_name, payload.raw_unit.as_deref()).or_else(|| {
+            let (label, code) = split_test_code(&payload.raw_name);
+            let heading = crate::laboratory_names::key(payload.ocr_section_heading.as_deref()?);
+            let urine_section = heading == "urine"
+                || heading.starts_with("urinalysis")
+                || matches!(
+                    heading.as_str(),
+                    "urinetest"
+                        | "urineroutine"
+                        | "urineanalysis"
+                        | "urinemacroscopic"
+                        | "urinemicroscopic"
+                        | "urinephysicalexamination"
+                );
+            (payload.ocr_metric_candidate.as_deref() == Some("urine_appearance")
+                && crate::laboratory_names::key(label) == "appearance"
+                && code.is_none()
+                && urine_section
+                && payload
+                    .raw_unit
+                    .as_deref()
+                    .is_none_or(|unit| unit.trim().is_empty() || canonical_unit(unit) == Some("1")))
+            .then_some("urine_appearance")
+        })
+    })
 }
 
-pub fn infer_metric(name: &str, raw_unit: Option<&str>) -> Option<&'static str> {
-    type Candidates = Vec<(&'static str, &'static str)>;
-    static INDEX: std::sync::LazyLock<std::collections::BTreeMap<String, Candidates>> =
-        std::sync::LazyLock::new(|| {
-            let mut index = std::collections::BTreeMap::<String, Candidates>::new();
-            for metric in metrics() {
-                let mut names = vec![metric.name];
-                for (_, aliases) in crate::laboratory_names::EXISTING_ALIASES
+// Previously issued clinical IDs still open the corresponding history and guide.
+pub(crate) fn canonical_history_id(id: &str) -> &str {
+    match id {
+        "clinical:edd89ae78ca4fa80bef33fcbf1acceca239aba400eab37d16677d13d83293271" => {
+            "vitamin_d_25_oh_total"
+        }
+        "clinical:e4c1ef2c51dac3bd5240dc82556330573bee7e98f8fceefa03c70bf38cc9bf0d" => {
+            "vitamin_d_25_oh_d3"
+        }
+        "clinical:7ab8a8adb6b2f4ec5ec4cb6fe7c9842f952dfea139183dc8c21d15a887f1c44e" => {
+            "bun_creatinine_ratio"
+        }
+        "clinical:cba92749dfff0342bdf57a4ac09165636d5d94eb4695b2798c0bb9499782b817" => {
+            "serum_phosphate"
+        }
+        "clinical:599284c9549c3c631d6aee4ddabe2a400a698996e714ffe4cc69e767b6245417" => {
+            "thyroglobulin"
+        }
+        "clinical:a335f19f51d64583e1f1f6152dc993c69bdbd1147c4d35663472d81acc74e7da" => {
+            "serum_magnesium"
+        }
+        "clinical:e72d76d9f5efb4586c214350591df35164ed183acb1ead4ef5d79a15351775bb" => "intact_pth",
+        "clinical:34b9f612dde80cf147469fed472154062c0447037e31a5c11911bf2ff3f92702" => {
+            "vitamin_d_25_oh_total"
+        }
+        "clinical:c4984e4189742ffb054258b800419c3906005e3971d0832dddb9f0feb36853e8" => {
+            "immature_granulocyte_percent"
+        }
+        "clinical:97c1cdd6c36b505ad71b6bbe8bac2b9a796f533334789167af0c52d4c4ffa0a6" => {
+            "immature_granulocyte_percent"
+        }
+        "clinical:96feb2056ce4641c5589c7dcabebbb4c6c95eea22df875b679d3f5d8a76b27ab" => {
+            "immature_granulocyte_count"
+        }
+        "clinical:4241c2d11b7ae792427a06df0264b577e9be832cec44e96ea28722efe90b683e" => {
+            "immature_granulocyte_count"
+        }
+        "clinical:b9eea2a3f386e9c03fa55e1b9dd53f349c18f4d5b0ea10ce29617c7d2ec6ce9f" => "nrbc_count",
+        "clinical:cf87113870a5059412204cf0a62f8a31e468ed871a65b456587ea90af92a4a52" => "nrbc_count",
+        "clinical:ef3b2d1f3d722a6d1b7d3306571a53a84560630f527c8127befcebbd735aa509" => {
+            "nrbc_per_100_wbc"
+        }
+        "clinical:555ca6941f1883ed87ef6c5d94efd02be40988630cd977af992cd7cdd70e1745" => {
+            "nrbc_per_100_wbc"
+        }
+        "clinical:55124fbe978a39e61c77ee3f4cd239186a4b8ca18e7f2a5c1b59f0dca8d25bb4" => "total_t4",
+        "clinical:9e8b162ad7697935375292af498020eb5f88e2c1fcd33ecdc00b6b0e330f9d38" => "total_t4",
+        "clinical:a7b43dc3c8d5f7e235d51d77d681a51e7964423767703202a66600a47f822083" => "ldh",
+        "clinical:0b0389fdf2077f4ccedd0f7d3a116bad2518123457e5b039bee9cea9b891e22e" => {
+            "vldl_cholesterol"
+        }
+        "clinical:150e1bcf73eb2b02af4f4a12400b00184e19c602e9321a533812e76ee610a355" => {
+            "ldl_hdl_ratio"
+        }
+        "clinical:f8c69c3356489bd567bd37e74055adfe26ec63693de99dc8742c463e6bfcca28" => {
+            "triglyceride_hdl_ratio"
+        }
+        "clinical:5402913b367638561a621a92e8839c87d305408498de198468a9726488876473" => {
+            "hdl_percent_total_cholesterol"
+        }
+        "clinical:ff6cde80d22d3f74637044c84573981e38a7f8f13e3258c000657b3855c7caf1" => {
+            "cholesterol_hdl_ratio"
+        }
+        "clinical:90acdb43a32563d5bcf1cfc436cc7b08cd9c729a622d52c4f7a349217a4a0849" => "uric_acid",
+        "clinical:a3f6426d0f2a32653bfc74abe5f3e13dc107b53e9c3933442a41b752fac87a44" => "ggt",
+        "clinical:a9764002077ab758442a8b2539ec96a9f2989e4e82644777d14a92d9e2508434" => "iron",
+        "clinical:9c522152e76d3760632a607854467165bffa6487b5f6704f2ed3ceb98459fd0d" => {
+            "tpo_antibodies"
+        }
+        "clinical:723c7b05071903e5de445ebd3174b6dd48c9ef0533909188c8b0bf9755b7b89f" => "hba1c",
+        "clinical:416205bd8baed739ad01aa8c9655da446f3e82199e28a706ba5784981f15adfa" => {
+            "urine_ketones"
+        }
+        "clinical:57319cf6b1370f896c84139f6e53269381db6ae8ef787fd3a941552e8c60656d" => {
+            "urine_occult_blood"
+        }
+        "clinical:7f7ed81d79f6c5ccdd17ad2ee569f81cf617e87cfa6d0022b61ac7385f669bde" => {
+            "urine_nitrite"
+        }
+        "clinical:cf226eab3c008056dc22a1524a39e259254f6b42c0c4a4503bfb8bbdddd6c25e" => {
+            "urine_leukocyte_esterase"
+        }
+        "clinical:52aed447c69feda115b0c0471bea884a6e43e2b45a04e042198698bbd8aab0be" => {
+            "urine_color"
+        }
+        "clinical:8a5e596909d99ca2fa3a06b13de89685a660123799fff0fcb394269962644975" => {
+            "urine_protein"
+        }
+        "clinical:e0af1aba74298311164659889f0699fbfd955aa8ad37a23a522f58dc1076bd55" => {
+            "urine_glucose"
+        }
+        "clinical:d3bfe87fd4799952812ba33e66827d3ea23adf78c439ceaaf210b75771cd7159" => {
+            "urine_hyaline_casts"
+        }
+        _ => id,
+    }
+}
+
+pub(crate) fn resolved_report_metric<'a>(
+    payload: &'a ObservationPayload,
+    source_name: Option<&str>,
+) -> Option<&'a str> {
+    let resolved = resolved_metric(payload);
+    // The Function Health report label "Vitamin D" denotes its blood 25(OH)D test.
+    // A bare label from another provider remains unspecified.
+    if payload.metric_id.is_none()
+        && resolved == Some("vitamin_d_unspecified")
+        && source_name.is_some_and(|source| source.trim().eq_ignore_ascii_case("Function Health"))
+        && crate::laboratory_names::key(&payload.raw_name) == "vitamind"
+        && payload.raw_unit.as_deref().and_then(canonical_unit) == Some("ng/mL")
+    {
+        return Some("vitamin_d_25_oh_total");
+    }
+    resolved
+}
+
+// These codes are used with misleading labels in some reports. Their
+// LOINC properties are not equivalent to the catalog candidates below.
+fn incompatible_lab_code(code: &str, metric: &str) -> bool {
+    matches!(
+        (code, metric),
+        ("15210-8", "thyroglobulin_antibodies")
+            | ("32786-6", "tpo_antibodies")
+            | ("31160-5", "neutrophil_percent")
+            | ("51384-6", "monocyte_percent")
+    )
+}
+
+pub fn test_code_conflicts(name: &str) -> bool {
+    let (label, code) = split_test_code(name);
+    if let Some(code) = code
+        && ALIAS_INDEX
+            .get(&crate::laboratory_names::key(label))
+            .is_some_and(|candidates| {
+                candidates
                     .iter()
-                    .filter(|(id, _)| *id == metric.metric_id)
-                {
-                    names.extend_from_slice(aliases);
-                }
-                for (_, _, _, aliases) in crate::laboratory_names::EXTRA
-                    .iter()
-                    .filter(|(id, _, _, _)| *id == metric.metric_id)
-                {
-                    names.extend_from_slice(aliases);
-                }
-                for name in names {
-                    let candidates = index.entry(crate::laboratory_names::key(name)).or_default();
-                    if !candidates.contains(&(metric.metric_id, metric.standard_unit)) {
-                        candidates.push((metric.metric_id, metric.standard_unit));
-                    }
+                    .any(|(metric, _)| incompatible_lab_code(code, metric))
+            })
+    {
+        return true;
+    }
+    code.and_then(loinc_metric).is_some_and(|coded| {
+        infer_metric(name, None) != Some(coded)
+            && infer_metric(label, None).is_some_and(|named| named != coded)
+    })
+}
+
+type Candidates = Vec<(&'static str, &'static str)>;
+static ALIAS_INDEX: std::sync::LazyLock<std::collections::BTreeMap<String, Candidates>> =
+    std::sync::LazyLock::new(|| {
+        let mut index = std::collections::BTreeMap::<String, Candidates>::new();
+        for metric in metrics() {
+            for name in std::iter::once(metric.name).chain(metric_aliases(metric.metric_id)) {
+                let candidates = index.entry(crate::laboratory_names::key(name)).or_default();
+                if !candidates.contains(&(metric.metric_id, metric.standard_unit)) {
+                    candidates.push((metric.metric_id, metric.standard_unit));
                 }
             }
-            index
-        });
-    let candidates: Vec<_> = INDEX
-        .get(&crate::laboratory_names::key(name))?
+        }
+        index
+    });
+
+pub fn infer_metric(name: &str, raw_unit: Option<&str>) -> Option<&'static str> {
+    let (name, code) = split_test_code(name);
+    let key = crate::laboratory_names::key(name);
+    let named = ALIAS_INDEX.get(&key);
+    let accepts_unit = |id: &str, standard: &str| {
+        raw_unit
+            .filter(|unit| !unit.trim().is_empty())
+            .is_none_or(|raw| {
+                canonical_unit(raw).is_some_and(|unit| conversion(id, standard, unit).is_some())
+            })
+    };
+    if let Some(id) = code.and_then(loinc_metric) {
+        let metric = DEFINITIONS.get(id)?;
+        let name_matches = key == "test"
+            // Some CBC tables use the same bare label for percentage and
+            // absolute rows. Require the percentage LOINC for these aliases.
+            || matches!(
+                (id, key.as_str()),
+                ("lymphocyte_percent", "lymphocytes")
+                    | ("eosinophil_percent", "eosinophils")
+                    | ("basophil_percent", "basophils")
+            )
+            || (id == "vitamin_d_25_oh_total" && key == "vitamind")
+            || (id == "serum_magnesium" && key == "magnesium")
+            || (matches!(id, "urine_protein" | "urine_glucose" | "urine_color")
+                && key == id.trim_start_matches("urine_"))
+            || (matches!(id, "urine_appearance" | "urine_clarity") && key == "appearance")
+            || (id == "urine_clarity" && key == "clarity")
+            || named.is_some_and(|candidates| candidates.iter().any(|(name_id, _)| *name_id == id));
+        return (name_matches && accepts_unit(id, metric.standard_unit)).then_some(id);
+    }
+    let candidates: Vec<_> = named?
         .iter()
         .filter(|(id, standard)| {
-            raw_unit
-                .filter(|unit| !unit.trim().is_empty())
-                .is_none_or(|raw| {
-                    canonical_unit(raw).is_some_and(|unit| conversion(id, standard, unit).is_some())
-                })
+            accepts_unit(id, standard) && code.is_none_or(|code| !incompatible_lab_code(code, id))
         })
         .collect();
     if candidates.len() == 1 {
@@ -188,6 +569,158 @@ pub fn infer_metric(name: &str, raw_unit: Option<&str>) -> Option<&'static str> 
     } else {
         None
     }
+}
+
+#[derive(Clone, serde::Deserialize, Serialize, sqlx::FromRow)]
+pub struct CustomMetric {
+    pub metric_id: String,
+    pub name: String,
+    pub standard_unit: String,
+}
+
+pub(crate) fn custom_unit(raw: &str) -> &str {
+    canonical_unit(raw).unwrap_or_else(|| raw.trim())
+}
+
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum UnitMatch {
+    Incompatible,
+    NotReported,
+    Convertible,
+    Exact,
+}
+
+#[derive(Serialize)]
+pub(crate) struct MetricSuggestion<'a> {
+    metric_id: &'a str,
+    name: &'a str,
+    standard_unit: &'a str,
+    unit_match: UnitMatch,
+}
+
+fn name_similarity(printed: &[char], candidate: &[char]) -> usize {
+    if printed == candidate {
+        return 100;
+    }
+    if printed.len().min(candidate.len()) < 3 {
+        return 0;
+    }
+    let mut distances: Vec<usize> = (0..=candidate.len()).collect();
+    for (i, letter) in printed.iter().enumerate() {
+        let mut diagonal = distances[0];
+        distances[0] = i + 1;
+        for (j, other) in candidate.iter().enumerate() {
+            let above = distances[j + 1];
+            distances[j + 1] = (above + 1)
+                .min(distances[j] + 1)
+                .min(diagonal + usize::from(letter != other));
+            diagonal = above;
+        }
+    }
+    100 - 100 * distances[candidate.len()] / printed.len().max(candidate.len())
+}
+
+pub(crate) fn metric_suggestions<'a>(
+    raw_name: &str,
+    raw_unit: Option<&str>,
+    ocr_candidate: Option<&str>,
+    custom_metrics: &'a [CustomMetric],
+) -> Vec<MetricSuggestion<'a>> {
+    let (printed, code) = split_test_code(raw_name);
+    let coded = code.and_then(loinc_metric);
+    let printed: Vec<char> = crate::laboratory_names::key(printed).chars().collect();
+    let mut name_scores = std::collections::BTreeMap::new();
+    if !printed.is_empty() && printed != ['t', 'e', 's', 't'] {
+        for (alias, candidates) in ALIAS_INDEX.iter() {
+            let alias: Vec<char> = alias.chars().collect();
+            let score = name_similarity(&printed, &alias);
+            if score >= 50 {
+                for &(id, _) in candidates {
+                    let best = name_scores.entry(id).or_insert(0);
+                    *best = (*best).max(score);
+                }
+            }
+        }
+    }
+    if let Some(candidate) = ocr_candidate.and_then(|id| DEFINITIONS.get(id)) {
+        name_scores
+            .entry(candidate.metric_id)
+            .and_modify(|score| *score = (*score).max(85))
+            .or_insert(85);
+    }
+    if let Some(id) = coded {
+        name_scores.insert(id, 100);
+    }
+    let reported = raw_unit.map(str::trim).filter(|unit| !unit.is_empty());
+    let mut ranked = Vec::new();
+    let mut add =
+        |id: &'a str, name: &'a str, standard_unit: &'a str, name_score: i32, is_custom: bool| {
+            let unit_match = match reported {
+                None => UnitMatch::NotReported,
+                Some(unit) if unit == standard_unit => UnitMatch::Exact,
+                Some(unit) if custom_unit(unit) == standard_unit => UnitMatch::Convertible,
+                Some(unit)
+                    if !is_custom
+                        && canonical_unit(unit)
+                            .is_some_and(|unit| conversion(id, standard_unit, unit).is_some()) =>
+                {
+                    UnitMatch::Convertible
+                }
+                Some(_) => UnitMatch::Incompatible,
+            };
+            let score = name_score
+                + match unit_match {
+                    UnitMatch::Exact => 24,
+                    UnitMatch::Convertible => 18,
+                    UnitMatch::NotReported => 0,
+                    UnitMatch::Incompatible => -18,
+                };
+            ranked.push((
+                score,
+                MetricSuggestion {
+                    metric_id: id,
+                    name,
+                    standard_unit,
+                    unit_match,
+                },
+            ));
+        };
+    for (id, score) in name_scores {
+        if let Some(metric) = DEFINITIONS.get(id) {
+            add(id, metric.name, metric.standard_unit, score as i32, false);
+        }
+    }
+    for metric in custom_metrics {
+        let name: Vec<char> = crate::laboratory_names::key(&metric.name).chars().collect();
+        let score = name_similarity(&printed, &name).max(
+            if Some(metric.metric_id.as_str()) == ocr_candidate {
+                85
+            } else {
+                0
+            },
+        );
+        if score >= 50 {
+            add(
+                &metric.metric_id,
+                &metric.name,
+                &metric.standard_unit,
+                score as i32,
+                true,
+            );
+        }
+    }
+    ranked.sort_unstable_by(|(a_score, a), (b_score, b)| {
+        b_score
+            .cmp(a_score)
+            .then_with(|| b.unit_match.cmp(&a.unit_match))
+            .then_with(|| a.metric_id.cmp(b.metric_id))
+    });
+    ranked
+        .into_iter()
+        .take(5)
+        .map(|(_, suggestion)| suggestion)
+        .collect()
 }
 
 pub fn canonical_unit(raw: &str) -> Option<&'static str> {
@@ -204,7 +737,7 @@ pub fn canonical_unit(raw: &str) -> Option<&'static str> {
         .collect();
     // Closed spelling aliases. Do not globally lowercase SI prefixes (M is not m).
     match compact.as_str() {
-        "1" | "ratio" => Some("1"),
+        "1" | "ratio" | "Ratio" => Some("1"),
         "%bywt" => Some("% by wt"),
         "Angstrom" | "angstrom" | "Å" => Some("Angstrom"),
         "nmol/L" | "nmol/l" => Some("nmol/L"),
@@ -214,7 +747,7 @@ pub fn canonical_unit(raw: &str) -> Option<&'static str> {
         "cells/mL" | "cells/ml" | "cell/mL" | "count/mL" | "{cells}/mL" => Some("cells/mL"),
         "cells/uL" | "cell/uL" | "#/uL" | "count/uL" | "{cells}/uL" => Some("cells/µL"),
         "mIU/mL" | "mIU/ml" => Some("mIU/mL"),
-        "IU/mL" | "IU/ml" => Some("IU/mL"),
+        "IU/mL" | "IU/ml" | "[IU]/mL" => Some("IU/mL"),
         "U/mL" | "U/ml" => Some("U/mL"),
         "mg/dL" | "mg/dl" | "MG/DL" => Some("mg/dL"),
         "mg/L" | "mg/l" | "MG/L" => Some("mg/L"),
@@ -229,18 +762,26 @@ pub fn canonical_unit(raw: &str) -> Option<&'static str> {
         "ng/dL" | "ng/dl" | "NG/dL" | "NG/dl" | "NG/DL" => Some("ng/dL"),
         "pg/mL" | "pg/ml" | "PG/mL" | "PG/ML" => Some("pg/mL"),
         "pg" | "PG" => Some("pg"),
-        "mIU/L" | "mIU/l" | "uIU/mL" | "uIU/ml" => Some("mIU/L"),
+        "mIU/L" | "mIU/l" | "uIU/mL" | "uIU/ml" | "u[IU]/mL" | "m[IU]/L" => Some("mIU/L"),
         "mL/min/1.73m2" | "ml/min/1.73m2" | "mL/min/{1.73_m2}" => Some("mL/min/1.73m2"),
         "s" | "sec" | "seconds" | "second(s)" => Some("s"),
         "/100WBC's" | "/100WBC’s" | "/100WBC" => Some("/100 WBC's"),
-        "10^12/L" | "10*12/L" | "10¹²/L" | "10^6/uL" | "10*6/uL" | "x10(6)/uL" | "M/uL"
-        | "Million/uL" | "10^12{cells}/L" | "10*12{cells}/L" => Some("10^12/L"),
-        "%" | "%(calc)" | "%NGSP" | "NGSP%" => Some("%"),
+        // CBC reports also use the documented 10E6 and 10E3 unit spellings.
+        "10E6/uL" | "x10E6/uL" | "10e6/uL" | "x10e6/uL" | "10^12/L" | "10*12/L" | "10¹²/L"
+        | "10^6/uL" | "10*6/uL" | "x10(6)/uL" | "M/uL" | "10⁶/uL" | "×10⁶/uL" | "x10⁶/uL"
+        | "×10^6/uL" | "x10^6/uL" | "10(6)/uL" | "10^6/microliter" | "10⁶/microliter"
+        | "×10⁶/microliter" | "×10^6/microliter" | "10^6/microlitre" | "10⁶/microlitre"
+        | "Million/uL" | "million/uL" | "10^6{cells}/uL" | "10*6{cells}/uL" | "10^12{cells}/L"
+        | "10*12{cells}/L" => Some("10^12/L"),
+        "%" | "%(calc)" | "%NGSP" | "NGSP%" | "Percent" | "percent" => Some("%"),
         "mmol/mol" | "MMOL/MOL" => Some("mmol/mol"),
         "U/L" | "IU/L" => Some("U/L"),
-        "10^9/L" | "10⁹/L" | "10^3/uL" | "10³/uL" | "10*9/L" | "10*3/uL" | "K/uL" | "x10(3)/uL"
-        | "x10^3/uL" | "×10^3/uL" | "×10³/uL" | "x10^9/L" | "x10(9)/L" | "×10^9/L" | "×10⁹/L"
-        | "Thousand/uL" | "10^9{cells}/L" | "10*9{cells}/L" => Some("10^9/L"),
+        "10E3/uL" | "x10E3/uL" | "10e3/uL" | "x10e3/uL" | "10^9/L" | "10⁹/L" | "10^3/uL"
+        | "10³/uL" | "10*9/L" | "10*3/uL" | "K/uL" | "x10(3)/uL" | "x10^3/uL" | "×10^3/uL"
+        | "×10³/uL" | "x10^9/L" | "x10(9)/L" | "×10^9/L" | "×10⁹/L" | "10(3)/uL"
+        | "10^3/microliter" | "10³/microliter" | "10^3/microlitre" | "10³/microlitre"
+        | "Thousand/uL" | "thousand/uL" | "10^3{cells}/uL" | "10*3{cells}/uL" | "10^9{cells}/L"
+        | "10*9{cells}/L" => Some("10^9/L"),
         _ => crate::apple_health::volume_unit(&compact).map(|(unit, _)| unit),
     }
 }
@@ -261,6 +802,12 @@ fn conversion(metric: &str, standard: &str, unit: &str) -> Option<Conversion> {
         source: "https://www.nist.gov/pml/owm/metric-si-prefixes",
     };
     if standard == unit {
+        return Some(rule);
+    }
+    if (metric, standard, unit) == ("vitamin_d_25_oh_total", "ng/mL", "nmol/L") {
+        rule.scale = Decimal::new(4, 1);
+        rule.rule = "vitamin-d-25-oh-molar";
+        rule.source = "https://ods.od.nih.gov/factsheets/VitaminD-HealthProfessional/";
         return Some(rule);
     }
     if let Some(exponent) = match standard {
@@ -396,7 +943,7 @@ pub struct Quantity {
     pub upper: Option<String>,
     pub lower_inclusive: Option<bool>,
     pub upper_inclusive: Option<bool>,
-    pub unit: Option<&'static str>,
+    pub unit: Option<String>,
     pub original_unit: Option<String>,
     pub unit_origin: &'static str,
     pub display: Option<String>,
@@ -516,7 +1063,7 @@ fn result_shape(raw: &str, unit: &str) -> Option<Shape> {
     }
     raw.char_indices().find_map(|(index, _)| {
         let (value, suffix) = raw.split_at(index);
-        if canonical_unit(suffix) == Some(unit) {
+        if custom_unit(suffix) == unit {
             shape(value)
         } else {
             None
@@ -526,27 +1073,37 @@ fn result_shape(raw: &str, unit: &str) -> Option<Shape> {
 
 fn derive(
     metric_id: Option<&str>,
+    custom: Option<&CustomMetric>,
     raw: &str,
     raw_unit: Option<&str>,
     origin: &'static str,
     reference: bool,
 ) -> Quantity {
-    let Some(metric) = metrics()
-        .into_iter()
-        .find(|metric| Some(metric.metric_id) == metric_id)
+    let Some((id, standard_unit)) = custom
+        .map(|metric| (metric.metric_id.as_str(), metric.standard_unit.as_str()))
+        .or_else(|| {
+            metric_id
+                .and_then(|id| DEFINITIONS.get(id))
+                .map(|metric| (metric.metric_id, metric.standard_unit))
+        })
     else {
         return Quantity::unavailable("unmapped_metric", raw_unit, origin);
     };
     let Some(raw_unit) = raw_unit
         .filter(|unit| !unit.trim().is_empty())
-        .or((metric.standard_unit == "1").then_some("1"))
+        .or((custom.is_none() && standard_unit == "1").then_some("1"))
     else {
         return Quantity::unavailable("missing_unit", raw_unit, origin);
     };
-    let Some(unit) = canonical_unit(raw_unit) else {
-        return Quantity::unavailable("unsupported_unit", Some(raw_unit), origin);
+    let unit = custom_unit(raw_unit);
+    let rule = if custom.is_some() {
+        (unit == standard_unit && !standard_unit.is_empty())
+            .then(|| conversion(id, standard_unit, unit))
+            .flatten()
+    } else {
+        canonical_unit(raw_unit).and_then(|unit| conversion(id, standard_unit, unit))
     };
-    let Some(rule) = conversion(metric.metric_id, metric.standard_unit, unit) else {
+    let Some(rule) = rule else {
         return Quantity::unavailable("unsupported_unit", Some(raw_unit), origin);
     };
     let Some(parsed) = (if reference {
@@ -565,7 +1122,7 @@ fn derive(
         );
     };
     let mut quantity = Quantity::unavailable("overflow", Some(raw_unit), origin);
-    quantity.unit = Some(metric.standard_unit);
+    quantity.unit = Some(standard_unit.to_owned());
     quantity.rule = Some(rule.rule);
     quantity.source = Some(rule.source);
     let display = match parsed {
@@ -607,7 +1164,7 @@ fn derive(
             format!("{left} – {right}")
         }
     };
-    quantity.display = Some(format!("{display} {}", metric.standard_unit));
+    quantity.display = Some(format!("{display} {standard_unit}"));
     quantity.reason = if quantity.status == "exact" {
         "Deterministic conversion; original value retained."
     } else {
@@ -617,8 +1174,24 @@ fn derive(
 }
 
 pub fn interpret(payload: &ObservationPayload) -> Interpretation {
+    interpret_with_custom(payload, None)
+}
+
+pub(crate) fn interpret_with_custom(
+    payload: &ObservationPayload,
+    custom: Option<&CustomMetric>,
+) -> Interpretation {
+    interpret_metric(payload, resolved_metric(payload), custom)
+}
+
+pub(crate) fn interpret_metric(
+    payload: &ObservationPayload,
+    metric: Option<&str>,
+    custom: Option<&CustomMetric>,
+) -> Interpretation {
     let result = derive(
-        resolved_metric(payload),
+        metric,
+        custom,
         &payload.raw_result,
         payload.raw_unit.as_deref(),
         "observation",
@@ -637,7 +1210,8 @@ pub fn interpret(payload: &ObservationPayload) -> Interpretation {
             });
             if let Some((value, unit)) = explicit {
                 derive(
-                    resolved_metric(payload),
+                    metric,
+                    custom,
                     value,
                     Some(unit),
                     "reference_explicit",
@@ -645,7 +1219,8 @@ pub fn interpret(payload: &ObservationPayload) -> Interpretation {
                 )
             } else {
                 derive(
-                    resolved_metric(payload),
+                    metric,
+                    custom,
                     raw,
                     payload.raw_unit.as_deref(),
                     "observation",
@@ -666,5 +1241,5 @@ pub fn normalized(payload: &ObservationPayload) -> Option<(String, String)> {
     if interpreted.status != "exact" {
         return None;
     }
-    Some((interpreted.value?, interpreted.unit?.into()))
+    Some((interpreted.value?, interpreted.unit?))
 }

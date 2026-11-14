@@ -18,7 +18,7 @@ from pathlib import Path
 TABLES = frozenset(
     'daily_views derived_results deleted_uploads sync_batches reports raw_files extraction_inputs extraction_outputs '
     'observations report_relations extraction_pages health_connections '
-    'health_records health_originals sync_coverage analysis_runs analysis_feedback'.split()
+    'health_records health_originals sync_coverage analysis_runs analysis_feedback custom_lab_metrics'.split()
 )
 MAX_JSON_BYTES = 96 * 1024 * 1024
 
@@ -153,12 +153,14 @@ def audit(path, max_bytes):
                 size == expected['byte_count'] and digest.hexdigest() == expected['sha256'],
                 'Member digest or byte count differs',
             )
+        table_counts = manifest.get('table_counts')
+        tables_present = set(table_counts) if isinstance(table_counts, dict) else set()
         require(
-            isinstance(manifest.get('table_counts'), dict) and set(manifest['table_counts']) == TABLES,
+            tables_present in (TABLES, TABLES - {'custom_lab_metrics'}),
             'Invalid table counts',
         )
         require(
-            isinstance(manifest.get('table_columns'), dict) and set(manifest['table_columns']) == TABLES,
+            isinstance(manifest.get('table_columns'), dict) and set(manifest['table_columns']) == tables_present,
             'Invalid column dictionary',
         )
         dictionary = manifest.get('field_dictionary')
@@ -166,13 +168,13 @@ def audit(path, max_bytes):
             isinstance(dictionary, dict)
             and dictionary.get('version') == 1
             and isinstance(dictionary.get('tables'), dict)
-            and set(dictionary['tables']) == TABLES,
+            and set(dictionary['tables']) == tables_present,
             'Invalid semantic field dictionary',
         )
         user = manifest.get('user_id')
         require(isinstance(user, str) and bool(user), 'Missing archive owner')
         tables = manifest.get('tables')
-        expected_tables = {f'{table}.jsonl' for table in TABLES}
+        expected_tables = {f'{table}.jsonl' for table in tables_present}
         require(isinstance(tables, list) and all(isinstance(t, str) for t in tables), 'Invalid table list')
         require(
             len(tables) == len(expected_tables) and set(tables) == expected_tables,
@@ -185,7 +187,7 @@ def audit(path, max_bytes):
         # Retain only the indexes needed for cross-record checks.
         files, reports, observations, revisions, health = set(), {}, {}, set(), {}
         raw_references, health_references = {}, []
-        for table in sorted(TABLES):
+        for table in sorted(tables_present):
             count = 0
             columns = None
             definitions = manifest['table_columns'][table]

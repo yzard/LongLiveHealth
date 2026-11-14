@@ -20,8 +20,12 @@ pub struct HistoryRequest {
 pub async fn history(
     database: &Database,
     user_id: &str,
-    request: HistoryRequest,
+    mut request: HistoryRequest,
 ) -> Result<Value, AppError> {
+    request.metric_id = crate::laboratory::canonical_history_id(&request.metric_id).to_owned();
+    if request.metric_id.starts_with("report-review:") {
+        return Err(AppError::NotFound);
+    }
     if request.metric_id.starts_with("clinical:") {
         let records = load_health(database, user_id, "").await?;
         return database.cpu.run(move || {
@@ -30,10 +34,21 @@ pub async fn history(
             Ok(json!({"chart_ranges":point_ranges(&group.points),"metric":group.definition,"points":group.points,"records":group.records,"excluded":[],"excluded_count":0,"algorithm_version":"clinical-history-v1"}))
         }).await;
     }
-    let definition = crate::laboratory::metrics()
-        .into_iter()
-        .find(|metric| metric.metric_id == request.metric_id)
-        .ok_or(AppError::Invalid("Unknown metric_id"))?;
+    let definition = if request.metric_id.starts_with("custom:") {
+        let metric = database
+            .custom_metrics(user_id)
+            .await?
+            .into_iter()
+            .find(|metric| metric.metric_id == request.metric_id)
+            .ok_or(AppError::NotFound)?;
+        serde_json::to_value(metric)?
+    } else {
+        let metric = crate::laboratory::metrics()
+            .into_iter()
+            .find(|metric| metric.metric_id == request.metric_id)
+            .ok_or(AppError::Invalid("Unknown metric_id"))?;
+        serde_json::to_value(metric)?
+    };
     let report_history = crate::reports::trends(
         database,
         user_id,
@@ -81,6 +96,14 @@ pub async fn history(
         point["source_key"] = json!(source_id);
         point["source_name"] = json!(source_name);
         point["filename"] = json!(filename);
+    }
+    if request.metric_id.starts_with("custom:") {
+        points.sort_by_key(|point| point["timestamp"].as_i64());
+        return Ok(
+            json!({"chart_ranges":point_ranges(&points),"metric":definition,"records":report_records,"points":points,
+            "excluded":report_history["excluded"],"excluded_count":report_history["incomparable_count"],
+            "algorithm_version":"metric-history-v2","conversion_version":crate::laboratory::CONVERSION_VERSION}),
+        );
     }
     let health = load_health(
         database,
@@ -195,7 +218,7 @@ fn append_health(
     }
     for (candidate, point_id) in candidates {
         let codes = candidate["code"]["coding"].as_array();
-        let matches: Vec<&str> = codes
+        let mut matches: Vec<&str> = codes
             .into_iter()
             .flatten()
             .filter(|coding| {
@@ -204,8 +227,15 @@ fn append_health(
                     Some("http://loinc.org" | "https://loinc.org")
                 )
             })
-            .filter_map(|coding| coding["code"].as_str().and_then(loinc_metric))
+            .filter_map(|coding| {
+                coding["code"]
+                    .as_str()
+                    .and_then(crate::laboratory::loinc_metric)
+            })
             .collect();
+        if crate::clinical_labs::quest_total_vitamin_d(candidate, record) {
+            matches = vec!["vitamin_d_25_oh_total"];
+        }
         if matches.is_empty() && !candidate["valueQuantity"].is_null() {
             unassigned.push(json!({"point_id":point_id,"reason":"unmapped_clinical_metric"}));
             continue;
@@ -293,6 +323,11 @@ fn append_value(
             bounding_box: None,
         },
         notes: None,
+        ocr_mapping_note: None,
+        ocr_metric_candidate: None,
+        ocr_section_heading: None,
+        ocr_new_metric: None,
+        ocr_normalization: None,
     };
     let Some((value, unit)) = crate::laboratory::normalized(&payload) else {
         excluded.push(json!({"point_id":id,"reason":"incompatible_unit_or_value"}));
@@ -300,62 +335,6 @@ fn append_value(
     };
     points.push(json!({"point_id":id,"source_key":format!("apple_health:{}", original["source_id"].as_str().unwrap_or("")),"source_id":original["source_id"],"source_name":"Apple Health", "metric_id":metric,
         "sampled_at":date,"timestamp":timestamp,"value":value,"unit":unit,"original":original}));
-}
-
-// Closed LOINC mapping, verified against https://loinc.org/<code>/.
-// Unknown codes remain in the raw archive; labels are never guessed from display text.
-pub(crate) fn loinc_metric(code: &str) -> Option<&'static str> {
-    Some(match code {
-        "2089-1" | "13457-7" | "18262-6" => "ldl_cholesterol",
-        "2093-3" => "total_cholesterol",
-        "2085-9" => "hdl_cholesterol",
-        "2571-8" => "triglycerides",
-        "1884-6" => "apob",
-        "4548-4" => "hba1c",
-        "2345-7" => "glucose",
-        "718-7" => "hemoglobin",
-        "2160-0" => "creatinine",
-        "2276-4" => "ferritin",
-        "1751-7" => "albumin",
-        "1988-5" => "crp",
-        "736-9" => "lymphocyte_percent",
-        "787-2" => "mcv",
-        "788-0" => "rdw",
-        "6768-6" => "alp",
-        "6690-2" => "wbc",
-        "1742-6" => "alt",
-        "1920-8" => "ast",
-        "2951-2" => "sodium",
-        "2823-3" => "potassium",
-        "2075-0" => "chloride",
-        "2028-9" => "carbon_dioxide",
-        "17861-6" => "calcium",
-        "3094-0" => "bun",
-        "2336-6" => "globulin",
-        "2885-2" => "total_protein",
-        "1975-2" => "total_bilirubin",
-        "4544-3" => "hematocrit",
-        "785-6" => "mch",
-        "786-4" => "mchc",
-        "32623-1" => "mpv",
-        "777-3" => "platelets",
-        "789-8" => "rbc",
-        "704-7" => "basophil_count",
-        "706-2" => "basophil_percent",
-        "711-2" => "eosinophil_count",
-        "713-8" => "eosinophil_percent",
-        "731-0" => "lymphocyte_count",
-        "742-7" => "monocyte_count",
-        "5905-5" => "monocyte_percent",
-        "751-8" => "neutrophil_count",
-        "770-8" => "neutrophil_percent",
-        "3040-3" => "lipase",
-        "3024-7" => "free_t4",
-        "3016-3" => "tsh",
-        "11580-8" => "tsh",
-        "8098-6" => "thyroglobulin_antibodies",
-        _ => return None,
-    })
 }
 
 pub(crate) async fn load_health(
@@ -387,6 +366,7 @@ pub(crate) async fn load_health(
 pub async fn browse(database: &Database, user_id: &str) -> Result<Value, AppError> {
     let records = load_health(database, user_id, "").await?;
     let reports = database.confirmed(user_id).await?;
+    let custom_metrics = database.custom_metrics(user_id).await?;
     database
         .cpu
         .run(move || {
@@ -394,14 +374,23 @@ pub async fn browse(database: &Database, user_id: &str) -> Result<Value, AppErro
                 .into_iter()
                 .map(|(key, group)| (key, group.definition))
                 .collect();
+            let definitions: BTreeMap<_, _> = crate::laboratory::metrics()
+                .into_iter()
+                .map(|metric| (metric.metric_id, metric))
+                .collect();
             for observation in reports {
-                if let Some(definition) = crate::laboratory::metrics()
-                    .into_iter()
-                    .find(|m| Some(m.metric_id) == observation.resolved_metric_id.as_deref())
+                let Some(id) = observation.resolved_metric_id.as_deref() else {
+                    continue;
+                };
+                if entries.contains_key(id) {
+                    continue;
+                }
+                if let Some(definition) = definitions.get(id) {
+                    entries.insert(id.into(), serde_json::to_value(definition)?);
+                } else if let Some(metric) =
+                    custom_metrics.iter().find(|metric| metric.metric_id == id)
                 {
-                    entries
-                        .entry(definition.metric_id.into())
-                        .or_insert(serde_json::to_value(definition)?);
+                    entries.insert(id.into(), serde_json::to_value(metric)?);
                 }
             }
             let mut metrics: Vec<Value> = entries.into_values().collect();

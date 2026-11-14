@@ -55,6 +55,7 @@ async fn analysis_uses_confirmed_snapshot_and_becomes_stale_after_correction() {
         .review(
             &user.user_id,
             longlivehealth::reports::ReviewRequest {
+                new_metric: None,
                 report_id: report,
                 expected_revision: 2,
                 context: None,

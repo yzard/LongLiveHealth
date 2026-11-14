@@ -2,6 +2,14 @@ use longlivehealth::documents::{parse_pdf_layer, pdf_evidence};
 use longlivehealth::reports::ExtractionInputRequest;
 
 pub fn mixed_pdf() -> Vec<u8> {
+    text_pdf(&[
+        &["LDL Cholesterol 2.586 mmol/L reference <2.586"],
+        &[],
+        &["Report heading only"],
+    ])
+}
+
+fn text_pdf(page_lines: &[&[&str]]) -> Vec<u8> {
     use lopdf::{Document, Object, Stream, dictionary};
     let mut document = Document::with_version("1.5");
     let pages_id = document.new_object_id();
@@ -9,22 +17,19 @@ pub fn mixed_pdf() -> Vec<u8> {
         .add_object(dictionary! {"Type"=>"Font", "Subtype"=>"Type1", "BaseFont"=>"Helvetica"});
     let image = document.add_object(Stream::new(dictionary! {"Type"=>"XObject", "Subtype"=>"Image", "Width"=>2, "Height"=>2, "ColorSpace"=>"DeviceRGB", "BitsPerComponent"=>8}, vec![255; 12]));
     let mut pages = Vec::new();
-    for text in [
-        Some("LDL Cholesterol 2.586 mmol/L reference <2.586"),
-        None,
-        Some("Report heading only"),
-    ] {
+    for lines in page_lines {
         let mut content = b"q 50 0 0 50 20 20 cm /Im1 Do Q\n".to_vec();
-        if let Some(text) = text {
+        for (index, text) in lines.iter().enumerate() {
+            let top = 250 - 20 * index;
             content
-                .extend_from_slice(format!("BT /F1 14 Tf 30 250 Td ({text}) Tj ET\n").as_bytes());
+                .extend_from_slice(format!("BT /F1 14 Tf 30 {top} Td ({text}) Tj ET\n").as_bytes());
         }
         let stream = document.add_object(Stream::new(dictionary! {}, content));
         let resources =
             dictionary! {"Font"=>dictionary! {"F1"=>font}, "XObject"=>dictionary! {"Im1"=>image}};
         pages.push(document.add_object(dictionary! {"Type"=>"Page", "Parent"=>pages_id, "MediaBox"=>vec![0.into(),0.into(),600.into(),300.into()], "Resources"=>resources, "Contents"=>stream}));
     }
-    document.objects.insert(pages_id, Object::Dictionary(dictionary! {"Type"=>"Pages", "Kids"=>pages.iter().map(|id| Object::Reference(*id)).collect::<Vec<_>>(), "Count"=>3}));
+    document.objects.insert(pages_id, Object::Dictionary(dictionary! {"Type"=>"Pages", "Kids"=>pages.iter().map(|id| Object::Reference(*id)).collect::<Vec<_>>(), "Count"=>page_lines.len() as i64}));
     let catalog = document.add_object(dictionary! {"Type"=>"Catalog", "Pages"=>pages_id});
     document.trailer.set("Root", catalog);
     let mut output = Vec::new();
@@ -184,4 +189,70 @@ async fn evidence_is_archived_exported_owner_scoped_and_deleted_with_report() {
             .is_err()
     );
     server.abort();
+}
+
+#[tokio::test]
+async fn mdland_date_requires_one_specimen_and_matching_continuation_pages() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("mdland.pdf");
+    let cpu = longlivehealth::execution::CpuExecutor::new(2).unwrap();
+    let first = [
+        "Lab Results",
+        "1 of 2",
+        "https://pati.mdland.net/report",
+        "Specimen:",
+        "Collected",
+        "10/20/2026 08:15:00",
+        "Received",
+        "10/21/2026",
+    ];
+    let continuation = [
+        "Lab Results",
+        "2 of 2",
+        "https://pati.mdland.net/report",
+        "LDL 100 mg/dL",
+    ];
+    let conflicting = [
+        "Lab Results",
+        "2 of 2",
+        "https://pati.mdland.net/report",
+        "Collected:",
+        "10/21/2026",
+    ];
+    let unrelated = [
+        "Lab Results",
+        "2 of 2",
+        "https://pati.mdland.net/other",
+        "LDL 100 mg/dL",
+    ];
+    for (second, valid) in [
+        (&continuation[..], true),
+        (&conflicting[..], false),
+        (&unrelated[..], false),
+    ] {
+        std::fs::write(&path, text_pdf(&[&first, second])).unwrap();
+        let evidence = pdf_evidence(&cpu, &path, 1).await.unwrap();
+        let date = longlivehealth::documents::pdf_collection_date(&cpu, &path, 2, &evidence)
+            .await
+            .unwrap();
+        if valid {
+            let date = date.unwrap();
+            assert_eq!(date.date, "2026-10-20");
+            assert_eq!(date.source_page, 1);
+            assert_eq!(date.source_quote, "Collected 10/20/2026 08:15:00");
+        } else {
+            assert!(date.is_none());
+        }
+    }
+}
+
+#[test]
+fn tiny_poppler_edge_overhang_keeps_the_text_and_normalizes_bounds() {
+    let evidence = parse_pdf_layer(
+        r#"<page width="612" height="792"><line><word xMin="600" yMin="-0.19" xMax="612.005" yMax="12">header</word></line></page>"#.into(),
+    );
+    assert!(evidence.error_code.is_none());
+    let layer = evidence.text_layer.unwrap();
+    assert_eq!(layer.text, "header");
+    assert_eq!(layer.words[0].bounding_box[1..3], [0., 1.]);
 }
