@@ -196,8 +196,18 @@ Android native tab icons use the same three-position order. The latest OCR
 report revision invalidation now refreshes Insights instead of the removed
 Trends screen. Android smoke checks reject the retired Overview/Trends tabs.
 
-Recovery verification: 72 shared Swift tests, 9 browser client tests, 4 Android
-package checks, the 69-route mobile API inventory, and an iOS Simulator build
-passed. Android package compilation and physical-device installation have not
-been performed for this recovery. The local Mac has no Rust toolchain or Docker
-runtime, so backend compilation was not rerun in this recovery session.
+Recovery verification: 72 shared Swift tests, 12 browser client/presentation tests,
+4 Android package checks, the 69-route mobile API inventory, and an iOS Simulator
+build passed. The Docker Android build and lint passed; ARM64 Build 71 was
+installed over Build 70 on the Z Fold, preserving the session. All six cards,
+matching detail titles, scrolling, closing and retained dashboard position were
+checked on the unfolded physical device. Switching Browse/Data/Insights retained
+the dashboard position. Cold launch selects Insights and shows exactly three tabs.
+
+The backend Docker build passed format checks, Clippy and 256 integration tests
+(2 intentionally ignored). A recovered Insights fixture was updated for the new
+OCR ReviewRequest.new_metric field. NAS now runs
+`longlivehealth-backend-api:recovered-insights-20261114`; the hosted APK matches
+the installed package SHA256
+`d4cbfe40f749c3c8238e4e1bc25b6859441692b0a562773093f013581ae38aba`.
+Desk's LLM service was stopped during compilation and restarted afterward.
