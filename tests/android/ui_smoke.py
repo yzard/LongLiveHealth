@@ -108,16 +108,18 @@ def navigation():
     tap("Blood Work"); wait_for("Example Laboratory")
     tap("Example Laboratory"); wait_for("Total Markers")
     assert "126" in labels()
+    wait_for("126 results ready to confirm")
+    tap("126 results ready to confirm")
+    wait_for("Marker 1")
     for _ in range(4):
         adb("shell", "input", "swipe", "1450", "1500", "1450", "450", "350")
     assert "Marker 1" not in labels(), "Report list did not scroll"
     # Switching away and back must keep the report, not reset to the Data menu.
     tap("Browse"); wait_for("RANGE")
     tap("Data")
-    assert "fixture.png" in labels(), "Tab return lost the report"
-    for _ in range(5):
-        adb("shell", "input", "swipe", "1450", "450", "1450", "1500", "350")
-    wait_for("Confirm All"); tap("Confirm All"); wait_for("0 pending")
+    wait_for("Ready to Confirm")
+    adb("shell", "input", "keyevent", "KEYCODE_BACK")
+    wait_for("Confirm"); tap("Confirm"); wait_for("0 results ready to confirm")
     tap("Report Info"); wait_for("Report Info")
     assert "Report Title" in labels(), "Report editor missing title"
     print("PASS: session persistence, chart periods/source toggles, fold state, report scroll/tab state/Confirm All/editor")
@@ -210,14 +212,13 @@ def report_date():
     tap_node(source)
     wait_for("Thyroid-stimulating hormone")
     wait_for("LOINC 11580-8")
-    assert all(label == "LOINC 11580-8" for label in labels() if "11580-8" in (label or ""))
     tap("Thyroid-stimulating hormone")
     wait_for("Review result")
     wait_for("TSH")
     wait_for("11580-8")
     assert "TSH (11580-8)" not in labels()
     tap("Cancel")
-    print("PASS: standardized laboratory title and separate LOINC line and editor field")
+    print("PASS: standardized laboratory title and inline LOINC and editor field")
 
 
 def chart_scroll():
@@ -333,7 +334,7 @@ def report_metric_review():
             "http://127.0.0.1:18765/api/v1/" + path,
         ], text=True))
 
-    issue = "No matching Browse metric. Review this result."
+    issue = "New"
     for scenario in ("test/report-metric-suggestions", "test/report-no-metric-suggestions"):
         control("test/reset")
         control("test/seed-report")
@@ -449,6 +450,7 @@ def report_status_actions(check_chart=False):
 
     control("test/reset")
     control("test/seed-report")
+    control("test/mark-last-result-uncertain")
     original = control("reports/get")["observations"][0]
     if check_chart:
         control("test/enable-report-status-chart")

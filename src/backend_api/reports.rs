@@ -198,6 +198,7 @@ fn browse_issues(
     interpretation: &crate::laboratory::Interpretation,
     metric: Option<&str>,
     custom: Option<&CustomMetric>,
+    candidates: &[crate::laboratory::MetricSuggestion<'_>],
 ) -> Vec<BrowseIssue> {
     let mut issues = Vec::new();
     if custom.is_none()
@@ -224,6 +225,33 @@ fn browse_issues(
                 code: "lab_test_code_conflict", scope: "browse",
                 message: "The printed test name and test code do not identify the same metric. Review the original before mapping this result.".into(),
             });
+        } else if let Some(candidate) = candidates
+            .iter()
+            .find(|candidate| {
+                Some(candidate.metric_id) == payload.ocr_metric_candidate.as_deref()
+                    || Some(candidate.metric_id)
+                        == crate::laboratory::infer_metric(&payload.raw_name, None)
+                    || Some(candidate.metric_id)
+                        == crate::laboratory::split_test_code(&payload.raw_name)
+                            .1
+                            .and_then(crate::laboratory::report_suggestion_code)
+            })
+            .filter(|candidate| candidate.unit_match == crate::laboratory::UnitMatch::Incompatible)
+        {
+            let reported = payload.raw_unit.as_deref().unwrap_or("not specified");
+            let standard = match candidate.standard_unit {
+                "1" => "unitless (qualitative result)",
+                "" => "unit not specified",
+                unit => unit,
+            };
+            issues.push(BrowseIssue {
+                code: "unsupported_unit",
+                scope: "browse",
+                message: format!(
+                    "Unit mismatch · {}: report unit {reported}; database standard unit {standard}.",
+                    candidate.name
+                ),
+            });
         } else if !known_name {
             let code_match = crate::laboratory::split_test_code(&payload.raw_name)
                 .1
@@ -233,6 +261,7 @@ fn browse_issues(
                     let name = crate::laboratory::display_name(&payload.raw_name, Some(id));
                     ("metric_identity_uncertain", format!("The test code suggests {name}, but the printed test name could not be verified. Review the original before mapping this result."))
                 }
+                None if !candidates.is_empty() => ("metric_identity_uncertain", "Review the suggested existing metrics against the original report before choosing a match.".into()),
                 None => ("unmapped_metric", "No existing Browse metric reliably matches this test. It appears separately for review. Check the original and select a metric if appropriate.".into()),
             };
             issues.push(BrowseIssue {
@@ -317,22 +346,26 @@ impl StoredObservation {
             .find(|metric| Some(metric.metric_id.as_str()) == resolved_metric_id.as_deref());
         let interpretation =
             crate::laboratory::interpret_metric(&payload, resolved_metric_id.as_deref(), custom);
+        let candidates = if resolved_metric_id.is_none() {
+            crate::laboratory::metric_suggestions(
+                &payload.raw_name,
+                payload.raw_unit.as_deref(),
+                payload.ocr_metric_candidate.as_deref(),
+                custom_metrics,
+            )
+        } else {
+            Vec::new()
+        };
         let browse_issues = browse_issues(
             &payload,
             &interpretation,
             resolved_metric_id.as_deref(),
             custom,
+            &candidates,
         );
         let metric_suggestions =
             if include_suggestions && browse_issues.iter().any(|issue| issue.scope == "browse") {
-                Some(serde_json::to_value(
-                    crate::laboratory::metric_suggestions(
-                        &payload.raw_name,
-                        payload.raw_unit.as_deref(),
-                        payload.ocr_metric_candidate.as_deref(),
-                        custom_metrics,
-                    ),
-                )?)
+                Some(serde_json::to_value(candidates)?)
             } else {
                 None
             };

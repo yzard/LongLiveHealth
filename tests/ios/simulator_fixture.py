@@ -144,6 +144,8 @@ class Handler(BaseHTTPRequestHandler):
                      payload=dict(template['payload'], raw_name=f'Marker {index + 1}'))
                 for index in range(126)
             ]
+        if route == 'test/mark-last-result-uncertain':
+            observations[-1]['payload']['ocr_mapping_note'] = 'Specimen could not be verified'
         if route == 'reports/delete':
             reports[:] = [item for item in reports if item['report_id'] != body.get('report_id')]
             observations[:] = [item for item in observations if item['report_id'] != body.get('report_id')]

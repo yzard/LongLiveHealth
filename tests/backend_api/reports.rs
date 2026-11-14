@@ -786,6 +786,12 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
     let mut unknown = observation_payload();
     unknown.raw_name = "Unknown test".into();
     unknown.metric_id = None;
+    let mut ketones = observation_payload();
+    ketones.raw_name = "Ketones (50557-8)".into();
+    ketones.raw_result = "Negative".into();
+    ketones.raw_unit = Some("mg/dL".into());
+    ketones.metric_id = None;
+    ketones.ocr_mapping_note = Some("Printed unit conflicts with the catalog".into());
     let mut undated = observation_payload();
     undated.sampled_at = None;
     let mut qualitative = observation_payload();
@@ -802,7 +808,7 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
                 report_id: report,
                 expected_revision: 1,
                 context: None,
-                observations: vec![unsupported, mapped, unknown, undated, qualitative]
+                observations: vec![unsupported, mapped, unknown, ketones, undated, qualitative]
                     .into_iter()
                     .map(|payload| ReviewItem {
                         observation_id: None,
@@ -833,6 +839,21 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
             .as_str()
             .unwrap()
             .contains("invalid-unit")
+    );
+    let ketones = find("Ketones (50557-8)", false);
+    assert_eq!(ketones["status"], "pending");
+    assert_eq!(ketones["browse_issues"][1]["code"], "unsupported_unit");
+    let message = ketones["browse_issues"][1]["message"].as_str().unwrap();
+    assert!(message.contains("Unit mismatch"));
+    assert!(message.contains("report unit mg/dL"));
+    assert!(message.contains("database standard unit unitless"));
+    assert_eq!(
+        ketones["metric_suggestions"][0]["metric_id"],
+        "urine_ketones"
+    );
+    assert_eq!(
+        ketones["metric_suggestions"][0]["unit_match"],
+        "incompatible"
     );
     assert_eq!(find("Globulin", true)["browse_issues"][0]["scope"], "chart");
     assert_eq!(

@@ -33,7 +33,12 @@ struct ReportView: View {
         let choosingMetric: Bool
     }
     var body: some View {
-        List {
+        let observations = document["observations"].arrayValue
+        let pending = observations.filter { $0["status"] == .string("pending") }
+        let ready = pending.filter { ReportReview.canBulkConfirm($0) }
+        let needsReview = pending.filter { !ReportReview.canBulkConfirm($0) }
+        let confirmed = observations.filter { $0["status"] == .string("confirmed") }
+        return List {
             Section {
                 Button { contextVisible = true } label: {
                     HStack {
@@ -47,17 +52,6 @@ struct ReportView: View {
                 LabeledContent("Total Markers", value: "\(document["observations"].arrayValue.count)")
                     .accessibilityIdentifier("report-marker-count")
                     .accessibilityValue("\(document["observations"].arrayValue.count)")
-                Button { Task { await confirmAll() } } label: {
-                    HStack {
-                        Text(confirmingAll ? "Confirming…" : "Confirm All")
-                        Spacer()
-                        if confirmingAll { ProgressView() }
-                        else { Text("\(ReportReview.pendingChanges(in: document).count) pending").foregroundStyle(.secondary) }
-                    }
-                }
-                .accessibilityIdentifier("confirm-all-results")
-                .disabled(confirmingAll || extracting || document == .null || ReportReview.pendingChanges(in: document).isEmpty)
-                if let confirmationError { Text(confirmationError).foregroundStyle(.red) }
                 HStack(spacing: 12) {
                     Button { showSource(page: 1) } label: { reportAction("View Original", icon: "doc.text.magnifyingglass") }
                         .accessibilityLabel("View original report").accessibilityIdentifier("report-original")
@@ -78,8 +72,35 @@ struct ReportView: View {
                     Button("Treat as independent report") { Task { await unlink() } }
                 }
             }
-            if !document["validation_issues"].arrayValue.isEmpty {
-                Section("OCR incomplete") {
+            Section("Review Results") {
+                HStack {
+                    NavigationLink {
+                        List {
+                            ForEach(ready, id: \.identifier) { observation in
+                                observationRow(observation)
+                            }
+                        }.mobileNavigationTitle("Ready to Confirm")
+                    } label: {
+                        Text(ready.count == 1 ? "1 result ready to confirm" : "\(ready.count) results ready to confirm")
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityIdentifier("ready-to-confirm-results")
+                    .disabled(ready.isEmpty)
+                    Spacer(minLength: 8)
+                    Button(confirmingAll ? "Confirming…" : "Confirm") { Task { await confirmAll() } }
+                        .buttonStyle(.borderless)
+                        .accessibilityIdentifier("confirm-all-results")
+                        .disabled(confirmingAll || extracting || ready.isEmpty)
+                }
+                if let confirmationError { Text(confirmationError).foregroundStyle(.red) }
+                if observations.isEmpty && document["validation_issues"].arrayValue.isEmpty {
+                    Text("No extracted results yet.").foregroundStyle(.secondary)
+                }
+            }
+            if !needsReview.isEmpty || !document["validation_issues"].arrayValue.isEmpty {
+                Section("Needs Review") {
                     ForEach(indexedValues("validation_issues")) { entry in
                         let issue = entry.value
                         VStack(alignment: .leading, spacing: 4) {
@@ -88,18 +109,16 @@ struct ReportView: View {
                                 .foregroundStyle(.red)
                         }
                     }
+                    ForEach(needsReview, id: \.identifier) { observation in
+                        observationRow(observation)
+                    }
                 }
             }
-            Section("Review results") {
-                if document["observations"].arrayValue.isEmpty { Text("No extracted results yet.").foregroundStyle(.secondary)
-                    InfoHelp(title: "Manual results", message: "You can add results manually while OCR is disabled or processing.") }
-                ForEach(document["observations"].arrayValue.filter { ["pending", "confirmed"].contains($0["status"].stringValue) }, id: \.identifier) { observation in
-                    ReportObservationRow(observation: observation, isBusy: model.isBusy,
-                        changeStatus: { Task { await toggleStatus(observation) } },
-                        edit: { editor = EditTarget(observation: observation, choosingMetric: false) },
-                        chooseMetric: { editor = EditTarget(observation: observation, choosingMetric: true) },
-                        showSource: { showSource(page: $0) },
-                        writeHealth: { healthWriter = EditTarget(observation: observation, choosingMetric: false) })
+            if !confirmed.isEmpty {
+                Section("Confirmed Results") {
+                    ForEach(confirmed, id: \.identifier) { observation in
+                        observationRow(observation)
+                    }
                 }
             }
             Section {
@@ -125,7 +144,7 @@ struct ReportView: View {
         .alert("Rescan report?", isPresented: $rescanConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Rescan", role: .destructive) { Task { await rescan() } }
-        } message: { Text("This replaces all existing results, including confirmed results and manual edits. Your original report and Report Info are kept. Review the new results and use Confirm All to include them in charts.") }
+        } message: { Text("This replaces all existing results, including confirmed results and manual edits. Your original report and Report Info are kept. Review the new results and confirm them to include them in charts.") }
         .alert("Delete report?", isPresented: $deleting) {
             Button("Cancel", role: .cancel) {}
             Button("Delete report", role: .destructive) { Task { await model.perform {
@@ -139,6 +158,15 @@ struct ReportView: View {
             } } }
         } message: { Text("This deletes the report, its confirmed and draft results, and related analysis from your archive. The server then removes stored files. Offline backups you made are separate.") }
     }
+    private func observationRow(_ observation: JSONValue) -> some View {
+        ReportObservationRow(observation: observation, isBusy: model.isBusy,
+            changeStatus: { Task { await toggleStatus(observation) } },
+            edit: { editor = EditTarget(observation: observation, choosingMetric: false) },
+            chooseMetric: { editor = EditTarget(observation: observation, choosingMetric: true) },
+            showSource: { showSource(page: $0) },
+            writeHealth: { healthWriter = EditTarget(observation: observation, choosingMetric: false) })
+    }
+
     @ViewBuilder private var reportDetails: some View {
         let rejected = document["observations"].arrayValue.filter { $0["status"].stringValue == "rejected" }
         if !rejected.isEmpty {
@@ -213,7 +241,9 @@ struct ReportView: View {
         do {
             // Use the existing atomic review endpoint; larger reports resume from remaining pending items.
             while true {
-                let changes = Array(ReportReview.pendingChanges(in: document).prefix(2_000))
+                let changes = document["observations"].arrayValue
+                    .filter { ReportReview.canBulkConfirm($0) }.prefix(2_000)
+                    .map { ReportReview.change($0, to: "confirmed") }
                 guard !changes.isEmpty else { return }
                 try Task.checkCancellation()
                 try await save(observations: changes, context: .null, newMetric: .null)
@@ -383,24 +413,52 @@ struct ReportObservationRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .center, spacing: 8) {
+            HStack(spacing: 8) {
                 Button { edit() } label: {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(laboratoryResultName(observation)).font(.headline)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(laboratoryResultName(observation))
+                            .font(.headline)
+                            .fixedSize(horizontal: false, vertical: true)
                         let code = observation["lab_test_code"].stringValue
                         if !code.isEmpty {
-                            Text("LOINC \(code)").font(.caption).foregroundStyle(.secondary)
+                            Text("LOINC \(code)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize()
                                 .accessibilityIdentifier("report-result-loinc")
                         }
-                        let name = observation["lab_test_name"].stringValue
-                        if !name.isEmpty {
-                            Text("Recommended name: \(name)").font(.caption).foregroundStyle(.secondary)
-                                .accessibilityIdentifier("report-result-loinc-name")
-                        }
-                        Text(resultLabel).foregroundStyle(.primary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }.buttonStyle(.plain)
+                Spacer(minLength: 0)
+                if observation["status"] != .string("rejected"),
+                   observation["browse_issues"].arrayValue.contains(where: { $0["code"] == .string("unmapped_metric") }) {
+                    Button(action: chooseMetric) {
+                        Text("New")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.yellow)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.yellow.opacity(0.12), in: Capsule())
+                            .frame(minHeight: 44)
+                    }
+                    .accessibilityIdentifier("report-result-new")
+                    .disabled(isBusy)
+                }
+            }.frame(minHeight: 44)
+            HStack(spacing: 8) {
+                Button { edit() } label: {
+                    Text(resultLabel).foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }.buttonStyle(.plain)
+                Button { showSource(sourcePage) } label: {
+                    Image(systemName: MobileSymbol.name("doc.text.magnifyingglass"))
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .accessibilityLabel(Text("View source · page \(sourcePage)"))
+                #if !os(Android)
+                .accessibilityHint("Opens the original report page")
+                #endif
                 HStack(spacing: 6) {
                     Text(observation["status"].stringValue.capitalized)
                         .font(.caption).foregroundStyle(.secondary)
@@ -418,17 +476,16 @@ struct ReportObservationRow: View {
                         .disabled(isBusy)
                     }
                 }
-                Button { showSource(sourcePage) } label: {
-                    Image(systemName: MobileSymbol.name("doc.text.magnifyingglass"))
-                        .frame(minWidth: 44, minHeight: 44)
-                }
-                .accessibilityLabel(Text("View source · page \(sourcePage)"))
-                #if !os(Android)
-                .accessibilityHint("Opens the original report page")
-                #endif
+            }
+            let name = observation["lab_test_name"].stringValue
+            if !name.isEmpty {
+                Text("Recommended name: \(name)").font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("report-result-loinc-name")
             }
             ForEach(Array(observation["browse_issues"].arrayValue.enumerated()), id: \.offset) { _, issue in
-                if issue["scope"] == .string("browse"), observation["status"] != .string("rejected") {
+                if issue["code"] == .string("unmapped_metric"), observation["status"] != .string("rejected") {
+                    EmptyView()
+                } else if issue["scope"] == .string("browse"), observation["status"] != .string("rejected") {
                     Button { chooseMetric() } label: {
                         HStack(alignment: .firstTextBaseline) {
                             issueLabel(issue)
@@ -438,6 +495,10 @@ struct ReportObservationRow: View {
                 } else {
                     issueLabel(issue).accessibilityIdentifier("report-result-issue")
                 }
+            }
+            let note = observation["payload"]["ocr_mapping_note"].stringValue
+            if !note.isEmpty && !observation["browse_issues"].arrayValue.contains(where: { $0["code"] == .string("ocr_mapping_uncertain") }) {
+                Text(note).font(.caption).foregroundStyle(.orange)
             }
             if observation["status"] == .string("confirmed"), observation["payload"]["metric_id"] == .string("glucose") {
                 Button("Save to \(MobilePlatform.healthProviderName)") { writeHealth() }.font(.caption).disabled(isBusy)

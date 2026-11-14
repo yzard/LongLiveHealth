@@ -666,7 +666,7 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Your reports"].exists)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Last refreshed")).firstMatch.exists)
         report.tap()
-        let resultRow = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "5.5 mmol/L (99.1 mg/dL)")).firstMatch
+        let resultRow = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "99.1 mg/dL (5.5 mmol/L)")).firstMatch
         XCTAssertTrue(resultRow.waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Original reference: not provided"].exists)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Reference retained as printed")).firstMatch.exists)
@@ -684,8 +684,8 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(delete.waitForExistence(timeout: 5))
         XCTAssertTrue(info.label.contains("Report Info"))
         XCTAssertLessThan(info.frame.midY, count.frame.midY)
-        XCTAssertLessThan(count.frame.midY, confirmAll.frame.midY)
-        XCTAssertLessThan(confirmAll.frame.midY, delete.frame.midY)
+        XCTAssertLessThan(count.frame.midY, delete.frame.midY)
+        XCTAssertLessThan(delete.frame.midY, confirmAll.frame.midY)
         info.tap()
         XCTAssertTrue(app.navigationBars["Report Info"].waitForExistence(timeout: 5))
         app.buttons["Cancel"].tap()
@@ -833,6 +833,7 @@ nonisolated final class SmokeTests: XCTestCase {
         _ = try await control("test/reset")
         _ = try await control("test/seed-report")
         _ = try await control("test/expand-report")
+        _ = try await control("test/mark-last-result-uncertain")
         let app = XCUIApplication(); app.launch(); dismissPasswordPrompts(app)
         if app.buttons["Sign in"].exists {
             let server = app.textFields["http://192.168.1.20:8080"]
@@ -898,6 +899,19 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertNil(counts?["reports/review"])
         let confirm = app.buttons["confirm-all-results"]
         XCTAssertTrue(confirm.isEnabled)
+        let ready = app.buttons["ready-to-confirm-results"]
+        XCTAssertTrue(ready.label.contains("125 results ready to confirm"))
+        XCTAssertEqual(confirm.label, "Confirm")
+        XCTAssertEqual(ready.frame.midY, confirm.frame.midY, accuracy: 2)
+        let needsReview = app.staticTexts["Needs Review"]
+        XCTAssertTrue(needsReview.exists)
+        XCTAssertGreaterThan(needsReview.frame.minY, ready.frame.maxY)
+        ready.tap()
+        let queue = app.navigationBars["Ready to Confirm"]
+        XCTAssertTrue(queue.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons.containing(.staticText, identifier: "Marker 1").firstMatch.exists)
+        queue.buttons.firstMatch.tap()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         _ = try await control("test/fail-review")
         confirm.tap()
         XCTAssertTrue(confirm.waitForExistence(timeout: 10))
@@ -905,9 +919,10 @@ nonisolated final class SmokeTests: XCTestCase {
         await fulfillment(of: [XCTNSPredicateExpectation(predicate: retry, object: confirm)], timeout: 10)
         _ = try await control("test/reset-counts")
         confirm.tap()
-        let finished = NSPredicate(format: "label CONTAINS %@", "0 pending")
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: finished, object: confirm)], timeout: 10)
+        let finished = NSPredicate(format: "label CONTAINS %@", "0 results ready to confirm")
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: finished, object: ready)], timeout: 10)
         XCTAssertFalse(confirm.isEnabled)
+        XCTAssertTrue(app.staticTexts["Specimen could not be verified"].exists)
         let confirmationCounts = try JSONSerialization.jsonObject(with: await control("test/counts")) as? [String: Int]
         XCTAssertEqual(confirmationCounts?["reports/review"], 1)
         XCTAssertNil(confirmationCounts?["reports/get"])

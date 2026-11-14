@@ -584,7 +584,7 @@ pub(crate) fn custom_unit(raw: &str) -> &str {
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum UnitMatch {
+pub(crate) enum UnitMatch {
     Incompatible,
     NotReported,
     Convertible,
@@ -593,10 +593,10 @@ enum UnitMatch {
 
 #[derive(Serialize)]
 pub(crate) struct MetricSuggestion<'a> {
-    metric_id: &'a str,
-    name: &'a str,
-    standard_unit: &'a str,
-    unit_match: UnitMatch,
+    pub(crate) metric_id: &'a str,
+    pub(crate) name: &'a str,
+    pub(crate) standard_unit: &'a str,
+    pub(crate) unit_match: UnitMatch,
 }
 
 fn name_similarity(printed: &[char], candidate: &[char]) -> usize {
@@ -621,6 +621,15 @@ fn name_similarity(printed: &[char], candidate: &[char]) -> usize {
     100 - 100 * distances[candidate.len()] / printed.len().max(candidate.len())
 }
 
+pub(crate) fn report_suggestion_code(code: &str) -> Option<&'static str> {
+    // Quantitative urine ketones can be reviewed against the existing
+    // qualitative entry, but the code alone cannot authorize conversion.
+    match code {
+        "50557-8" => Some("urine_ketones"),
+        _ => loinc_metric(code),
+    }
+}
+
 pub(crate) fn metric_suggestions<'a>(
     raw_name: &str,
     raw_unit: Option<&str>,
@@ -628,7 +637,7 @@ pub(crate) fn metric_suggestions<'a>(
     custom_metrics: &'a [CustomMetric],
 ) -> Vec<MetricSuggestion<'a>> {
     let (printed, code) = split_test_code(raw_name);
-    let coded = code.and_then(loinc_metric);
+    let coded = code.and_then(report_suggestion_code);
     let printed: Vec<char> = crate::laboratory_names::key(printed).chars().collect();
     let mut name_scores = std::collections::BTreeMap::new();
     if !printed.is_empty() && printed != ['t', 'e', 's', 't'] {
@@ -711,8 +720,9 @@ pub(crate) fn metric_suggestions<'a>(
         }
     }
     ranked.sort_unstable_by(|(a_score, a), (b_score, b)| {
-        b_score
-            .cmp(a_score)
+        (Some(b.metric_id) == ocr_candidate)
+            .cmp(&(Some(a.metric_id) == ocr_candidate))
+            .then_with(|| b_score.cmp(a_score))
             .then_with(|| b.unit_match.cmp(&a.unit_match))
             .then_with(|| a.metric_id.cmp(b.metric_id))
     });
