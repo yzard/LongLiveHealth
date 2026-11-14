@@ -31,8 +31,9 @@ nonisolated final class LiveInsightsTests: XCTestCase {
             method.tap()
             XCTAssertTrue(app.navigationBars["Method & Sources"].waitForExistence(timeout: 5))
             capture(app, "Method \(id)")
-            app.navigationBars["Method & Sources"].buttons["Done"].tap()
-            app.buttons["Done"].firstMatch.tap()
+            closeVisibleSheet(app)
+            XCTAssertTrue(app.navigationBars["Method & Sources"].waitForNonExistence(timeout: 5))
+            closeVisibleSheet(app)
             XCTAssertTrue(card.waitForExistence(timeout: 5))
         }
         capture(app, "Dashboard bottom")
@@ -40,6 +41,15 @@ nonisolated final class LiveInsightsTests: XCTestCase {
         app.tabBars.buttons["Insights"].tap()
         XCTAssertTrue(app.buttons["insight-card-cardiovascular"].exists)
         capture(app, "Dashboard restored after tab return")
+    }
+
+    @MainActor private func closeVisibleSheet(_ app: XCUIApplication) {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let banner = springboard.otherElements["NotificationShortLookView"].firstMatch
+        if banner.exists { banner.swipeUp() }
+        let done = app.buttons.matching(identifier: "Done").allElementsBoundByIndex.last { $0.isHittable }
+        XCTAssertNotNil(done, "The foreground sheet must expose its close button")
+        done?.tap()
     }
 
     @MainActor private func reveal(_ app: XCUIApplication, _ element: XCUIElement) {
