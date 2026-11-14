@@ -477,30 +477,6 @@ def report_status_actions(check_chart=False):
     wait_for("Example Laboratory")
     tap("Example Laboratory")
 
-    for action, initial, next_status, next_action in (
-        ("Hold", "Confirmed", "Pending", "Confirm"),
-        ("Confirm", "Pending", "Confirmed", "Hold"),
-        ("Hold", "Confirmed", "Pending", "Confirm"),
-    ):
-        wait_for(initial)
-        wait_for(action)
-        assert next_action not in labels()
-        tap(action)
-        wait_for(next_status)
-        wait_for(next_action)
-        assert action not in labels()
-        assert "Review result" not in labels()
-        current = control("reports/get")["observations"][0]
-        assert current["observation_id"] == original["observation_id"]
-        assert current["payload"] == original["payload"]
-        assert current["status"] == next_status.lower()
-        if check_chart:
-            tap("Browse")
-            if next_status == "Pending":
-                wait_for("No comparable measurements yet. Confirm imported results with a metric, unit and collection date.")
-            else:
-                wait_for("mg/dL")
-            tap("Data")
     control("test/fail-review")
     tap("Confirm")
     for _ in range(15):
@@ -510,10 +486,20 @@ def report_status_actions(check_chart=False):
     else:
         raise AssertionError("A failed status change did not show an error")
     tap("OK")
-    wait_for("Pending")
     wait_for("Confirm")
     assert control("reports/get")["observations"][0]["status"] == "pending"
-    print("PASS: separate status and single Confirm/Hold action, repeated toggles, failed-write recovery")
+    tap("Confirm")
+    wait_for("Confirmed Results")
+    assert not {"Pending", "Confirmed", "Hold", "Confirm"}.intersection(labels())
+    wait_for("View source · page 1")
+    current = control("reports/get")["observations"][0]
+    assert current["observation_id"] == original["observation_id"]
+    assert current["payload"] == original["payload"]
+    assert current["status"] == "confirmed"
+    if check_chart:
+        tap("Browse")
+        wait_for("mg/dL")
+    print("PASS: confirm retry, source action on confirmed rows, and no inline status labels")
 
 
 def report_settings():

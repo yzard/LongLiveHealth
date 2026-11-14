@@ -1194,13 +1194,13 @@ async fn browse_hides_drafts_but_reports_keep_review_issues() {
     assert_eq!(unknown["browse_issues"][0]["code"], "unmapped_metric");
     assert_eq!(
         uncertain["browse_issues"][0]["code"],
-        "ocr_mapping_uncertain"
+        "metric_identity_uncertain"
     );
     assert!(
         uncertain["browse_issues"][0]["message"]
             .as_str()
             .unwrap()
-            .contains("difficult to read")
+            .contains("Thyroid-stimulating hormone")
     );
     assert_eq!(
         find("Glucose (11580-8)")["browse_issues"][0]["code"],

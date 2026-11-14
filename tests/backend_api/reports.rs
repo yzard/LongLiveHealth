@@ -792,6 +792,14 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
     ketones.raw_unit = Some("mg/dL".into());
     ketones.metric_id = None;
     ketones.ocr_mapping_note = Some("Printed unit conflicts with the catalog".into());
+    let mut bounded = ketones.clone();
+    bounded.raw_name = "Urine ketones (50557-8)".into();
+    bounded.notes = Some("Reported negative threshold: <0.1 mg/dL".into());
+    let mut egfr = observation_payload();
+    egfr.raw_name = "eGFR (33914-3)".into();
+    egfr.raw_unit = Some("mL/min/1.73m2".into());
+    egfr.metric_id = None;
+    egfr.ocr_mapping_note = Some("Unit mismatch against catalog entry with no unit".into());
     let mut undated = observation_payload();
     undated.sampled_at = None;
     let mut qualitative = observation_payload();
@@ -808,15 +816,24 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
                 report_id: report,
                 expected_revision: 1,
                 context: None,
-                observations: vec![unsupported, mapped, unknown, ketones, undated, qualitative]
-                    .into_iter()
-                    .map(|payload| ReviewItem {
-                        observation_id: None,
-                        expected_revision: None,
-                        status: "pending".into(),
-                        payload,
-                    })
-                    .collect(),
+                observations: vec![
+                    unsupported,
+                    mapped,
+                    unknown,
+                    ketones,
+                    bounded,
+                    egfr,
+                    undated,
+                    qualitative,
+                ]
+                .into_iter()
+                .map(|payload| ReviewItem {
+                    observation_id: None,
+                    expected_revision: None,
+                    status: "pending".into(),
+                    payload,
+                })
+                .collect(),
             },
         )
         .await
@@ -842,8 +859,8 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
     );
     let ketones = find("Ketones (50557-8)", false);
     assert_eq!(ketones["status"], "pending");
-    assert_eq!(ketones["browse_issues"][1]["code"], "unsupported_unit");
-    let message = ketones["browse_issues"][1]["message"].as_str().unwrap();
+    assert_eq!(ketones["browse_issues"][0]["code"], "unsupported_unit");
+    let message = ketones["browse_issues"][0]["message"].as_str().unwrap();
     assert!(message.contains("Unit mismatch"));
     assert!(message.contains("report unit mg/dL"));
     assert!(message.contains("database standard unit unitless"));
@@ -855,6 +872,20 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
         ketones["metric_suggestions"][0]["unit_match"],
         "incompatible"
     );
+    assert!(ketones.get("reported_negative_bound").is_none());
+    let bounded = find("Urine ketones (50557-8)", false);
+    assert_eq!(bounded["reported_negative_bound"], "<0.1 mg/dL");
+    assert_eq!(bounded["payload"]["raw_result"], "Negative");
+    assert!(
+        bounded["browse_issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["code"] == "negative_with_unit")
+    );
+    let egfr = find("eGFR (33914-3)", false);
+    assert_eq!(egfr["browse_issues"][0]["code"], "unmapped_metric");
+    assert_eq!(egfr["browse_issues"].as_array().unwrap().len(), 1);
     assert_eq!(find("Globulin", true)["browse_issues"][0]["scope"], "chart");
     assert_eq!(
         find("Unknown test", false)["browse_issues"][0]["code"],

@@ -183,6 +183,8 @@ pub struct Observation {
     pub lab_test_name: Option<&'static str>,
     pub browse_issues: Vec<BrowseIssue>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub reported_negative_bound: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub metric_suggestions: Option<Value>,
 }
 
@@ -191,6 +193,29 @@ pub struct BrowseIssue {
     pub code: &'static str,
     pub scope: &'static str,
     pub message: String,
+}
+
+// A reported assay threshold is a review suggestion. The printed result remains intact.
+fn negative_bound(payload: &ObservationPayload) -> Option<String> {
+    let unit = payload.raw_unit.as_deref()?.trim();
+    if unit.is_empty()
+        || !matches!(
+            payload.raw_result.trim().to_ascii_lowercase().as_str(),
+            "negative" | "not detected"
+        )
+    {
+        return None;
+    }
+    let bound = payload
+        .notes
+        .as_deref()?
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("Reported negative threshold: <"))?;
+    let (value, threshold_unit) = bound.trim().split_once(char::is_whitespace)?;
+    let value = value.parse::<rust_decimal::Decimal>().ok()?;
+    (value > rust_decimal::Decimal::ZERO
+        && crate::laboratory::custom_unit(unit) == crate::laboratory::custom_unit(threshold_unit))
+    .then(|| format!("<{value} {unit}"))
 }
 
 fn browse_issues(
@@ -208,40 +233,27 @@ fn browse_issues(
                 .any(|definition| definition.metric_id == id)
         })
     {
-        let known_name = crate::laboratory::infer_metric(&payload.raw_name, None).is_some();
-        if let Some(note) = payload
-            .ocr_mapping_note
-            .as_deref()
-            .map(str::trim)
-            .filter(|note| !note.is_empty())
-        {
-            issues.push(BrowseIssue {
-                code: "ocr_mapping_uncertain", scope: "browse",
-                message: format!("OCR is uncertain about the test identity: {note} Check the original report before mapping this result."),
-            });
-        }
+        let named = crate::laboratory::infer_metric(&payload.raw_name, None);
+        let coded = crate::laboratory::split_test_code(&payload.raw_name)
+            .1
+            .and_then(crate::laboratory::report_suggestion_code);
+        let candidate = candidates.iter().find(|candidate| {
+            Some(candidate.metric_id) == payload.ocr_metric_candidate.as_deref()
+                || Some(candidate.metric_id) == named
+                || Some(candidate.metric_id) == coded
+        });
         if crate::laboratory::test_code_conflicts(&payload.raw_name) {
             issues.push(BrowseIssue {
                 code: "lab_test_code_conflict", scope: "browse",
                 message: "The printed test name and test code do not identify the same metric. Review the original before mapping this result.".into(),
             });
-        } else if let Some(candidate) = candidates
-            .iter()
-            .find(|candidate| {
-                Some(candidate.metric_id) == payload.ocr_metric_candidate.as_deref()
-                    || Some(candidate.metric_id)
-                        == crate::laboratory::infer_metric(&payload.raw_name, None)
-                    || Some(candidate.metric_id)
-                        == crate::laboratory::split_test_code(&payload.raw_name)
-                            .1
-                            .and_then(crate::laboratory::report_suggestion_code)
-            })
-            .filter(|candidate| candidate.unit_match == crate::laboratory::UnitMatch::Incompatible)
-        {
+        } else if let Some(candidate) = candidate.filter(|candidate| {
+            !candidate.standard_unit.trim().is_empty()
+                && candidate.unit_match == crate::laboratory::UnitMatch::Incompatible
+        }) {
             let reported = payload.raw_unit.as_deref().unwrap_or("not specified");
             let standard = match candidate.standard_unit {
                 "1" => "unitless (qualitative result)",
-                "" => "unit not specified",
                 unit => unit,
             };
             issues.push(BrowseIssue {
@@ -252,29 +264,20 @@ fn browse_issues(
                     candidate.name
                 ),
             });
-        } else if !known_name {
-            let code_match = crate::laboratory::split_test_code(&payload.raw_name)
-                .1
-                .and_then(crate::laboratory::loinc_metric);
-            let (code, message) = match code_match {
-                Some(id) => {
-                    let name = crate::laboratory::display_name(&payload.raw_name, Some(id));
-                    ("metric_identity_uncertain", format!("The test code suggests {name}, but the printed test name could not be verified. Review the original before mapping this result."))
-                }
-                None if !candidates.is_empty() => ("metric_identity_uncertain", "Review the suggested existing metrics against the original report before choosing a match.".into()),
-                None => ("unmapped_metric", "No existing Browse metric reliably matches this test. It appears separately for review. Check the original and select a metric if appropriate.".into()),
-            };
+        } else if let Some(candidate) = candidate {
             issues.push(BrowseIssue {
-                code,
+                code: "metric_identity_uncertain",
                 scope: "browse",
-                message,
+                message: format!(
+                    "Suggested match: {}. Check the original report before mapping this result.",
+                    candidate.name
+                ),
             });
-        } else if crate::laboratory::infer_metric(&payload.raw_name, payload.raw_unit.as_deref())
-            .is_none()
-        {
+        } else {
             issues.push(BrowseIssue {
-                code: "unsupported_unit", scope: "browse",
-                message: format!("Unit ‘{}’ does not match this metric. The result appears separately in Browse. Check the original report and edit the result.", payload.raw_unit.as_deref().unwrap_or("not provided")),
+                code: "unmapped_metric",
+                scope: "browse",
+                message: "No existing Browse metric reliably matches this test. It appears separately for review. Check the original and select a metric if appropriate.".into(),
             });
         }
     } else if ["missing_unit", "unsupported_unit", "overflow"]
@@ -286,6 +289,24 @@ fn browse_issues(
             message: format!(
                 "Historical values only; cannot plot: {}",
                 interpretation.result.reason
+            ),
+        });
+    }
+    if payload
+        .raw_unit
+        .as_deref()
+        .is_some_and(|unit| !unit.trim().is_empty())
+        && matches!(
+            payload.raw_result.trim().to_ascii_lowercase().as_str(),
+            "negative" | "not detected"
+        )
+    {
+        issues.push(BrowseIssue {
+            code: "negative_with_unit",
+            scope: "review",
+            message: negative_bound(payload).map_or_else(
+                || "Verify the assay threshold in the original report before entering a numeric bound.".into(),
+                |bound| format!("Reported negative threshold: {bound}. Verify against the original report."),
             ),
         });
     }
@@ -384,6 +405,7 @@ impl StoredObservation {
                 .to_owned(),
             lab_test_code: lab_test_code.map(str::to_owned),
             lab_test_name: lab_test_code.and_then(crate::loinc::long_common_name),
+            reported_negative_bound: negative_bound(&payload),
             browse_issues,
             metric_suggestions,
             observation_id: self.observation_id,

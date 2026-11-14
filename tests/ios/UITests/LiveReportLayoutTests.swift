@@ -28,8 +28,23 @@ nonisolated final class LiveReportLayoutTests: XCTestCase {
         XCTAssertLessThan(heading.frame.minY, issue.frame.minY)
         XCTAssertTrue(issue.label.contains("report unit mg/dL"))
         XCTAssertTrue(issue.label.contains("database standard unit unitless (qualitative result)"))
+        let ketonesTitle = app.buttons.containing(.staticText, identifier: "Ketones").firstMatch
+        let manualConfirm = app.buttons.matching(identifier: "report-result-status-action")
+            .allElementsBoundByIndex.first { button in
+                button.label == "Confirm" && button.frame.minY > ketonesTitle.frame.minY
+                    && button.frame.maxY < issue.frame.minY
+            }
+        XCTAssertNotNil(manualConfirm)
         issue.tap()
         XCTAssertTrue(app.staticTexts["Ketones - urine"].waitForExistence(timeout: 10))
+        app.buttons["Cancel"].tap()
+        let egfr = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "LOINC 33914-3")).firstMatch
+        for _ in 0..<8 where !egfr.isHittable { app.swipeUp() }
+        XCTAssertTrue(egfr.isHittable)
+        let newBadge = app.buttons.matching(identifier: "report-result-new").allElementsBoundByIndex
+            .first { abs($0.frame.midY - egfr.frame.midY) < 20 }
+        XCTAssertNotNil(newBadge)
+
     }
 
     @MainActor func testInstalledReportLayout() throws {

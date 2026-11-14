@@ -909,7 +909,7 @@ nonisolated final class SmokeTests: XCTestCase {
         ready.tap()
         let queue = app.navigationBars["Ready to Confirm"]
         XCTAssertTrue(queue.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons.containing(.staticText, identifier: "Marker 1").firstMatch.exists)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Marker 1")).firstMatch.waitForExistence(timeout: 5))
         queue.buttons.firstMatch.tap()
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         _ = try await control("test/fail-review")
@@ -922,7 +922,8 @@ nonisolated final class SmokeTests: XCTestCase {
         let finished = NSPredicate(format: "label CONTAINS %@", "0 results ready to confirm")
         await fulfillment(of: [XCTNSPredicateExpectation(predicate: finished, object: ready)], timeout: 10)
         XCTAssertFalse(confirm.isEnabled)
-        XCTAssertTrue(app.staticTexts["Specimen could not be verified"].exists)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "<0.1 mg/dL (Negative mg/dL)")).firstMatch.exists)
+        XCTAssertTrue(needsReview.exists)
         let confirmationCounts = try JSONSerialization.jsonObject(with: await control("test/counts")) as? [String: Int]
         XCTAssertEqual(confirmationCounts?["reports/review"], 1)
         XCTAssertNil(confirmationCounts?["reports/get"])

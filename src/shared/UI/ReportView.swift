@@ -253,8 +253,8 @@ struct ReportView: View {
     private func toggleStatus(_ observation: JSONValue) async {
         guard !confirmingAll, !savingReview, !rescanning else { return }
         let status = observation["status"].stringValue
-        guard status == "pending" || status == "confirmed" else { return }
-        let change = ReportReview.change(observation, to: status == "pending" ? "confirmed" : "pending")
+        guard status == "pending" else { return }
+        let change = ReportReview.change(observation, to: "confirmed")
         await model.perform {
             try await save(observations: [change], context: .null, newMetric: .null)
         }
@@ -402,10 +402,17 @@ struct ReportObservationRow: View {
     let chooseMetric: () -> Void
     let showSource: (Int) -> Void
     let writeHealth: () -> Void
+    private var needsManualConfirmation: Bool {
+        observation["status"] == .string("pending")
+            && !ReportReview.canBulkConfirm(observation)
+    }
+
     private var resultLabel: String {
         let printed = [observation["payload"]["raw_result"].stringValue,
                        observation["payload"]["raw_unit"].stringValue]
             .filter { !$0.isEmpty }.joined(separator: " ")
+        let bound = observation["reported_negative_bound"].stringValue
+        if !bound.isEmpty { return "\(bound) (\(printed))" }
         let standardized = observation["interpretation"]["result"]["display"].stringValue
         return standardized.isEmpty || standardized == printed ? printed : "\(standardized) (\(printed))"
     }
@@ -447,7 +454,10 @@ struct ReportObservationRow: View {
             }.frame(minHeight: 44)
             HStack(spacing: 8) {
                 Button { edit() } label: {
-                    Text(resultLabel).foregroundStyle(.primary)
+                    Text(resultLabel)
+                        .foregroundStyle(observation["browse_issues"].arrayValue.contains {
+                            $0["code"] == .string("negative_with_unit")
+                        } ? Color.yellow : Color.primary)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }.buttonStyle(.plain)
@@ -459,22 +469,18 @@ struct ReportObservationRow: View {
                 #if !os(Android)
                 .accessibilityHint("Opens the original report page")
                 #endif
-                HStack(spacing: 6) {
-                    Text(observation["status"].stringValue.capitalized)
-                        .font(.caption).foregroundStyle(.secondary)
-                    if let changeStatus {
-                        Button(action: changeStatus) {
-                            Text(observation["status"] == .string("confirmed") ? "Hold" : "Confirm")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(Color.accentColor)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color.accentColor.opacity(0.12), in: Capsule())
-                                .frame(minHeight: 44)
-                        }
-                        .accessibilityIdentifier("report-result-status-action")
-                        .disabled(isBusy)
+                if let changeStatus, observation["status"] == .string("pending") {
+                    Button(action: changeStatus) {
+                        Text("Confirm")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(needsManualConfirmation ? Color.yellow : Color.accentColor)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background((needsManualConfirmation ? Color.yellow : Color.accentColor).opacity(0.12), in: Capsule())
+                            .frame(minHeight: 44)
                     }
+                    .accessibilityIdentifier("report-result-status-action")
+                    .disabled(isBusy)
                 }
             }
             let name = observation["lab_test_name"].stringValue
@@ -483,7 +489,8 @@ struct ReportObservationRow: View {
                     .accessibilityIdentifier("report-result-loinc-name")
             }
             ForEach(Array(observation["browse_issues"].arrayValue.enumerated()), id: \.offset) { _, issue in
-                if issue["code"] == .string("unmapped_metric"), observation["status"] != .string("rejected") {
+                if issue["code"] == .string("ocr_mapping_uncertain")
+                    || (issue["code"] == .string("unmapped_metric") && observation["status"] != .string("rejected")) {
                     EmptyView()
                 } else if issue["scope"] == .string("browse"), observation["status"] != .string("rejected") {
                     Button { chooseMetric() } label: {
@@ -496,10 +503,6 @@ struct ReportObservationRow: View {
                     issueLabel(issue).accessibilityIdentifier("report-result-issue")
                 }
             }
-            let note = observation["payload"]["ocr_mapping_note"].stringValue
-            if !note.isEmpty && !observation["browse_issues"].arrayValue.contains(where: { $0["code"] == .string("ocr_mapping_uncertain") }) {
-                Text(note).font(.caption).foregroundStyle(.orange)
-            }
             if observation["status"] == .string("confirmed"), observation["payload"]["metric_id"] == .string("glucose") {
                 Button("Save to \(MobilePlatform.healthProviderName)") { writeHealth() }.font(.caption).disabled(isBusy)
             }
@@ -508,7 +511,7 @@ struct ReportObservationRow: View {
 
     private func issueLabel(_ issue: JSONValue) -> some View {
         Label(issue["message"].stringValue, systemImage: MobileSymbol.name("exclamationmark.triangle"))
-            .font(.caption).foregroundStyle(.orange)
+            .font(.caption).foregroundStyle(Color.yellow)
             .fixedSize(horizontal: false, vertical: true)
     }
 

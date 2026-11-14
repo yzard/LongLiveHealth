@@ -145,7 +145,12 @@ class Handler(BaseHTTPRequestHandler):
                 for index in range(126)
             ]
         if route == 'test/mark-last-result-uncertain':
-            observations[-1]['payload']['ocr_mapping_note'] = 'Specimen could not be verified'
+            row = observations[-1]
+            row['status'] = 'pending'
+            row['payload'].update(raw_result='Negative', raw_unit='mg/dL')
+            row['reported_negative_bound'] = '<0.1 mg/dL'
+            row['browse_issues'] = [{'code': 'negative_with_unit', 'scope': 'review',
+                                     'message': 'Reported negative threshold: <0.1 mg/dL.'}]
         if route == 'reports/delete':
             reports[:] = [item for item in reports if item['report_id'] != body.get('report_id')]
             observations[:] = [item for item in observations if item['report_id'] != body.get('report_id')]
