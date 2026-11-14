@@ -2,11 +2,11 @@ use crate::{
     add_user, fixture,
     health_batch::{batch, record},
 };
-use longlivehealth::{health::ConnectionRequest, wellness::trends};
+use longlivehealth::{health::ConnectionRequest, insights::history};
 use serde_json::json;
 
 #[tokio::test]
-async fn long_term_trends_preserve_complete_history_explicit_pairs_and_account_scope() {
+async fn insight_histories_preserve_complete_history_explicit_pairs_and_account_scope() {
     let (_dir, state) = fixture().await;
     let user = add_user(&state, "alice").await;
     let other = add_user(&state, "bob").await;
@@ -23,7 +23,7 @@ async fn long_term_trends_preserve_complete_history_explicit_pairs_and_account_s
         .unwrap();
     state.database.save_wellness_preferences(&user.user_id, serde_json::from_value(json!({
         "expected_version":0,"batch_id":uuid::Uuid::new_v4().to_string(),
-        "preferences":{"reference_profile":{"birth_date":"1980-01-01","reference_sex":"male"},"source_aliases":{},"source_priority":{},"favorite_metrics":[],"overview_show_all":true,"sleep_target_minutes":420}
+        "preferences":{"reference_profile":{"birth_date":"1980-01-01","reference_sex":"male"},"source_aliases":{},"source_priority":{},"sleep_target_minutes":420}
     })).unwrap()).await.unwrap();
     let now = longlivehealth::authentication::now().unwrap();
     let mut records = Vec::new();
@@ -81,10 +81,10 @@ async fn long_term_trends_preserve_complete_history_explicit_pairs_and_account_s
             .await
             .unwrap();
     }
-    let result = trends::get(
+    let result = history::snapshot(
         &state.database,
         &user.user_id,
-        trends::Request {
+        history::Request {
             timezone: "America/New_York".into(),
         },
     )
@@ -119,10 +119,10 @@ async fn long_term_trends_preserve_complete_history_explicit_pairs_and_account_s
                 .all(|p| p["value"].as_f64().unwrap() < 180.)
         );
     }
-    let empty = trends::get(
+    let empty = history::snapshot(
         &state.database,
         &other.user_id,
-        trends::Request {
+        history::Request {
             timezone: "UTC".into(),
         },
     )
@@ -136,10 +136,10 @@ async fn long_term_trends_preserve_complete_history_explicit_pairs_and_account_s
             .all(|c| c["state"] == "insufficient_data")
     );
     assert!(
-        trends::get(
+        history::snapshot(
             &state.database,
             &user.user_id,
-            trends::Request {
+            history::Request {
                 timezone: "invalid".into()
             }
         )

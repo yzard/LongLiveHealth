@@ -284,7 +284,6 @@ async fn reserved_connections_cannot_bypass_domain_validation() {
     let token = crate::token(&state, "reserved").await;
     let app = longlivehealth::app::create_application(state.clone());
     for endpoint in [
-        "wellness/day",
         "wellness/sources",
         "wellness/chart",
         "wellness/timeline",
@@ -608,7 +607,7 @@ async fn preferences_are_versioned_isolated_and_preserve_source_fallbacks() {
             .unwrap()["version"],
         0
     );
-    let input = json!({"expected_version":0,"batch_id":uuid::Uuid::new_v4(),"preferences":{"reference_profile":{"birth_date":null,"reference_sex":null},"source_aliases":{"apple_health:watch":"My Watch"},"source_priority":{"sleep":["apple_health:watch","health_connect:ring"]},"favorite_metrics":["sleep"],"overview_show_all":false,"sleep_target_minutes":480}});
+    let input = json!({"expected_version":0,"batch_id":uuid::Uuid::new_v4(),"preferences":{"reference_profile":{"birth_date":null,"reference_sex":null},"source_aliases":{"apple_health:watch":"My Watch"},"source_priority":{"sleep":["apple_health:watch","health_connect:ring"]},"sleep_target_minutes":480}});
     let result = state
         .database
         .save_wellness_preferences(
@@ -618,7 +617,10 @@ async fn preferences_are_versioned_isolated_and_preserve_source_fallbacks() {
         .await
         .unwrap();
     assert_eq!(result["version"], 1);
-    assert_eq!(result["preferences"], input["preferences"]);
+    let mut expected = input["preferences"].clone();
+    expected["cardiovascular"] =
+        serde_json::to_value(longlivehealth::insights::Context::default()).unwrap();
+    assert_eq!(result["preferences"], expected);
     let mut stale = input.clone();
     stale["batch_id"] = json!(uuid::Uuid::new_v4());
     stale["preferences"]["sleep_target_minutes"] = json!(500);
@@ -650,7 +652,7 @@ async fn preferences_are_versioned_isolated_and_preserve_source_fallbacks() {
         0
     );
     let mut invalid = input;
-    invalid["preferences"]["favorite_metrics"] = json!(["sleep", "sleep"]);
+    invalid["preferences"]["sleep_target_minutes"] = json!(0);
     assert!(
         state
             .database
@@ -1277,66 +1279,6 @@ async fn sleep_correction_and_training_declaration_follow_manual_revision_lifecy
 }
 
 #[test]
-fn association_statistics_match_independent_reference_with_calendar_gaps() {
-    use longlivehealth::wellness::statistics::{Row, benjamini_yekutieli, regress};
-    let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/statistics.json")).unwrap();
-    for case in fixture["cases"].as_array().unwrap() {
-        let rows: Vec<_> = case["rows"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|r| Row {
-                day: r["day"].as_u64().unwrap() as usize,
-                x: r["x"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|v| v.as_f64().unwrap())
-                    .collect(),
-                y: r["y"].as_f64().unwrap(),
-            })
-            .collect();
-        let output = regress(&rows, 17).unwrap();
-        for field in ["effect", "standard_error", "p_value"] {
-            assert!(
-                (output[field].as_f64().unwrap() - case["expected"][field].as_f64().unwrap()).abs()
-                    < 1e-8,
-                "{} {}",
-                case["name"],
-                field
-            );
-        }
-        for i in 0..2 {
-            assert!(
-                (output["ci_95"][i].as_f64().unwrap()
-                    - case["expected"]["ci_95"][i].as_f64().unwrap())
-                .abs()
-                    < 1e-8
-            );
-        }
-        assert_eq!(output["bootstrap_successes"], 500);
-        assert_eq!(output, regress(&rows, 17).unwrap());
-    }
-    let p: Vec<_> = fixture["by"]["p_values"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_f64())
-        .collect();
-    for (actual, expected) in benjamini_yekutieli(&p)
-        .iter()
-        .zip(fixture["by"]["q_values"].as_array().unwrap())
-    {
-        if let Some(expected) = expected.as_f64() {
-            assert!((actual.unwrap() - expected).abs() < 1e-12);
-        } else {
-            assert!(actual.is_none());
-        }
-    }
-}
-
-#[test]
 fn association_journal_types_round_trip_and_invalid_values_are_rejected() {
     use longlivehealth::wellness::entries::Entry;
     let valid = json!({"kind":"journal","content":{"behaviors":{"alcohol":false},"measurements":{"caffeine":{"value":120,"unit":"mg"}},"times":{"bedtime":1420},"mood":5,"perceived_stress":null,"note":"synthetic"}});
@@ -1357,120 +1299,6 @@ fn association_journal_types_round_trip_and_invalid_values_are_rejected() {
             .unwrap()
             .validate()
             .is_err()
-    );
-}
-
-#[tokio::test]
-async fn associations_preserve_missingness_isolate_owners_and_invalidate_on_source_edit() {
-    use longlivehealth::wellness::associations::Request;
-    let (_directory, state) = crate::fixture().await;
-    let alice = crate::add_user(&state, "association-alice").await;
-    let bob = crate::add_user(&state, "association-bob").await;
-    let result = state
-        .database
-        .behavior_associations(
-            &alice.user_id,
-            Request {
-                end_date: "2026-01-01".into(),
-                timezone: "UTC".into(),
-                outcome: "sleep".into(),
-                source: "apple_health:watch".into(),
-                behaviors: vec!["caffeine".into(), "alcohol".into()],
-                covariates: vec![],
-                lag_days: 1,
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(result["results"].as_array().unwrap().len(), 2);
-    assert_eq!(result["results"][0]["state"], "insufficient_days");
-    assert!(result["results"][0]["q_value"].is_null());
-    assert!(result["results"][0]["passes_by_threshold"].is_null());
-    assert_eq!(
-        result["calibration"]["significance_decisions_enabled"],
-        false
-    );
-    let id = result["result_id"].as_str().unwrap();
-    assert!(
-        state
-            .database
-            .association_result(&bob.user_id, id)
-            .await
-            .is_err()
-    );
-    assert_eq!(
-        state
-            .database
-            .association_result(&alice.user_id, id)
-            .await
-            .unwrap(),
-        result
-    );
-    state.database.save_wellness_entry(&alice.user_id,serde_json::from_value(json!({"record_id":uuid::Uuid::new_v4(),"version":1,"batch_id":uuid::Uuid::new_v4(),"at":100,"timezone":"UTC","entry":{"kind":"journal","content":{"behaviors":{"alcohol":false},"measurements":{},"times":{},"mood":null,"perceived_stress":null,"note":"synthetic"}}})).unwrap()).await.unwrap();
-    assert!(
-        state
-            .database
-            .association_result(&alice.user_id, id)
-            .await
-            .is_err()
-    );
-    assert_eq!(
-        state
-            .database
-            .association_results(&alice.user_id)
-            .await
-            .unwrap()["results"],
-        json!([])
-    );
-}
-
-#[test]
-fn association_daily_pipeline_handles_types_missing_days_and_clock_boundaries() {
-    use chrono::{Days, NaiveDate};
-    use longlivehealth::wellness::associations::{Request, analyze};
-    let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/statistics.json")).unwrap();
-    let start = NaiveDate::from_ymd_opt(2026, 1, 5).unwrap();
-    let mut request = Request {
-        end_date: "2026-04-04".into(),
-        timezone: "UTC".into(),
-        outcome: "hrv_sdnn".into(),
-        source: "apple_health:watch".into(),
-        behaviors: vec!["synthetic".into(), "never_recorded".into()],
-        covariates: vec![],
-        lag_days: 0,
-    };
-    let mut journals = Vec::new();
-    let mut outcomes = Vec::new();
-    for row in fixture["cases"][0]["rows"].as_array().unwrap() {
-        let date = start
-            .checked_add_days(Days::new(row["day"].as_u64().unwrap()))
-            .unwrap();
-        journals.push(json!({"at":date.and_hms_opt(12,0,0).unwrap().and_utc().timestamp(),"timezone":"UTC","entry":{"content":{"behaviors":{"synthetic":row["x"][1].as_f64()==Some(1.0)},"measurements":{},"times":{}}}}));
-        outcomes.push(json!({"date":date.to_string(),"source":"apple_health:watch","value":row["y"],"unit":"ms","excluded_sample_count":0}));
-    }
-    let result = analyze(&request, start, &json!(journals), &json!(outcomes)).unwrap();
-    assert_eq!(result["results"][0]["state"], "estimated");
-    assert!(
-        (result["results"][0]["estimate"]["effect"].as_f64().unwrap()
-            - fixture["cases"][0]["expected"]["effect"].as_f64().unwrap())
-        .abs()
-            < 1e-8
-    );
-    assert_eq!(result["results"][1]["state"], "insufficient_days");
-    journals[0]["entry"]["content"]["behaviors"] = json!({});
-    journals[0]["entry"]["content"]["measurements"] = json!({"synthetic":{"value":1,"unit":"mg"}});
-    assert_eq!(
-        analyze(&request, start, &json!(journals), &json!(outcomes)).unwrap()["results"][0]["state"],
-        "behavior_type_or_unit_changed"
-    );
-    request.behaviors = vec!["bedtime".into()];
-    for (index, journal) in journals.iter_mut().enumerate() {
-        journal["entry"]["content"]["times"] = json!({"bedtime":if index%2==0{719}else{721}});
-    }
-    assert_eq!(
-        analyze(&request, start, &json!(journals), &json!(outcomes)).unwrap()["results"][0]["state"],
-        "clock_time_crosses_anchor"
     );
 }
 
@@ -1510,75 +1338,6 @@ async fn training_protocol_rejects_inconsistent_times_and_preserves_answer_delay
             expected
         );
     }
-}
-
-fn nn_payload() -> serde_json::Value {
-    let mut offset = 0.0;
-    let intervals: Vec<_> = (0..300)
-        .map(|i| {
-            let nn = if i % 2 == 0 { 990.0 } else { 1010.0 };
-            offset += nn / 1000.0;
-            json!({"offset_seconds":offset,"nn_ms":nn,"quality":"normal","preceded_by_gap":false})
-        })
-        .collect();
-    json!({"schema":"nn-intervals-v1","protocol_id":"rest-5min","context":"morning_rest","device_model":"fixture","firmware":"1","posture":"supine","quality_reviewed":true,"intervals":intervals})
-}
-#[test]
-fn hrv_requires_five_continuous_reviewed_minutes_and_separates_protocol_baselines() {
-    use longlivehealth::wellness::hrv::{Intervals, calculate, summarize};
-    let payload = nn_payload();
-    let result = calculate(&serde_json::from_value::<Intervals>(payload.clone()).unwrap()).unwrap();
-    assert!((result["rmssd_ms"].as_f64().unwrap() - 20.0).abs() < 1e-10);
-    assert!((result["ln_rmssd"].as_f64().unwrap() - 20f64.ln()).abs() < 1e-10);
-    for mutation in ["gap", "quality", "offset", "duration", "review"] {
-        let mut bad = payload.clone();
-        match mutation {
-            "gap" => bad["intervals"][120]["preceded_by_gap"] = json!(true),
-            "quality" => bad["intervals"][120]["quality"] = json!("unknown"),
-            "offset" => bad["intervals"][120]["offset_seconds"] = json!(1),
-            "duration" => {
-                bad["intervals"].as_array_mut().unwrap().pop();
-            }
-            _ => bad["quality_reviewed"] = json!(false),
-        }
-        assert!(calculate(&serde_json::from_value::<Intervals>(bad).unwrap()).is_err());
-    }
-    let rows = (0..30)
-        .map(|day| {
-            let mut p = payload.clone();
-            if day == 29 {
-                p["firmware"] = json!("2");
-            }
-            longlivehealth::health::StoredHealthRecord {
-                platform: "manual".into(),
-                source_id: "test-device".into(),
-                record_id: format!("nn-{day}"),
-                record_type: "nn_intervals".into(),
-                start_at: day * 86400,
-                end_at: day * 86400 + 300,
-                version: 1,
-                payload_json: json!({"payload":p}).to_string(),
-            }
-        })
-        .collect();
-    let result = summarize(rows, chrono_tz::UTC).unwrap();
-    assert_eq!(result.as_array().unwrap().len(), 2);
-    let prior = result
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|g| g["protocol"]["firmware"] == "1")
-        .unwrap();
-    assert!(prior["days"][27]["baseline"].is_null());
-    assert_eq!(prior["days"][28]["baseline_days"], 28);
-    assert!(prior["days"][28]["baseline"]["z"].is_null());
-    let changed = result
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|g| g["protocol"]["firmware"] == "2")
-        .unwrap();
-    assert_eq!(changed["days"][0]["baseline_days"], 0);
 }
 
 #[tokio::test]
@@ -1804,87 +1563,6 @@ fn nutrition_targets_preserve_zero_and_missing_values() {
             .unwrap()
             .iter()
             .all(|v| v["observed_sum"].is_null())
-    );
-}
-
-#[tokio::test]
-async fn hrv_archive_query_is_owned_and_keeps_unknown_apple_quality_explicit() {
-    use longlivehealth::{
-        health::{ConnectionRequest, HealthRecordInput, SyncRequest},
-        wellness::hrv::Request,
-    };
-    let (_directory, state) = crate::fixture().await;
-    let user = crate::add_user(&state, "hrv-owner").await;
-    let other = crate::add_user(&state, "hrv-other").await;
-    let connection = state
-        .database
-        .create_connection(
-            &user.user_id,
-            ConnectionRequest {
-                platform: "apple_health".into(),
-                installation_id: uuid::Uuid::new_v4().to_string(),
-            },
-        )
-        .await
-        .unwrap();
-    for (kind, payload) in [
-        ("nn_intervals", nn_payload()),
-        (
-            "heartbeat_series",
-            json!({"samples":[{"time_since_start":1,"preceded_by_gap":false}]}),
-        ),
-    ] {
-        state
-            .database
-            .sync_health(
-                &user.user_id,
-                SyncRequest {
-                    connection_id: connection.connection_id.clone(),
-                    batch_id: uuid::Uuid::new_v4().to_string(),
-                    record_type: kind.into(),
-                    coverage_status: "observed".into(),
-                    records: vec![HealthRecordInput {
-                        record_id: kind.into(),
-                        source_id: "test".into(),
-                        record_type: kind.into(),
-                        start_at: 100,
-                        end_at: 400,
-                        version: 1,
-                        deleted: false,
-                        payload,
-                    }],
-                },
-            )
-            .await
-            .unwrap();
-    }
-    let request = || Request {
-        start_at: 0,
-        end_at: 1000,
-        timezone: "UTC".into(),
-    };
-    let result = state
-        .database
-        .hrv_windows(&user.user_id, request())
-        .await
-        .unwrap();
-    assert_eq!(result["sources"].as_array().unwrap().len(), 2);
-    assert!(
-        result["sources"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|g| g["windows"][0]["state"] == "quality_or_protocol_unknown")
-    );
-    assert!(
-        state
-            .database
-            .hrv_windows(&other.user_id, request())
-            .await
-            .unwrap()["sources"]
-            .as_array()
-            .unwrap()
-            .is_empty()
     );
 }
 
@@ -2427,53 +2105,6 @@ async fn fit_import_deduplicates_and_restricts_deletion_to_owner() {
     );
 }
 
-#[test]
-fn calendar_report_keeps_sources_and_missing_days_separate() {
-    use longlivehealth::wellness::report::summarize_days;
-    let rows = vec![
-        json!({"source":"a","date":"2026-01-01","value":10.0}),
-        json!({"source":"a","date":"2026-01-02","value":30.0}),
-        json!({"source":"b","date":"2026-01-01","value":100.0}),
-    ];
-    let result = summarize_days(&rows, 3).unwrap();
-    assert_eq!(result[0]["daily_median"], 20.0);
-    assert_eq!(result[0]["missing_days"], 1);
-    assert_eq!(result[1]["daily_median"], 100.0);
-    assert_eq!(result[1]["missing_days"], 2);
-    assert!(summarize_days(&[rows[0].clone(), rows[0].clone()], 3).is_err());
-}
-#[tokio::test]
-async fn calendar_report_validates_bounds_and_preserves_empty_state() {
-    use longlivehealth::wellness::report::Request;
-    let (_directory, state) = crate::fixture().await;
-    let user = crate::add_user(&state, "calendar-report").await;
-    let request = |end: &str| Request {
-        start_date: "2026-01-01".into(),
-        end_date: end.into(),
-        timezone: "America/New_York".into(),
-    };
-    let result = state
-        .database
-        .wellness_report(&user.user_id, request("2026-12-31"))
-        .await
-        .unwrap();
-    assert_eq!(result["calendar_days"], 365);
-    assert_eq!(result["metrics"].as_array().unwrap().len(), 8);
-    assert!(
-        result["metrics"][0]["sources"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
-    assert!(
-        state
-            .database
-            .wellness_report(&user.user_id, request("2027-02-01"))
-            .await
-            .is_err()
-    );
-}
-
 fn complete_diet_totals() -> BTreeMap<String, f64> {
     serde_json::from_value(json!({"energy_kcal":1000,"total_fruit_cup_eq":0.8,"whole_fruit_cup_eq":0.4,"vegetables_cup_eq":1.1,"greens_beans_cup_eq":0.2,"whole_grains_oz_eq":1.5,"dairy_cup_eq":1.3,"protein_foods_oz_eq":2.5,"seafood_plant_oz_eq":0.8,"unsaturated_fat_g":20,"saturated_fat_g":8,"refined_grains_oz_eq":1.8,"sodium_mg":1100,"added_sugars_tsp_eq":4})).unwrap()
 }
@@ -2625,23 +2256,6 @@ fn training_windows_do_not_combine_active_and_elapsed_protocols() {
         same_day["days"][26]["state"],
         "incompatible_duration_protocols"
     );
-}
-
-#[test]
-fn hrv_rejects_mismatched_archive_duration() {
-    let row = longlivehealth::health::StoredHealthRecord {
-        platform: "health_connect".into(),
-        source_id: "reviewed-device".into(),
-        record_id: "duration-mismatch".into(),
-        record_type: "nn_intervals".into(),
-        start_at: 0,
-        end_at: 10,
-        version: 1,
-        payload_json: json!({"payload":nn_payload()}).to_string(),
-    };
-    let result = longlivehealth::wellness::hrv::summarize(vec![row], chrono_tz::UTC).unwrap();
-    assert_eq!(result[0]["windows"][0]["state"], "ineligible_window");
-    assert!(result[0]["days"].as_array().unwrap().is_empty());
 }
 
 #[test]
@@ -3381,35 +2995,6 @@ fn retired_practice_cannot_be_saved_but_respiratory_metrics_remain() {
         )
         .is_some()
     );
-}
-
-#[tokio::test]
-async fn overview_can_persist_all_none_and_individual_rows() {
-    let (_directory, state) = crate::fixture().await;
-    let user = crate::add_user(&state, "layout-owner").await;
-    let mut saved = state
-        .database
-        .wellness_preferences(&user.user_id)
-        .await
-        .unwrap();
-    assert_eq!(saved["preferences"]["overview_show_all"], true);
-    for (all, metrics) in [
-        (false, vec![]),
-        (false, vec!["active_energy", "basal_energy"]),
-        (true, vec![]),
-    ] {
-        let mut preferences = saved["preferences"].clone();
-        preferences["overview_show_all"] = json!(all);
-        preferences["favorite_metrics"] = json!(metrics);
-        saved = state.database.save_wellness_preferences(&user.user_id, serde_json::from_value(json!({"expected_version":saved["version"],"batch_id":uuid::Uuid::new_v4(),"preferences":preferences})).unwrap()).await.unwrap();
-        let reloaded = state
-            .database
-            .wellness_preferences(&user.user_id)
-            .await
-            .unwrap();
-        assert_eq!(reloaded["preferences"]["overview_show_all"], all);
-        assert_eq!(reloaded["preferences"]["favorite_metrics"], json!(metrics));
-    }
 }
 
 #[tokio::test]

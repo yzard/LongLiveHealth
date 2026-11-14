@@ -36,10 +36,8 @@ struct RootView: View {
             else if model.mustChangePassword { NavigationStack { PasswordChangeView(model: model, required: true) } }
             else {
                 TabView(selection: $model.selectedTab) {
-                    NavigationStack { OverviewView(model: model) }.tabItem { Label("Overview", systemImage: "square.grid.2x2") }.tag("Overview")
+                    NavigationStack { InsightsView(model: model) }.tabItem { Label("Insights", systemImage: "sparkles") }.tag("Insights")
                     NavigationStack { BrowseView(model: model) }.tabItem { Label("Browse", systemImage: "list.bullet") }.tag("Browse")
-                    NavigationStack { TrendsView(model: model) }.tabItem { Label("Trends", systemImage: "chart.xyaxis.line") }.tag("Trends")
-                    NavigationStack { AnalysisView(model: model) }.tabItem { Label("Insights", systemImage: "sparkles") }.tag("Insights")
                     NavigationStack(path: $model.dataPath) { DataCenterView(model: model) }.tabItem { Label("Data", systemImage: "externaldrive") }.tag("Data")
                 }
                 .id(model.session?.userID)

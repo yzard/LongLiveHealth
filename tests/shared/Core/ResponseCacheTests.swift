@@ -13,7 +13,7 @@ import Testing
     #expect(try account.load(String.self, name: "anchor-sleep.json") == "keep")
     let empty = JSONValue.object([:])
     #expect(try cache.load("browse/catalog", body: empty) == nil)
-    for path in ["browse/catalog", "wellness/day", "trends/get", "analysis/list", "reports/list"] {
+    for path in ["browse/catalog", "wellness/history", "insights/get", "analysis/list", "reports/list"] {
         try await cache.save(.object(["server_value": .string(path)]), path: path, body: empty)
         #expect(try cache.load(path, body: empty)?["result"]["server_value"] == .string(path))
         #expect(try cache.load(path, body: .object(["date": .string("2026-10-30")])) == nil)

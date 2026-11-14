@@ -85,3 +85,90 @@ fn nonexistent_evidence_cannot_be_published() {
         .is_err()
     );
 }
+
+#[test]
+fn provider_projection_preserves_lab_values_and_all_daily_sources() {
+    use serde_json::json;
+    let input = json!({"provider":{"api_key":"must-not-be-forwarded"},"evidence":[
+        {"id":"observation:one:1","kind":"confirmed_report_observation","value":{
+            "observation_id":"one","report_id":"report","resolved_metric_id":"apob",
+            "payload":{"raw_name":"ApoB","raw_result":"<120","raw_unit":"mg/dL","sampled_at":"2026-07-30","reference_range":"<90","report_flag":"Above Range","notes":"calc","source":{"quote":"repeated report text"}},
+            "interpretation":{"result":{"value":120}}}},
+        {"id":"daily:date:steps","kind":"source_separated_daily_summary","value":{
+            "record_type":"steps","current":{"state":"source_selection_required"},"history":[
+                {"date":"2026-10-20","state":"source_selection_required","selected":null,"alternatives":[
+                    {"source":"watch","value":100,"unit":"count","sample_count":5,"value_status":"available","algorithm":"sum","excluded_sample_count":0},
+                    {"source":"phone","value":90,"unit":"count","sample_count":4,"value_status":"available","algorithm":"sum","excluded_sample_count":1}]}],"chart_ranges":{"duplicated":true}}}]});
+    let result = longlivehealth::analysis::model_input(&input);
+    assert!(result.get("provider").is_none());
+    assert_eq!(result["flagged_laboratory_evidence_ids"], json!(["e1"]));
+    let lab = &result["laboratory_rows"][0];
+    assert_eq!(lab[0], "e1");
+    assert_eq!(lab[2], "<120");
+    assert_eq!(lab[5], "<90");
+    assert_eq!(lab[3], "mg/dL");
+    assert_eq!(lab[4], "2026-07-30");
+    assert_eq!(lab[6], "Above Range");
+    let daily = &result["evidence"][0]["value"];
+    let summaries = daily["history_summary"].as_array().unwrap();
+    let watch = summaries.iter().find(|v| v["source"] == "watch").unwrap();
+    let phone = summaries.iter().find(|v| v["source"] == "phone").unwrap();
+    assert_eq!(watch["daily_median"], 100.0);
+    assert_eq!(phone["daily_median"], 90.0);
+    assert_eq!(phone["excluded_samples"], 1);
+    assert_eq!(daily["current"]["state"], "source_selection_required");
+    assert!(daily.get("chart_ranges").is_none());
+    assert_eq!(
+        input["evidence"][0]["value"]["payload"]["raw_result"],
+        "<120"
+    );
+}
+
+#[test]
+fn short_model_citations_restore_only_exact_snapshot_identifiers() {
+    use longlivehealth::wellness::coach::{Output, restore_citations};
+    use serde_json::json;
+    let input = json!({"evidence":[{"id":"observation:real:2"},{"id":"daily:2026-10-20:steps"}]});
+    for (ids, valid) in [
+        (json!(["e1", "e2"]), true),
+        (json!(["e0"]), false),
+        (json!(["e3"]), false),
+        (json!(["e01"]), false),
+        (json!(["invented"]), false),
+    ] {
+        let mut output:Output=serde_json::from_value(json!({"claims":[{"text":"A fact","evidence_ids":ids}],"missing_information":[],"questions":[],"drafts":[]})).unwrap();
+        assert_eq!(restore_citations(&mut output, &input).is_ok(), valid);
+        if valid {
+            assert_eq!(
+                output.claims[0].evidence_ids,
+                vec!["observation:real:2", "daily:2026-10-20:steps"]
+            );
+        }
+    }
+}
+
+#[test]
+fn clinical_source_identifiers_are_not_replaced_by_archive_aliases() {
+    let input = serde_json::json!({"evidence":longlivehealth::analysis::evidence()});
+    assert_eq!(
+        longlivehealth::analysis::model_input(&input)["evidence"],
+        input["evidence"]
+    );
+}
+
+#[test]
+fn complete_coach_findings_are_not_rejected_by_claim_count() {
+    use longlivehealth::wellness::coach::{Output, validate};
+    use serde_json::json;
+    let input = json!({"evidence":[{"id":"real"}],"allow_drafts":false});
+    let claims: Vec<_> = (0..22)
+        .map(|i| json!({"text":format!("Finding {i}"),"evidence_ids":["real"]}))
+        .collect();
+    let mut output: Output = serde_json::from_value(
+        json!({"claims":claims,"missing_information":[],"questions":[],"drafts":[]}),
+    )
+    .unwrap();
+    assert!(validate(&output, &input).is_ok());
+    output.claims[21].evidence_ids = vec!["invented".into()];
+    assert!(validate(&output, &input).is_err());
+}

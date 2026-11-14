@@ -530,7 +530,7 @@ try:
             ],
         },
     )
-    assert api('trends/get', {'metric_ids': ['ldl_cholesterol']})['points'][0]['value'] == '120'
+    assert api('metrics/history/get', {'metric_id': 'ldl_cholesterol'})['points'][0]['value'] == '120'
     if options.ocr:
         pdf = text_pdf()
         pdf_payload = (
@@ -578,7 +578,7 @@ try:
         )
         point = next(
             point
-            for point in api('trends/get', {'metric_ids': ['ldl_cholesterol']})['points']
+            for point in api('metrics/history/get', {'metric_id': 'ldl_cholesterol'})['points']
             if point['report_id'] == pdf_report
         )
         assert point['value'] == '100' and point['unit'] == 'mg/dL'
@@ -637,7 +637,8 @@ try:
         )
         points = [
             point
-            for point in api('trends/get', {'metric_ids': ['glucose', 'apob']})['points']
+            for metric in ['glucose', 'apob']
+            for point in api('metrics/history/get', {'metric_id': metric})['points']
             if point['report_id'] == scan_report
         ]
         assert len(points) == 4

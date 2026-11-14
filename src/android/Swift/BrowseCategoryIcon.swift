@@ -4,8 +4,8 @@ import SwiftUI
 struct BrowseCategoryIcon: View {
     let category: BrowseCategory
     let color: Color
-    private var asset: String {
-        switch category.symbol {
+    static func asset(for symbol: String) -> String {
+        switch symbol {
         case "flame.fill": "health_category_local_fire_department"
         case "figure.stand": "health_category_accessibility_new"
         case "circle.dotted": "health_category_autorenew"
@@ -31,7 +31,7 @@ struct BrowseCategoryIcon: View {
         }
     }
     var body: some View {
-        Image(asset, bundle: .module).renderingMode(.template).resizable()
+        Image(Self.asset(for: category.symbol), bundle: .module).renderingMode(.template).resizable()
             .scaledToFit().foregroundStyle(color).frame(width: 32, height: 32)
             .accessibilityLabel(Text(category.title))
     }

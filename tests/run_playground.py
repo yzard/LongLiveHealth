@@ -21,8 +21,6 @@ class PlaygroundEntrypointTests(unittest.TestCase):
                 shutil.copy(ROOT / "src/development/data_roots.py", project / "src/development/data_roots.py")
                 (project / "docker").mkdir()
                 shutil.copy(ROOT / "docker/config.toml", project / "docker/config.toml")
-                (project / "src/backend_ocr").mkdir(parents=True)
-                shutil.copy(ROOT / "src/backend_ocr/config.toml", project / "src/backend_ocr/config.toml")
                 shutil.copy(ROOT / "run_playground.sh", project / "run_playground.sh")
                 build = project / "build_docker.sh"
                 build.write_text("#!/bin/sh\nexit " + ("7" if fail else "0") + "\n")

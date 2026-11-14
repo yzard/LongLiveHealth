@@ -92,18 +92,18 @@ test('long server sessions stay within browser timer limits instead of immediate
 });
 
 
-test('daily views and exports retain same-origin authorization and reject invalid download IDs', async () => {
+test('source views and exports retain same-origin authorization and reject invalid download IDs', async () => {
   const calls = [];
   const client = new Client(async (url, options) => {
     calls.push([url, options]);
     return options.method === 'GET' ? new Response('zip', { headers: { 'Content-Type': 'application/zip' } }) : Response.json({});
   }, () => {});
   client.session = session('private');
-  for (const action of ['wellness/day', 'wellness/sources', 'wellness/associations/list', 'wellness/associations/get', 'wellness/associations/run', 'exports/list', 'exports/create']) await client.post(action, {}, undefined);
+  for (const action of ['wellness/sources', 'exports/list', 'exports/create']) await client.post(action, {}, undefined);
   for (const id of ['', '../secret', 'abc?token=x', undefined, null]) await assert.rejects(client.exportArchive(id, undefined), /Invalid/);
-  assert.equal(calls.length, 7);
+  assert.equal(calls.length, 3);
   assert.equal((await client.exportArchive('archive-123', undefined)).type, 'application/zip');
-  assert.equal(calls[7][0], '/api/v1/exports/archive-123/download');
+  assert.equal(calls[3][0], '/api/v1/exports/archive-123/download');
   for (const [, options] of calls) {
     assert.equal(options.headers.Authorization, 'Bearer private');
     assert.equal(options.credentials, 'omit');

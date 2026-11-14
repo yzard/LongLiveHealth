@@ -30,7 +30,6 @@ Android 安装包通过公开的 `GET /longlivehealth.apk` 下载（旧路径 `/
 | reports/relate | report_id、expected_revision、preferred_report_id 可空、kind | updated |
 | reports/delete | report_id、expected_revision | cleanup_queued |
 | metrics/list | {} | metrics：metric_id/name/standard_unit |
-| trends/get | metric_ids 1–20、start_at/end_at 可空 | points、incomparable_count、算法/转换版本 |
 | health/connect | platform、installation_id UUID | connection_id、platform、installation_id |
 | health/sync | 见下方 | batch_id、replayed、total_records |
 | health/coverage | {} | coverage、read_permission=unknown、total_records |
@@ -72,7 +71,6 @@ OCR 候选始终 pending、metric_id=null，不能自行确认。有效结构携
 
 reports/get 的 observations 含 interpretation（result/reference/version）：状态、明确原因、原单位及单位来源、标准单位、value 或上下界/包含性、显示文本和规则/来源。简单比较符/范围可换算边界但不会成为精确趋势点。参考范围显式单位优先，否则使用报告结果列单位并标记 unit_origin=observation；条件化/复杂范围保留原文，不生成假阈值。
 
-trends/get 返回标准 value/unit、original、标准化 reference、excluded（observation_id/reason）与计数、转换版本。只有已确认/映射、有日期且精确可转换的值进入 points。报告查询只返回 extraction_inputs 元数据；完整文本/XML 经 reports/input/get 按需读取，避免列表加载整个证据正文。
 
 重复候选只表示文件字节相同；独立上传仍保留。用户决定 duplicate 或 superseded 关系，被替代报告退出趋势。禁止关系链/环，解绑需要新的版本。
 
@@ -142,7 +140,7 @@ All routes below require the current user's Bearer session. Source data remains 
 
 `POST /api/v1/wellness/day` accepts `date` (`YYYY-MM-DD`), `timezone` (IANA name), and `source_priority` (metric names mapped to ordered source IDs). The response includes six metrics, their source alternatives, history, coverage, and archive revision. A source ID combines its platform and producer. Multiple available sources require a choice. Missing data remains null. Personal comparisons require 28 earlier valid days from the same source within 42 days. These comparisons describe data. They do not estimate disease risk.
 
-`wellness/day` version `wellness-day-v6` also returns `combined` on step history/current entries. This is the Overview step total: disjoint intervals add; overlaps select Apple Watch, other wearables, unknown sources, then phones. Equal-rank sources use stable source-key ordering; samples within one source keep their summed values. Partial samples are prorated by duration, since individual step timestamps are unavailable. Cached daily views with older algorithm versions are recomputed.
+Internal daily aggregation version `wellness-day-v6` returns `combined` step history: disjoint intervals add; overlaps select Apple Watch, other wearables, unknown sources, then phones. Equal-rank sources use stable source-key ordering; samples within one source keep their summed values. Partial samples are prorated by duration, since individual step timestamps are unavailable. Cached daily views with older algorithm versions are recomputed.
 
 `POST /api/v1/wellness/sources` accepts `{}`. The response lists visible source and type combinations, record counts, and timestamp ranges. An empty range does not establish denied permission.
 
@@ -187,16 +185,6 @@ Manual edits require the next version. A stale version or a change of entry type
 
 导出清单的 `field_dictionary` 包含第一版字段语义。校验器要求其表和列集合与 SQLite 列字典一致。字典解释归属、时间、修订、单位和缺失规则；供应商未标准化字段保持原始载荷。
 
-### Behavior association research
-
-Journal content requires `behaviors`, `measurements`, and `times` maps. An empty map is valid. Boolean behaviors use boolean values. Measurements use `{ "value": 120, "unit": "mg" }`. Times use integer minutes after midnight from 0 through 1439. Names must be distinct across all three maps.
-
-`POST /api/v1/wellness/associations/run` accepts `end_date`, `timezone`, `outcome`, `source`, `behaviors`, `covariates`, and `lag_days`. The outcome uses a supported daily metric. The source uses the exact `platform:source_id` identifier. Specify 1–8 behavior names and 0–3 covariate names before the run. The lag is 0 or 1. The fixed window covers 90 completed local dates.
-
-`POST /api/v1/wellness/associations/list` returns the current user's saved result metadata. `POST /api/v1/wellness/associations/get` accepts `result_id` and returns that user's result. Results include input snapshots, daily exclusion reasons, nominal statistical estimates, and calibration status. A source revision removes saved results. The server retains at most 100 results per user.
-
-The current protocol fails synthetic error-rate calibration. `passes_by_threshold` is null, and `significance_decisions_enabled` is false. The client must not present nominal p/q values as confirmed discoveries.
-
 ### 扩展领域接口（schema v1）
 
 以下路径均以 `/api/v1/` 开头，使用 POST、当前账户鉴权和修订一致性检查。未知字段被拒绝。
@@ -204,7 +192,6 @@ The current protocol fails synthetic error-rate calibration. `passes_by_threshol
 | 路径 | 请求和行为 |
 | --- | --- |
 | `wellness/library` | `kind` 为 exercise、workout_template、food、recipe、nutrition_goals、reminder 或 memory。返回最多 1000 条当前记录，受 4 MiB 限制，不受日期窗口限制。 |
-| `wellness/hrv` | 起止时间窗口返回来源和协议分开的 NN/RMSSD/lnRMSSD 结果。最多 90 天、1000 条原始窗口和 16 MiB。未知心搏质量保持不可计算。 |
 | `wellness/food/portion` | 接收 `basis`（record_id、version、amount、unit）和 `meal`。food 使用 g，recipe 使用 servings。返回营养素、缺项与来源快照，供人工确认后保存。 |
 | `wellness/nutrition/day` | `date` 与 `timezone`。返回已有摄入、缺值计数及用户目标。重复同时间目标不自动选取。 |
 | `wellness/reminders` | 指定时间窗口返回提醒的本地时间发生项，最多 31 天。静默时段抑制通知。不存在的夏令时时刻明确标记，重复时刻只取首次。 |
@@ -382,7 +369,7 @@ units; no units are inferred. Text, thresholds and qualitative results remain in
 
 `wellness/history` accepts `record_type` and an IANA `timezone`, and returns a
 complete source-separated daily metric (`history`, `unit`, `chart_ranges`, record
-bounds and data revision). It uses the same daily algorithms as Overview but is
+bounds and data revision). It uses the shared daily aggregation algorithms but is
 not restricted to its 43-day baseline window. Queries are chunked and capped at
 20,000 calendar days / 100,000 daily source rows; an excess returns an error, not
 a truncated chart. Sleep includes only recorded asleep categories; in-bed-only
@@ -450,8 +437,10 @@ Blood pressure uses `HKCorrelationTypeIdentifierBloodPressure` through `wellness
 
 Historical Values use newest-first order across both clients. Date-only collection dates retain their date precision, and undated results appear last. Complete laboratory records and additional plot points are merged before sorting; paginated specialty records use a descending time cursor.
 
-### Directional Trends cards
+### Integrated Insights
 
-POST /api/v1/wellness/trends accepts a timezone and returns cards, complete, data_revision, computed_at and algorithm_version. The API processes the authenticated account's complete VO₂ Max, explicitly paired blood pressure, confirmed Blood Work histories and recent daily sleep/resting-heart-rate data. It returns only assessable worsening or improving cards, with worsening first. Stable, small, insufficient, stale and unassessable changes are omitted. Browse retains all underlying history.
+`POST /api/v1/insights/get` accepts `{ "timezone": "America/New_York" }` and returns six ordered `dashboard` cards (Sleep, Readiness, Vitals, Heart, Fitness and Cardiovascular Review), including preview evidence, sleep-stage intervals, descriptive baseline bands and methods, together with the authenticated user's cardiovascular review and training/recovery evidence, source/date provenance, missing inputs, references, computation time and data revision. PREVENT eligibility is checked before calculating a percentage. Recovery comparisons preserve source and HRV type. Risk context is saved through `wellness/preferences/save` in the `cardiovascular` object; unspecified values remain null. See [method and validation](reviews/2026-11-05-integrated-insights.md).
 
-Each stable-ID card includes source identity, unit, dated series, observed-day coverage, change.direction, per-component before/after comparisons, the reference/goal basis, comparison windows, display-filter explanation and evidence citations. Different device sources, units, assay methods and specimen types remain separate. A worsening blood-pressure component takes priority without concealing an improving component. A concurrent archive change returns 409 so the client can refresh against a consistent revision. Both mobile clients use this single response rather than computing separate trend directions.
+The separate behavior-association and HRV-window calculator endpoints have been removed. Archived derived outputs remain part of full-data exports.
+
+The mobile tabs are Insights (launch default), Browse and Data. Overview and Trends pages and their public `wellness/day`, `wellness/trends` `trends/get` and `wellness/report` endpoints are removed. Insights retains normalized longitudinal evidence internally.

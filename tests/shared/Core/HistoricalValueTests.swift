@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import LongLiveHealthCore
 
 @Test func historicalValuesKeepDatesAndMissingValuesHonest() {
@@ -86,4 +87,14 @@ import Testing
         #expect(HistoricalValue.displayUnit(unit, kind: kind) == label)
     }
     #expect(HistoricalValue.quantity(.number(0.04), unit: "x 10(3)/uL") == "0.04 ×10³ cells/µL")
+}
+
+@Test func collectionDatesPreserveCalendarDatesAcrossTimeZones() throws {
+    let at = try #require(ISO8601DateFormatter().date(from: "2026-07-30T00:00:00Z")).timeIntervalSince1970
+    let newYork = try #require(TimeZone(identifier: "America/New_York"))
+    let tokyo = try #require(TimeZone(identifier: "Asia/Tokyo"))
+    #expect(HistoricalValue.collectionDate(timestamp: at, text: "2026-07-30", timeZone: newYork) == "2026-07-30")
+    #expect(HistoricalValue.collectionDate(timestamp: at, text: "2026-07-30", timeZone: tokyo) == "2026-07-30")
+    #expect(HistoricalValue.collectionDate(timestamp: at, text: "2026-07-30T00:00:00Z", timeZone: newYork) == "Jul 29, 2026")
+    #expect(HistoricalValue.collectionDate(timestamp: nil, text: "", timeZone: newYork) == "—")
 }

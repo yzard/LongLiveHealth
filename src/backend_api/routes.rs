@@ -35,6 +35,7 @@ pub fn router(upload_limit: usize) -> Router<AppState> {
         .route("/api/v1/exports/list", post(list_exports))
         .route("/api/v1/exports/delete", post(delete_export))
         .route("/api/v1/exports/{export_id}/download", get(download_export))
+        .route("/api/v1/insights/get", post(crate::insights::get))
         .route("/api/v1/analysis/create", post(create_analysis))
         .route("/api/v1/analysis/list", post(list_analyses))
         .route("/api/v1/analysis/get", post(get_analysis))
@@ -54,7 +55,6 @@ pub fn router(upload_limit: usize) -> Router<AppState> {
         .route("/api/v1/reports/relate", post(relate_reports))
         .route("/api/v1/metrics/list", post(list_metrics))
         .route("/api/v1/browse/catalog", post(browse_catalog))
-        .route("/api/v1/trends/get", post(get_trends))
         .route("/api/v1/metrics/history/get", post(get_metric_history))
         .route("/api/v1/health/connect", post(connect_health))
         .route(
@@ -97,12 +97,9 @@ pub fn router(upload_limit: usize) -> Router<AppState> {
             "/api/v1/wellness/sleep/regularity",
             post(wellness_regularity),
         )
-        .route("/api/v1/wellness/day", post(wellness_day))
         .route("/api/v1/wellness/history", post(wellness_history))
-        .route("/api/v1/wellness/trends", post(long_term_trends))
         .route("/api/v1/wellness/chart", post(measurement_chart))
         .route("/api/v1/wellness/measurements", post(measurement_history))
-        .route("/api/v1/wellness/hrv", post(wellness_hrv))
         .route("/api/v1/wellness/library", post(wellness_library))
         .route("/api/v1/wellness/import/fit", post(import_fit))
         .route("/api/v1/wellness/coach", post(request_coach))
@@ -114,16 +111,9 @@ pub fn router(upload_limit: usize) -> Router<AppState> {
         .route("/api/v1/wellness/nutrition/day", post(nutrition_day))
         .route("/api/v1/wellness/timeline", post(wellness_timeline))
         .route("/api/v1/wellness/review", post(wellness_review))
-        .route("/api/v1/wellness/report", post(wellness_report))
         .route("/api/v1/wellness/diet", post(wellness_diet))
         .route("/api/v1/wellness/meals", post(wellness_meals))
         .route("/api/v1/wellness/meal-glucose", post(wellness_meal_glucose))
-        .route("/api/v1/wellness/associations/run", post(associations_run))
-        .route(
-            "/api/v1/wellness/associations/list",
-            post(associations_list),
-        )
-        .route("/api/v1/wellness/associations/get", post(associations_get))
         .route("/api/v1/wellness/sources", post(wellness_sources))
         .route("/api/v1/server/status", post(status))
         .route("/api/v1/session/login", post(login))
@@ -465,17 +455,7 @@ async fn get_metric_history(
         crate::reference_guides::enrich(&state, &current.user.user_id, metric, result).await?;
     crate::transport::json_response(&state, result).await
 }
-async fn get_trends(
-    State(state): State<AppState>,
-    current: CurrentUser,
-    Json(request): Json<crate::reports::TrendRequest>,
-) -> Result<Response, AppError> {
-    crate::transport::json_response(
-        &state,
-        crate::reports::trends(&state.database, &current.user.user_id, request).await?,
-    )
-    .await
-}
+
 async fn connect_health(
     State(state): State<AppState>,
     current: CurrentUser,
@@ -530,7 +510,7 @@ async fn health_coverage(
 async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(
         json!({"status":"ok", "api_version":1, "capabilities":{"file_archive":true,"document_extraction":true,
-        "review":true,"trends":true,"health_sync":true,"wellness_day":true,"manual_entries":true,"export":true,"delete":true,"analysis":state.config.analysis_enabled}}),
+        "review":true,"health_sync":true,"manual_entries":true,"export":true,"delete":true,"analysis":state.config.analysis_enabled}}),
     )
 }
 
@@ -677,20 +657,6 @@ async fn measurement_history(
             .await?,
     ))
 }
-async fn long_term_trends(
-    State(state): State<AppState>,
-    current: CurrentUser,
-    Json(request): Json<crate::wellness::trends::Request>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let _permit = state
-        .health_slots
-        .acquire()
-        .await
-        .map_err(|_| AppError::Internal)?;
-    Ok(Json(
-        crate::wellness::trends::get(&state.database, &current.user.user_id, request).await?,
-    ))
-}
 async fn wellness_history(
     State(state): State<AppState>,
     current: CurrentUser,
@@ -704,18 +670,6 @@ async fn wellness_history(
     let result =
         crate::reference_guides::enrich(&state, &current.user.user_id, metric, result).await?;
     Ok(Json(result))
-}
-async fn wellness_day(
-    State(state): State<AppState>,
-    current: CurrentUser,
-    Json(request): Json<crate::wellness::DayRequest>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    Ok(Json(
-        state
-            .database
-            .wellness_day(&current.user.user_id, request)
-            .await?,
-    ))
 }
 async fn wellness_sources(
     State(state): State<AppState>,
@@ -924,65 +878,6 @@ async fn wellness_regularity(
     ))
 }
 
-async fn associations_run(
-    State(state): State<AppState>,
-    current: CurrentUser,
-    Json(request): Json<crate::wellness::associations::Request>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let _slot = state
-        .health_slots
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| AppError::RateLimited)?;
-    Ok(Json(
-        state
-            .database
-            .behavior_associations(&current.user.user_id, request)
-            .await?,
-    ))
-}
-async fn associations_list(
-    State(state): State<AppState>,
-    current: CurrentUser,
-) -> Result<Json<serde_json::Value>, AppError> {
-    Ok(Json(
-        state
-            .database
-            .association_results(&current.user.user_id)
-            .await?,
-    ))
-}
-async fn associations_get(
-    State(state): State<AppState>,
-    current: CurrentUser,
-    Json(request): Json<crate::wellness::associations::GetRequest>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    Ok(Json(
-        state
-            .database
-            .association_result(&current.user.user_id, &request.result_id)
-            .await?,
-    ))
-}
-
-async fn wellness_hrv(
-    State(state): State<AppState>,
-    current: CurrentUser,
-    Json(request): Json<crate::wellness::hrv::Request>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let _permit = state
-        .health_slots
-        .acquire()
-        .await
-        .map_err(|_| AppError::Internal)?;
-    Ok(Json(
-        state
-            .database
-            .hrv_windows(&current.user.user_id, request)
-            .await?,
-    ))
-}
-
 async fn wellness_library(
     State(state): State<AppState>,
     current: CurrentUser,
@@ -1096,24 +991,6 @@ async fn import_fit(
         state
             .database
             .import_fit(&current.user.user_id, request)
-            .await?,
-    ))
-}
-
-async fn wellness_report(
-    State(state): State<AppState>,
-    current: CurrentUser,
-    Json(request): Json<crate::wellness::report::Request>,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let _permit = state
-        .health_slots
-        .acquire()
-        .await
-        .map_err(|_| AppError::Internal)?;
-    Ok(Json(
-        state
-            .database
-            .wellness_report(&current.user.user_id, request)
             .await?,
     ))
 }

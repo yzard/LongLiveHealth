@@ -1,22 +1,18 @@
 import { Client, dateScope, safeLink, sessionDelay } from './client.mjs';
-import { el, button, badge, dated, numeric, quantity, originalReference, detail, table, chart } from './presentation.mjs';
+import { el, button, badge, dated, numeric, quantity, originalReference, detail, table } from './presentation.mjs';
 
 const root = document.querySelector('#app');
 const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 let controller = new AbortController();
 let generation = 0;
 let expiryTimer;
-let metrics = [];
 let capabilities = {};
 let main;
 let notice;
 let closePreview = () => {};
-let selectedDate = dateScope(1, new Date(), timezone).end_date;
-let sourcePriority = {};
 let sourcePreferences = { version: -1, preferences: {} };
 let sourceCatalog = [];
 let importCursor = null;
-const filters = { metric: 'ldl_cholesterol', second: '', kind: 'resting_heart_rate' };
 const client = new Client(window.fetch.bind(window), () => showLogin('Your session has expired. Sign in again.'));
 
 function resetView() {
@@ -126,9 +122,7 @@ function showLogin(reason) {
   resetView();
   clearTimeout(expiryTimer);
   client.clear();
-  metrics = [];
   capabilities = {};
-  sourcePriority = {};
   sourcePreferences = { version: -1, preferences: {} }; sourceCatalog = [];
   importCursor = null;
   root.replaceChildren();
@@ -160,13 +154,10 @@ function showLogin(reason) {
       client.session = session;
       if (session.user.must_change_password) { showPasswordChange(); return; }
       try {
-        const [status, catalog] = await Promise.all([
-          client.post('server/status', {}, signal), client.post('metrics/list', {}, signal),
-        ]);
+        const status = await client.post('server/status', {}, signal);
         if (signal.aborted) return;
         capabilities = status.capabilities;
         await post("wellness/preferences/get", {});
-        metrics = catalog.metrics;
         scheduleExpiry();
         showShell();
       } catch (error) {
@@ -183,10 +174,10 @@ function showShell() {
   root.replaceChildren();
   const shell = el('div', null, 'shell');
   const sidebar = el('aside', null, 'sidebar');
-  const brand = el('a', null, 'brand'); brand.href = '#overview';
+  const brand = el('a', null, 'brand'); brand.href = '#insights';
   brand.append(el('span', '+', 'brand-mark'), el('span', 'Long Live Health', 'wordmark'));
   const nav = el('nav'); nav.setAttribute('aria-label', 'Main navigation');
-  const items = [['overview', 'Overview', '01'], ['reports', 'Archive', '02'], ['trends', 'Trends', '03'], ['insights', 'Insights', '04'], ['data', 'Data', '05']];
+  const items = [['insights', 'Insights', '01'], ['reports', 'Blood Work', '02'], ['data', 'Data', '03']];
   for (const [name, title, index] of items) {
     const link = el('a'); link.href = `#${name}`; link.dataset.view = name;
     link.append(el('span', index, 'nav-number'), el('span', title)); nav.append(link);
@@ -210,18 +201,14 @@ function showShell() {
 }
 
 const titles = {
-  associations: ["Behavior associations", "Declared comparisons with uncertainty and missingness."],
   review: ['Log review', 'Recorded training, nutrition and body measurements.'],
   timeline: ['Timeline', 'Archived events, with their source and revision.'],
   series: ['Device trends', 'Measurements remain separate for each source.'],
   sleep: ['Sleep', 'Observed sessions and source stage intervals.'],
   entries: ['Daily logs', 'Your own observations, meals and training.'],
-  overview: ['Overview', 'Your daily records, with their sources and coverage.'],
   data: ['Data', 'Manage sources and take your archive with you.'],
   reports: ['Archive', 'The original evidence, always within reach.'],
-  trends: ['Trends', 'See how confirmed results change over time.'],
   health: ['Health', 'The details your mobile devices have synced.'],
-  hrv: ['HRV windows', 'Quality-reviewed intervals and separate protocol baselines.'],
   insights: ['Insights', 'A focused review, grounded in your archived data.'],
   settings: ['Settings', 'Your connection and available services.'],
 };
@@ -231,7 +218,7 @@ async function navigate() {
   const current = generation;
   const signal = controller.signal;
   const [requested, encoded] = location.hash.slice(1).split('/');
-  const view = titles[requested] ? requested : 'overview';
+  const view = titles[requested] ? requested : 'insights';
   let id;
   try { id = encoded ? decodeURIComponent(encoded) : null; }
   catch { id = null; }
@@ -245,8 +232,8 @@ async function navigate() {
   main.append(loading); main.setAttribute('aria-busy', 'true');
   try {
     const render = {
-      hrv: hrvView, associations: associationsView, review: reviewView, timeline: timelineView, series: seriesView, overview: overviewView, data: dataView, entries: entriesView, sleep: sleepView,
-      reports: () => id ? reportView(id) : reportsView(), trends: trendsView,
+        review: reviewView, timeline: timelineView, series: seriesView, data: dataView, entries: entriesView, sleep: sleepView,
+      reports: () => id ? reportView(id) : reportsView(),
       health: healthView, insights: () => id ? analysisView(id) : insightsView(), settings: settingsView,
     }[view];
     const content = await render();
@@ -355,41 +342,6 @@ async function reportView(id) {
   wrap.append(panel); return wrap;
 }
 
-async function trendsView() {
-  const wrap = el('div');
-  wrap.append(button('Device trends', () => route('series'), 'quiet'), button('Review daily logs', () => route('review'), 'quiet'));
-  const controls = section('Compare your history'); controls.classList.add('controls');
-  const options = metrics.map(metric => [metric.metric_id, metric.name]);
-  const primary = select(options, filters.metric);
-  const secondary = select([['', 'Single metric'], ...options], filters.second);
-  controls.append(field('Metric', primary), field('Compare with', secondary));
-  controls.append(button('Refresh history', navigate, 'quiet'));
-  for (const input of [primary, secondary]) input.addEventListener('change', () => {
-    filters.metric = primary.value; filters.second = secondary.value; navigate();
-  });
-  wrap.append(controls);
-  const ids = [...new Set([filters.metric, filters.second].filter(Boolean))];
-  const results = await Promise.all(ids.map(async metric => ({ metric, data: await post('trends/get', { metric_ids: [metric], start_at: null, end_at: null }) })));
-  for (const { metric, data } of results) {
-    const title = metrics.find(item => item.metric_id === metric)?.name ?? metric;
-    const panel = section(title);
-    if (!data.points.length) panel.append(empty('No comparable results. Confirm a mapped metric, recognized unit and collection date in the mobile app.'));
-    else {
-      const unit = data.points[0].unit;
-      panel.append(el('p', `${unit} · ${data.points.length} confirmed results · all years`, 'muted'));
-      const open = point => route('reports', point.report_id);
-      panel.append(chart(data.points, `${title} in ${unit}`, open));
-      panel.append(table(['Collected', 'Standardized', 'Printed result', 'Reference', 'Source'], data.points.map(point => [
-        point.sampled_at, `${point.value} ${point.unit}`, `${point.original.raw_result} ${point.original.raw_unit ?? ''}`,
-        quantity(point.reference), reportLink(point.report_id, `Report · page ${point.original.source.page}`),
-      ])));
-    }
-    if (data.incomparable_count) panel.append(el('p', `${data.incomparable_count} confirmed results cannot be compared due to date, unit or value limitations. They remain in Reports.`, 'footnote'));
-    wrap.append(panel);
-  }
-  return wrap;
-}
-
 async function healthView() {
   const wrap = el('div');
   const coverage = await post('health/coverage', {});
@@ -405,7 +357,6 @@ async function healthView() {
 async function insightsView() {
   const data = await post('analysis/list', {});
   const wrap = el('div');
-  wrap.append(button('HRV windows', () => route('hrv'), 'quiet'), button('Behavior associations', () => route('associations'), 'quiet'));
   const preset = section('Lipid history & recent health');
   preset.append(el('p', 'PERSONAL RESEARCH PREVIEW', 'eyebrow'),
     el('p', 'Review confirmed lipid results with the last 90 calendar days of synced health data. The server uses its configured AI service.'),
@@ -478,63 +429,6 @@ async function analysisView(id) {
   wrap.append(panel); return wrap;
 }
 
-const metricNames = { sleep: 'Sleep', workout: 'Workouts', steps: 'Steps', resting_heart_rate: 'Resting heart rate', heart_rate: 'Heart rate', hrv_sdnn: 'HRV SDNN' };
-async function overviewView() {
-  const wrap = el('div');
-  wrap.append(button('Open timeline', () => route('timeline'), 'quiet'));
-  const controls = section('Daily archive'); controls.classList.add('controls');
-  const date = el('input'); date.type = 'date'; date.value = selectedDate;
-  date.addEventListener('change', () => { if (date.value) { selectedDate = date.value; navigate(); } });
-  controls.append(field('Date', date), el('p', timezone, 'muted'), button('Refresh', navigate, 'quiet'));
-  wrap.append(controls);
-  const saved = await post('wellness/preferences/get', {});
-  sourcePriority = saved.preferences.source_priority;
-  const snapshot = await post('wellness/day', { date: selectedDate, timezone, source_priority: sourcePriority });
-  wrap.append(el('p', `Calculated ${dated(snapshot.computed_at)}`, 'muted'));
-  const customize = el('details'); customize.append(el('summary', 'Customize overview'));
-  const favorites = new Map();
-  for (const metric of snapshot.metrics) {
-    const checkbox = el('input'); checkbox.type = 'checkbox'; checkbox.checked = saved.preferences.favorite_metrics.includes(metric.record_type);
-    favorites.set(metric.record_type, checkbox); customize.append(field(metricNames[metric.record_type], checkbox));
-  }
-  const target = el('input'); target.type = 'number'; target.min = '1'; target.max = '1440'; target.value = saved.preferences.sleep_target_minutes ?? '';
-  customize.append(field('Your daily sleep target (minutes, optional)', target), el('p', 'Select favorite metrics to show. No selection shows all metrics. A target is your own goal, not a calculated biological sleep need.', 'footnote'));
-  customize.append(actionButton('Save overview preferences', async () => {
-    await post('wellness/preferences/save', { expected_version: saved.version, batch_id: crypto.randomUUID(), preferences: { ...saved.preferences, favorite_metrics: [...favorites].filter(([, input]) => input.checked).map(([kind]) => kind), sleep_target_minutes: target.value ? Number(target.value) : null } }); await navigate();
-  }, 'quiet'));
-  controls.append(customize);
-  const grid = el('div', null, 'metric-grid');
-  for (const metric of snapshot.metrics.filter(m => !saved.preferences.favorite_metrics.length || saved.preferences.favorite_metrics.includes(m.record_type))) {
-    const card = section(metricNames[metric.record_type] ?? metric.record_type);
-    const selected = metric.current.selected;
-    card.append(el('p', selected ? `${numeric(selected.value)} ${selected.unit ?? ''}` : 'Not available', 'metric-value'));
-    card.append(badge(metric.current.state), el('p', (selected ? sourceLabel(selected.source) : null) ?? (metric.current.state === 'source_selection_required' ? 'Choose the source to use for this metric.' : metric.current.state === 'query_limit_exceeded' ? 'This history exceeds the query limit. Open device records for a shorter range.' : 'No usable records for this day.'), 'muted'));
-    if (metric.record_type === 'sleep' && selected && saved.preferences.sleep_target_minutes) card.append(el('p', `${numeric(selected.value / 60 - saved.preferences.sleep_target_minutes)} minutes relative to your daily target`, 'footnote'));
-    if (metric.record_type === 'sleep') card.append(el('p', 'Calendar-day sleep total, including naps. This is not a nightly recovery score.', 'footnote'));
-    const sources = [...new Set(metric.history.flatMap(day => day.alternatives.map(item => item.source)))];
-    if (sources.length) {
-      const choice = select([['', 'Use only when one source is available'], ...sources.map(s => [s, sourceLabel(s)])], sourcePriority[metric.record_type]?.[0] ?? '');
-      choice.addEventListener('change', () => action(choice, async () => {
-        const priorities = { ...sourcePriority };
-        if (choice.value) priorities[metric.record_type] = [choice.value];
-        else delete priorities[metric.record_type];
-        await post('wellness/preferences/save', { expected_version: saved.version, batch_id: crypto.randomUUID(), preferences: { ...saved.preferences, source_priority: priorities } });
-        await navigate();
-      }));
-      card.append(field(`Source for ${metricNames[metric.record_type]}`, choice));
-    }
-    card.append(el('p', metric.baseline ? `Previous 28 valid days: median ${numeric(metric.baseline.median)} ${selected?.unit ?? ''}` : `Personal baseline: ${metric.baseline_valid_days}/28 valid days`, 'footnote'));
-    const spark = dailySparkline(metric); if (spark) card.append(spark);
-    const history = el('details'); history.append(el('summary', 'History and source comparison'));
-    history.append(table(['Date', 'Source', 'Value', 'State'], metric.history.flatMap(day => day.alternatives.map(item => [day.date, sourceText(item.source), `${numeric(item.value)} ${item.unit ?? ''}`, day.state]))));
-    history.append(detail('Calculation evidence', { version: metric.algorithm_version, archive_revision: snapshot.data_revision, source_policy: snapshot.source_policy, baseline: metric.baseline, evidence_status: snapshot.evidence_status }));
-    card.append(history); grid.append(card);
-  }
-  const actions = el('div', null, 'toolbar');
-  actions.append(button('Record a daily log', () => route('entries'), 'primary'), button('Sleep sessions', () => route('sleep'), 'quiet')); wrap.append(actions);
-  wrap.append(grid, button('Browse device records', () => route('health'), 'quiet'));
-  return wrap;
-}
 
 async function dataView() {
   const wrap = el('div');
@@ -793,54 +687,7 @@ async function sleepView() {
 }
 
 
-function dailySparkline(metric) {
-  const points = metric.history.filter(day => day.selected && Number.isFinite(day.selected.value));
-  if (!points.length) return null;
-  const figure = el('figure', null, 'sparkline');
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 280 70'); svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', `${metricNames[metric.record_type]}: ${points.length} recorded days. Daily values appear in the history table.`);
-  const values = points.map(p => p.selected.value), low = Math.min(...values), high = Math.max(...values);
-  const times = points.map(p => Date.parse(`${p.date}T12:00:00Z`));
-  const x = i => times.length === 1 || times.at(-1) === times[0] ? 140 : 8 + 264 * (times[i] - times[0]) / (times.at(-1) - times[0]);
-  const y = i => high === low ? 35 : 62 - 54 * (values[i] - low) / (high - low);
-  for (let i = 0; i < points.length; i++) {
-    if (i && times[i] - times[i - 1] === 86400000 && points[i].selected.source === points[i - 1].selected.source) {
-      const line = document.createElementNS(svg.namespaceURI, 'line');
-      for (const [key, value] of Object.entries({ x1: x(i - 1), y1: y(i - 1), x2: x(i), y2: y(i) })) line.setAttribute(key, value);
-      line.setAttribute('class', 'chart-line'); svg.append(line);
-    }
-    const circle = document.createElementNS(svg.namespaceURI, 'circle');
-    circle.setAttribute('cx', x(i)); circle.setAttribute('cy', y(i)); circle.setAttribute('r', '3'); circle.setAttribute('class', 'chart-point'); svg.append(circle);
-  }
-  figure.append(svg, el('figcaption', `${points[0].date} to ${points.at(-1).date} · ${points.length} recorded days · ${numeric(low)}–${numeric(high)} ${points[0].selected.unit}`, 'footnote'));
-  return figure;
-}
 
-let selectedSeries = 'blood_glucose';
-async function seriesView() {
-  const wrap = el('div'), control = section('Recorded measurements');
-  const catalog = await post('browse/catalog', {});
-  const entries = catalog.entries.filter(entry => entry.presentation === 'measurement');
-  if (!entries.length) { wrap.append(empty('No recorded measurements.')); return wrap; }
-  if (!entries.some(entry => entry.kind === selectedSeries)) selectedSeries = entries[0].kind;
-  const choice = select(entries.map(entry => [entry.kind, entry.title]), selectedSeries);
-  choice.addEventListener('change', () => { selectedSeries = choice.value; navigate(); });
-  control.append(field('Measurement', choice), el('p', 'Last 30 days', 'muted')); wrap.append(control);
-  const end = Math.floor(Date.now() / 1000);
-  const result = await post('wellness/chart', {record_type: selectedSeries, start_at: end - 30 * 86400, end_at: end, period: 'M', timezone});
-  for (const component of result.components ?? [result]) {
-    const panel = section(component.title ?? entries.find(entry => entry.kind === selectedSeries).title);
-    const ranges = component.chart_ranges?.M ?? [];
-    if (!ranges.length) panel.append(empty('No recorded measurements in this window.'));
-    else {
-      panel.append(measurementRangePlot(ranges, component.unit));
-      panel.append(table(['Time', 'Source', 'Range'], ranges.map(row => [dated(row.start_at), sourceLabel(row.source), `${numeric(row.min)}–${numeric(row.max)} ${component.unit}`])));
-    }
-    wrap.append(panel);
-  }
-  return wrap;
-}
 function measurementRangePlot(rows, unit) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 600 180'); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', `Recorded ranges in ${unit}`);
@@ -930,69 +777,6 @@ async function reviewView() {
   }, 'quiet'));
   return wrap;
 }
-
-async function associationsView() {
-  const wrap = el('div'), panel = section('Declare an analysis');
-  panel.append(el('p', 'Exploratory statistics, not causal effects. Choose the entire comparison family before running. Repeated searches are not covered by the correction.', 'notice'));
-  const [sources, saved] = await Promise.all([post('wellness/sources', {}), post('wellness/associations/list', {})]);
-  const form = el('form'), outcome = select([['sleep', 'Recorded sleep seconds'], ['hrv_sdnn', 'HRV SDNN (not RMSSD)'], ['resting_heart_rate', 'Resting heart rate'], ['heart_rate', 'Heart rate'], ['workout', 'Recorded workout seconds'], ['steps', 'Recorded steps']], 'sleep');
-  const source = el('select');
-  function refreshSources() {
-    source.replaceChildren();
-    for (const item of sources.sources.filter(item => item.record_type === outcome.value)) { const option = el('option', sourceLabel(`${item.platform}:${item.source_id}`)); option.value = `${item.platform}:${item.source_id}`; source.append(option); }
-  }
-  outcome.onchange = refreshSources; refreshSources();
-  const end = el('input'); end.type = 'date'; end.required = true;
-  const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1); end.value = dateScope(1, yesterday, timezone).end_date;
-  const behaviors = el('textarea'); behaviors.required = true; behaviors.placeholder = 'caffeine\nalcohol';
-  const covariates = el('textarea'); covariates.placeholder = 'illness';
-  const lag = select([['0', 'Same date'], ['1', 'Behavior on previous date']], '1');
-  const consent = el('input'); consent.type = 'checkbox'; consent.required = true;
-  const run = el('button', 'Run declared analysis', 'primary'); run.type = 'submit';
-  form.append(field('Outcome', outcome), field('One source for the whole window', source), field('Last completed date in the 90-day window', end), field('Behavior names (one per line, up to 8)', behaviors), field('Covariate names (one per line, up to 3)', covariates), field('Declared lag', lag), field('I selected this family before inspecting results and will check source protocol changes and missing data.', consent), run);
-  const output = section('Result'); output.append(empty('Run a declared analysis or open a saved result.'));
-  const names = input => input.value.split('\n').map(s => s.trim()).filter(Boolean);
-  function show(result) {
-    output.replaceChildren(el('h2', 'Result'), el('p', `Source: ${sourceLabel(result.parameters.source)} · End date: ${result.parameters.end_date}`, 'muted'));
-    for (const row of result.results) {
-      const card = el('article', null, 'observation'); card.append(el('h3', row.behavior), badge(row.state), el('p', `${row.sample_days}/90 complete days · ${row.missing_days} missing or excluded`));
-      if (row.estimate) {
-        const e = row.estimate;
-        card.append(el('p', `Association: ${numeric(e.effect)} ${row.outcome_unit} per ${row.predictor_unit}`), el('p', `Nominal 95% interval: ${e.ci_95.map(numeric).join(' to ')} · nominal p: ${e.p_value.toPrecision(4)} · nominal BY q: ${row.q_value.toPrecision(4)}`), el('p', e.bootstrap_ci_95 ? `Block bootstrap 95% interval: ${e.bootstrap_ci_95.map(numeric).join(' to ')}` : 'Block bootstrap unavailable: too many singular resamples.'));
-        card.append(el('p', 'Significance decisions are disabled: this fixed protocol failed synthetic error-rate calibration. p/q values and intervals are exploratory diagnostics.', 'notice'));
-      }
-      card.append(detail('Daily inclusion and missingness', row.days)); output.append(card);
-    }
-    for (const note of result.notes) output.append(el('p', note, 'footnote'));
-    output.append(detail('Fixed model protocol', result.protocol), button('Download result and inputs', () => {
-      const url = URL.createObjectURL(new Blob([JSON.stringify(result, null, 2)], {type: 'application/json'})); const link = el('a'); link.href = url; link.download = `longlivehealth-associations-${result.result_id}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }, 'quiet'));
-  }
-  form.onsubmit = event => { event.preventDefault(); action(run, async () => {
-    const result = await post('wellness/associations/run', {end_date: end.value, timezone, outcome: outcome.value, source: source.value, behaviors: names(behaviors), covariates: names(covariates), lag_days: Number(lag.value)}); show(result);
-  }); };
-  panel.append(form); wrap.append(panel, output);
-  const history = section('Saved current analyses');
-  history.append(el('p', 'Source edits remove saved analyses and their input snapshots. Results are included in the full archive export.', 'footnote'));
-  for (const item of saved.results) history.append(actionButton(`${item.parameters.outcome} · ${item.parameters.end_date} · ${dated(item.created_at)}`, async () => show(await post('wellness/associations/get', {result_id: item.result_id})), 'quiet'));
-  wrap.append(history); return wrap;
-}
-
-async function hrvView() {
-  const now = Math.floor(Date.now()/1000);
-  const result = await post('wellness/hrv', {start_at: now-90*86400, end_at: now, timezone});
-  const wrap = el('div');
-  for (const note of result.notes) wrap.append(el('p', note, 'notice'));
-  if (!result.sources.length) wrap.append(empty('No archived NN or heartbeat windows in the last 90 days.'));
-  for (const source of result.sources) {
-    const panel = section(sourceLabel(source.source)); panel.append(detail('Acquisition protocol', source.protocol));
-    panel.append(table(['Date', 'lnRMSSD', 'Baseline days', 'Prior median', 'Prior MAD'], source.days.map(day => [day.date, numeric(day.ln_rmssd), `${day.baseline_days}/28`, numeric(day.baseline?.median), numeric(day.baseline?.mad)])));
-    for (const window of source.windows) panel.append(detail(`${window.date} · ${window.state} · ${window.record_id}`, window));
-    wrap.append(panel);
-  }
-  return wrap;
-}
-
 
 function showPasswordChange() {
   root.replaceChildren();

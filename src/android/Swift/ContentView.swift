@@ -25,10 +25,8 @@ struct ContentView: View {
                 NavigationStack { PasswordChangeView(model: model, required: true) }
             } else {
                 TabView(selection: $model.selectedTab) {
-                    NavigationStack { OverviewView(model: model) }.tabItem { Label("Overview", systemImage: MobileSymbol.name("square.grid.2x2")) }.tag("Overview")
+                    NavigationStack { InsightsView(model: model) }.tabItem { Label("Insights", systemImage: MobileSymbol.name("sparkles")) }.tag("Insights")
                     BrowseView(model: model).tabItem { Label("Browse", systemImage: MobileSymbol.name("list.bullet")) }.tag("Browse")
-                    NavigationStack { TrendsView(model: model) }.tabItem { Label("Trends", systemImage: MobileSymbol.name("chart.xyaxis.line")) }.tag("Trends")
-                    NavigationStack { AnalysisView(model: model) }.tabItem { Label("Insights", systemImage: MobileSymbol.name("sparkles")) }.tag("Insights")
                     DataCenterView(model: model).tabItem { Label("Data", systemImage: MobileSymbol.name("externaldrive")) }.tag("Data")
                 }.initialTask { await model.resumeForeground() }
             }

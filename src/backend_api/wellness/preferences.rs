@@ -7,21 +7,20 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::Row;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 const RECORD: &str = "a37f17a5-867c-4f39-b864-76ffdd87953d";
 const SOURCE: &str = "longlivehealth.preferences";
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
+    #[serde(default)] // Persisted and shipped-client preferences predate cardiovascular context.
+    pub cardiovascular: crate::insights::Context,
     #[serde(default)] // Persisted preferences from before evidence-based guides.
     pub reference_profile: crate::reference_guides::Profile,
     #[serde(default)] // Existing saved preferences predate display aliases.
     pub source_aliases: BTreeMap<String, String>,
     pub source_priority: BTreeMap<String, Vec<String>>,
-    pub favorite_metrics: Vec<String>,
-    #[serde(default)]
-    pub overview_show_all: Option<bool>,
     pub sleep_target_minutes: Option<u16>,
 }
 #[derive(Deserialize)]
@@ -47,18 +46,11 @@ impl Preferences {
             ));
         }
         super::validate_priorities(&self.source_priority)?;
-        if self.favorite_metrics.len() > super::KINDS.len()
-            || self
-                .favorite_metrics
-                .iter()
-                .any(|m| !super::KINDS.contains(&m.as_str()))
-            || self.favorite_metrics.iter().collect::<BTreeSet<_>>().len()
-                != self.favorite_metrics.len()
-            || self
-                .sleep_target_minutes
-                .is_some_and(|m| m == 0 || m > 1440)
+        if self
+            .sleep_target_minutes
+            .is_some_and(|m| m == 0 || m > 1440)
         {
-            return Err(AppError::Invalid("Invalid metric layout or sleep target"));
+            return Err(AppError::Invalid("Invalid sleep target"));
         }
         Ok(())
     }
@@ -74,13 +66,20 @@ impl Database {
             .await?;
         if let Some(row) = row {
             let raw: Value = serde_json::from_str(&row.get::<String, _>("payload_json"))?;
-            let preferences: Preferences = serde_json::from_value(raw["payload"].clone())
+            // Existing on-disk preferences may contain retired Overview layout fields.
+            // Drop these only while reading persisted data; API input remains strict.
+            let mut payload = raw["payload"].clone();
+            if let Some(fields) = payload.as_object_mut() {
+                fields.remove("favorite_metrics");
+                fields.remove("overview_show_all");
+            }
+            let preferences: Preferences = serde_json::from_value(payload)
                 .map_err(|_| AppError::Conflict("Stored preferences are invalid"))?;
             preferences.validate()?;
             Ok(json!({"version":row.get::<i64,_>("version"),"preferences":preferences}))
         } else {
             Ok(
-                json!({"version":0,"preferences":Preferences {reference_profile:Default::default(),source_aliases:BTreeMap::new(),source_priority:BTreeMap::new(),favorite_metrics:vec![],overview_show_all:Some(true),sleep_target_minutes:None}}),
+                json!({"version":0,"preferences":Preferences {cardiovascular:Default::default(),reference_profile:Default::default(),source_aliases:BTreeMap::new(),source_priority:BTreeMap::new(),sleep_target_minutes:None}}),
             )
         }
     }

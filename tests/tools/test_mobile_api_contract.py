@@ -26,11 +26,9 @@ for route, (file, literal) in dynamic.items():
 callers['/longlivehealth.apk'] = {'Initial Android installation download'}
 # The browser still calls these routes after the mobile Trends redesign.
 web = (ROOT / 'src/frontend/app.mjs').read_text()
-for path in ('trends/get', 'wellness/review', 'wellness/timeline'):
+for path in ('wellness/review', 'wellness/timeline'):
     assert f"post('{path}'" in web
     callers['/api/v1/' + path] = {'Browser UI'}
-# The currently deployed mobile builds still expose the long-term report.
-callers['/api/v1/wellness/report'] = {'Mobile iOS 102 / Android 55 compatibility'}
 assert not routes - callers.keys(), f'Routes without mobile callers: {sorted(routes - callers.keys())}'
 assert not callers.keys() - routes, f'Mobile calls without server routes: {sorted(callers.keys() - routes)}'
 print(f'Public API inventory passed: {len(routes)} routes, each with an explicit caller or installation purpose')

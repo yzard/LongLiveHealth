@@ -30,7 +30,7 @@ request_counts = {}
 admin_password_changed = False
 refresh_failure = False
 fail_preferences = False
-source_preferences = {"version": int(time.time() * 1000), "preferences": {"reference_profile": {"birth_date": None, "reference_sex": None}, "source_aliases": {}, "source_priority": {}, "favorite_metrics": [], "sleep_target_minutes": None}}
+source_preferences = {"version": int(time.time() * 1000), "preferences": {"reference_profile": {"birth_date": None, "reference_sex": None}, "source_aliases": {}, "source_priority": {}, "sleep_target_minutes": None}}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -64,7 +64,7 @@ class Handler(BaseHTTPRequestHandler):
             reports.clear()
             upload_ids.clear()
             observations.clear()
-            source_preferences = {"version": int(time.time() * 1000), "preferences": {"reference_profile": {"birth_date": None, "reference_sex": None}, "source_aliases": {}, "source_priority": {}, "favorite_metrics": [], "sleep_target_minutes": None}}
+            source_preferences = {"version": int(time.time() * 1000), "preferences": {"reference_profile": {"birth_date": None, "reference_sex": None}, "source_aliases": {}, "source_priority": {}, "sleep_target_minutes": None}}
             context = {}
             runs.clear()
             relation = {}
@@ -227,32 +227,26 @@ class Handler(BaseHTTPRequestHandler):
                 ],
                 'excluded_count': 0,
             },
-            'trends/get': {
-                'points': (
-                    [
-                        {
-                            'observation_id': 'trend-' + str(index),
-                            'report_id': 'fixture-report',
-                            'sampled_at': collection_date,
-                            'timestamp': 1790812800 + index * 86400,
-                            'value': 100 + index * 10,
-                            'unit': 'mg/dL',
-                            'revision': 1,
-                            'original': {
-                                'raw_name': 'Synthetic LDL',
-                                'raw_result': str(100 + index * 10),
-                                'raw_unit': 'mg/dL',
-                                'source': {'page': 1},
-                            },
-                        }
-                        for index, collection_date in enumerate(['2026-10-01', '2026-10-02'])
-                    ]
-                    if analysis_enabled
-                    else []
-                ),
-                'incomparable_count': 0,
-            },
             'analysis/list': {'runs': runs},
+            'insights/get': {
+                'computed_at': int(time.time()),
+                'cardiovascular': {
+                    'title':'Cardiovascular Review', 'risk_label':'10-year total CVD risk', 'risk_percent':None,
+                    'explanation':'Risk needs confirmed diagnoses and medicines.', 'inputs':[], 'findings':[], 'cards':[],
+                    'missing':['Confirm: Current smoking'], 'actions':[],
+                    'method':'Synthetic assessment method for UI verification.',
+                    'references':[{'title':'AHA PREVENT', 'url':'https://professional.heart.org/en/guidelines-and-statements/about-prevent-calculator'}]
+                },
+                'training': {
+                    'title':'Training & Recovery', 'status':'More comparable data needed', 'actions':[],
+                    'missing':['Comparable HRV baseline from the same source'], 'fitness':[],
+                    'method':'Synthetic recovery method for UI verification.', 'references':[],
+                    'signals':[{'id':device,'metric_id':'hrv_sdnn','title':'HRV SDNN','source':device,'source_name':device,'unit':'ms',
+                        'baseline':50,'recent':40,'baseline_days':28,'recent_days':7,'change_percent':-20,'cue':'lower_hrv',
+                        'series':[{'title':'HRV','points':[{'at':1793000000,'value':50},{'at':1793100000,'value':40}]}]}
+                        for device in ['First Watch','Second Watch']]
+                }
+            },
             'health/coverage': {'coverage': [{'record_type':'heart_rate','status':'observed','last_success_at':1790985600}, {'record_type':'workout_route','status':'error'}, {'record_type':'sleep','status':'no_visible_samples'}], 'total_records': 29330},
             'health/sync': {'replayed': False, 'total_records': 29330},
             'wellness/sleep/regularity': {'sources': [], 'notes': []},
@@ -260,29 +254,6 @@ class Handler(BaseHTTPRequestHandler):
             'wellness/timeline': {'events': [], 'next_cursor': None},
             'wellness/review': {'days': [], 'measurements': [], 'strength_bests': [], 'notes': []},
             'wellness/preferences/get': source_preferences,
-            'wellness/day': {
-                'date': body.get('date'),
-                'timezone': body.get('timezone'),
-                'metrics': [
-                    {
-                        'record_type': kind,
-                        'unit': unit,
-                        'current': {'state': 'ready'},
-                        'history': [
-                            {
-                                'date': (
-                                    date.fromisoformat(body.get('date', '2026-10-01')) - timedelta(days=offset)
-                                ).isoformat(),
-                                'alternatives': [{'source': 'apple_health:watch', 'value': value, 'unit': unit}],
-                                'combined': {'value': value, 'unit': unit} if kind == 'steps' else None,
-                            }
-                            for offset in range(1, 10)
-                        ],
-                    }
-                    for kind, unit, value in [('sleep', 'seconds', 27000), ('steps', 'count', 6500), ('heart_rate', 'count/min', 75), ('workout', 'seconds', 3600), ('resting_heart_rate', 'count/min', 58), ('hrv_sdnn', 'ms', 40), ('active_energy', 'kcal', 500), ('basal_energy', 'kcal', 1500)]
-                ],
-                'computed_at': 1790985600,
-            },
             'wellness/sources': {'sources': [{'platform': 'apple_health', 'source_id': 'watch', 'record_type': 'sleep', 'record_count': 10}, {'platform': 'apple_health', 'source_id': 'watch', 'record_type': 'vo2_max', 'first_at': int(time.time()) - 400 * 86400}], 'catalog': [{'source_key': 'apple_health:watch', 'name': 'Apple Watch'}]},
             'wellness/sleep': {'sources': [], 'algorithm_version': 'synthetic'},
             'wellness/entries/list': {'entries': [{'record_id': 'manual-weight', 'at': time.time() - 60, 'version': 1, 'entry': {'kind': 'body', 'content': {'weight_kg': 72.5}}}] if body.get('kind') == 'body' else []},
@@ -437,30 +408,22 @@ class Handler(BaseHTTPRequestHandler):
             for name, value in [('Systolic', 120), ('Diastolic', 80)]:
                 components.append({'id':'blood_pressure_'+name.lower(), 'title':name, 'unit':'mmHg', 'chart_ranges':chart_ranges([(source,'mmHg',now,value)])})
             response = {'components':components, 'sources':[source], 'first_at':now, 'last_at':now, 'valid_samples':2, 'complete':True, 'latest_reading':{'at':now,'source':source,'values':{c['id']:v for c,v in zip(components,[120,80])}}}
-        if route == 'wellness/day':
-            for metric in response['metrics']:
-                metric['chart_ranges'] = chart_ranges([(p['source'], p['unit'], datetime.fromisoformat(day['date']).replace(tzinfo=timezone.utc).timestamp(), p['value']) for day in metric['history'] for p in day['alternatives']])
-        if route == 'wellness/trends':
-            cards = []
-            for metric, title, category, unit in [
-                ('vo2_max', 'VO₂ Max', 'heart_vo2', 'ml/kg*min'),
-                ('blood_pressure', 'Blood Pressure', 'heart_bp', 'mmHg'),
-                ('ldl_cholesterol', 'LDL Cholesterol', 'bloodWork', 'mg/dL'),
-            ]:
-                names = ['Systolic', 'Diastolic'] if metric == 'blood_pressure' else [title]
-                cards.append({
-                    'id': 'long-term-' + metric, 'metric_id': metric, 'title': title, 'source': 'apple_health:watch',
-                    'source_name': 'Synthetic Laboratory', 'unit': unit, 'category': category, 'state': 'ready',
-                    'series': [{'title': name, 'points': [{'at': 1577836800 + index * 31536000, 'value': 30 + index + component * 10} for index in range(4)]} for component, name in enumerate(names)],
-                    'observed_days': 4, 'first_at': 1577836800, 'last_at': 1672444800,
-                    'aggregation': 'Collected results', 'missing': [], 'explanation': 'Synthetic evidence',
-                    'citation': 'https://biologicalvariation.eu/', 'comparison_note': '',
-                    'change': {'direction': 'worsening' if metric == 'blood_pressure' else 'improving', 'comparison': 'Synthetic comparison', 'filter_note': 'Synthetic filter', 'comparisons': [{'title': title, 'before': 40, 'after': 45, 'basis': 'Synthetic reference', 'citations': []}]}
-                })
-            second_source = dict(cards[0], id='long-term-vo2-second-source', source='apple_health:older-watch')
-            cards.insert(1, second_source)
-            cards.sort(key=lambda c: c['change']['direction'] != 'worsening')
-            response = {'cards': cards, 'complete': True, 'data_revision': 1}
+        if route == 'insights/get':
+            now = int(time.time())
+            signal = response['training']['signals'][0]
+            evidence = dict(signal, latest=58, latest_at=now-86400, baseline_low=54, baseline_high=65)
+            response['dashboard'] = [dict(id=key, title=title, symbol=symbol, summary='Synthetic evidence for layout verification.',
+                method='Synthetic method', references=[], evidence=[dict(evidence, metric_id=metric, title=title, unit=unit)])
+                for key,title,symbol,metric,unit in [
+                    ('sleep','Sleep','bed.double.fill','sleep','seconds'),
+                    ('readiness','Readiness','sparkles','hrv_sdnn','ms'),
+                    ('vitals','Vitals','waveform.path.ecg','resting_heart_rate','count/min'),
+                    ('heart','Heart','heart.fill','heart_rate','count/min'),
+                    ('fitness','Fitness','figure.walk','active_energy','kcal'),
+                    ('cardiovascular','Cardiovascular Review','heart.fill','apob','mg/dL')]]
+            response['dashboard'][0].update(goal_minutes=420, source='First Watch', session={
+                'start_at':now-28800, 'end_at':now, 'asleep_seconds':27000,
+                'timeline':[{'start_at':now-28800+i*3600,'end_at':now-25200+i*3600,'category':[3,4,3,5,3,4,5,2][i]} for i in range(8)]})
         if route == 'wellness/history':
             kind = body['record_type']
             unit, value = {'sleep': ('seconds', 27000), 'workout': ('seconds', 3600), 'resting_heart_rate': ('count/min', 58), 'hrv_sdnn': ('ms', 40), 'active_energy': ('kcal', 500), 'basal_energy': ('kcal', 1500), 'steps': ('count', 6500)}[kind]

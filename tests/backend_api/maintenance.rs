@@ -26,22 +26,16 @@ async fn export_contains_raw_and_revisions_without_credentials_and_delete_cleans
         .await
         .unwrap();
     additional_sources(&state, &user.user_id).await;
-    let association = state
-        .database
-        .behavior_associations(
-            &user.user_id,
-            longlivehealth::wellness::associations::Request {
-                end_date: "2026-01-01".into(),
-                timezone: "UTC".into(),
-                outcome: "sleep".into(),
-                source: "apple_health:watch".into(),
-                behaviors: vec!["synthetic".into()],
-                covariates: vec![],
-                lag_days: 0,
-            },
-        )
-        .await
-        .unwrap();
+    // Historical research outputs remain exportable after their calculator is retired.
+    let pool = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}",
+        state.config.data_dir.join("database.sqlite").display()
+    ))
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO derived_results (result_id,user_id,kind,algorithm_version,input_revision,parameters_json,input_json,output_json,created_at) VALUES ('archived-result',?,'behavior_association','retired',0,'{}','{}','{}',0)")
+        .bind(&user.user_id).execute(&pool).await.unwrap();
+    pool.close().await;
     let export = state.database.request_export(&user.user_id).await.unwrap();
     assert!(
         longlivehealth::maintenance::export_next(&state)
@@ -139,13 +133,21 @@ async fn export_contains_raw_and_revisions_without_credentials_and_delete_cleans
             .unwrap(),
         crate::png()
     );
-    assert_eq!(
-        restored_db
-            .association_result(&user.user_id, association["result_id"].as_str().unwrap())
-            .await
-            .unwrap(),
-        association
-    );
+    let restored_pool = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}",
+        restored_path.join("database.sqlite").display()
+    ))
+    .await
+    .unwrap();
+    let historical: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM derived_results WHERE user_id=? AND result_id='archived-result'",
+    )
+    .bind(&user.user_id)
+    .fetch_one(&restored_pool)
+    .await
+    .unwrap();
+    assert_eq!(historical, 1);
+    restored_pool.close().await;
     assert_eq!(
         restored_db
             .observations(&user.user_id, &report)

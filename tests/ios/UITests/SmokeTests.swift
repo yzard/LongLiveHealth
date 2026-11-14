@@ -19,7 +19,7 @@ nonisolated final class SmokeTests: XCTestCase {
         }
     }
     @MainActor private func tapTab(_ app: XCUIApplication, _ name: String) {
-        let tab = (name == "Health" || name == "Archive") ? "Data" : name == "Settings" ? "Overview" : name
+        let tab = (name == "Health" || name == "Archive") ? "Data" : name == "Settings" ? "Data" : name
         let frame = app.tabBars.buttons[tab].frame
         app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
         if name == "Health", !app.navigationBars["Apple Health"].exists {
@@ -35,7 +35,7 @@ nonisolated final class SmokeTests: XCTestCase {
         }
         if name == "Settings", !app.navigationBars["Settings"].exists { app.buttons["Settings"].firstMatch.tap() }
     }
-    @MainActor func testTrendsShowComparisonTilesAndBloodWorkEntry() throws {
+    @MainActor func testIntegratedInsightsShowMissingRiskAndSeparateRecoverySources() throws {
         let app = XCUIApplication(); app.launch()
         dismissPasswordPrompts(app)
         if app.buttons["Sign in"].exists {
@@ -48,19 +48,27 @@ nonisolated final class SmokeTests: XCTestCase {
             app.secureTextFields["Password"].tap(); app.secureTextFields["Password"].typeText("test-password")
             app.buttons["Sign in"].tap(); dismissPasswordPrompts(app)
         }
-        XCTAssertTrue(app.tabBars.buttons["Trends"].waitForExistence(timeout: 10))
-        tapTab(app, "Trends")
-        XCTAssertTrue(app.staticTexts["Worsening"].firstMatch.waitForExistence(timeout: 20))
-        XCTAssertTrue(app.staticTexts["Blood Pressure"].firstMatch.exists)
-        reveal(app, app.staticTexts["Improving"].firstMatch)
-        XCTAssertTrue(app.staticTexts["Improving"].firstMatch.exists)
-        for title in ["VO₂ Max", "LDL Cholesterol"] {
-            reveal(app, app.staticTexts[title].firstMatch)
-            XCTAssertTrue(app.staticTexts[title].firstMatch.exists)
+
+        XCTAssertTrue(app.tabBars.buttons["Insights"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.tabBars.buttons["Insights"].isSelected)
+        XCTAssertEqual(app.tabBars.buttons.allElementsBoundByIndex.map(\.label), ["Insights", "Browse", "Data"])
+        let firstCard = app.buttons["insight-card-sleep"]
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 15))
+        for id in ["sleep", "readiness", "vitals", "heart", "fitness", "cardiovascular"] {
+            let card = app.buttons["insight-card-\(id)"]
+            reveal(app, card)
+            card.tap()
+            XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
+            let titles = ["sleep": "Sleep", "readiness": "Readiness", "vitals": "Vitals", "heart": "Heart", "fitness": "Fitness", "cardiovascular": "Cardiovascular Review"]
+            XCTAssertTrue(app.navigationBars[titles[id]!].waitForExistence(timeout: 5))
+            if id == "cardiovascular" {
+                reveal(app, app.staticTexts["Not calculated"])
+                XCTAssertTrue(app.staticTexts["Not calculated"].exists)
+            }
+            app.buttons["Done"].firstMatch.tap()
+            XCTAssertTrue(card.waitForExistence(timeout: 5))
         }
-        XCTAssertFalse(app.staticTexts["More data needed"].exists)
-        tapTab(app, "Data")
-        XCTAssertTrue(app.buttons["Blood Work"].waitForExistence(timeout: 10))
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.lifetime = .keepAlways; add(shot)
     }
 
     @MainActor func testECGShowsWaveformBeforeCompactReadableDetails() async throws {
@@ -170,7 +178,7 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["metric-detail-title"].waitForExistence(timeout: 10))
         app.navigationBars.buttons.firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Heart"].exists)
-        tapTab(app, "Overview"); tapTab(app, "Browse")
+        tapTab(app, "Insights"); tapTab(app, "Browse")
         XCTAssertTrue(app.navigationBars["Heart"].exists)
         app.navigationBars.buttons.firstMatch.tap()
         let blood = app.buttons["Blood Work"]
@@ -181,7 +189,7 @@ nonisolated final class SmokeTests: XCTestCase {
         countRequest.url = URL(string: "http://127.0.0.1:18765/api/v1/test/counts")!
         let (countData, _) = try await URLSession.shared.data(for: countRequest)
         let counts = try JSONSerialization.jsonObject(with: countData) as? [String: Int]
-        for route in ["browse/catalog", "wellness/sources", "metrics/browse", "wellness/day"] {
+        for route in ["browse/catalog", "wellness/sources", "metrics/browse"] {
             XCTAssertEqual(counts?[route] ?? 0, 0, "Returning to Browse must preserve the loaded directory")
         }
         let shot = XCTAttachment(screenshot: app.screenshot())
@@ -220,34 +228,6 @@ nonisolated final class SmokeTests: XCTestCase {
         let source = app.staticTexts["Apple Watch"].firstMatch
         XCTAssertTrue(source.waitForExistence(timeout: 10)); source.tap()
         XCTAssertTrue(app.staticTexts["Recorded details"].waitForExistence(timeout: 10))
-    }
-
-    @MainActor func testOverviewTodayWeekMonthTable() async throws {
-        let app = XCUIApplication(); app.launch()
-        dismissPasswordPrompts(app)
-        if app.buttons["Sign in"].exists {
-            let server = app.textFields["http://192.168.1.20:8080"]
-            server.tap()
-            let old = server.value as? String ?? ""
-            if old != "http://192.168.1.20:8080" { server.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count)) }
-            server.typeText("http://127.0.0.1:18765")
-            app.textFields["Username"].tap(); app.textFields["Username"].typeText("simulator")
-            app.secureTextFields["Password"].tap(); app.secureTextFields["Password"].typeText("test-password")
-            app.buttons["Sign in"].tap(); dismissPasswordPrompts(app)
-        }
-        XCTAssertTrue(app.tabBars.buttons["Overview"].waitForExistence(timeout: 10))
-        tapTab(app, "Overview")
-        for label in ["Today", "Last 7 days", "Last 30 days"] {
-            XCTAssertTrue(app.staticTexts[label].waitForExistence(timeout: 10))
-            XCTAssertTrue(app.staticTexts[label].isHittable)
-        }
-        XCTAssertFalse(app.staticTexts["Yesterday"].exists)
-        XCTAssertLessThan(app.staticTexts["Today"].frame.midX, app.staticTexts["Last 7 days"].frame.midX)
-        XCTAssertLessThan(app.staticTexts["Last 7 days"].frame.midX, app.staticTexts["Last 30 days"].frame.midX)
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "Overview today week month"
-        shot.lifetime = .keepAlways
-        add(shot)
     }
 
     @MainActor func testBrowseDetailsUseSharedPresentation() async throws {
@@ -321,49 +301,6 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.searchFields["Search metrics"].waitForExistence(timeout: 10))
     }
 
-    @MainActor func testOverviewVisibilityControlsAllRows() async throws {
-        let app = XCUIApplication(); app.launch()
-        dismissPasswordPrompts(app)
-        if app.buttons["Sign in"].exists {
-            let server = app.textFields["http://192.168.1.20:8080"]
-            server.tap()
-            let old = server.value as? String ?? ""
-            if old != "http://192.168.1.20:8080" { server.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count)) }
-            server.typeText("http://127.0.0.1:18765")
-            app.textFields["Username"].tap(); app.textFields["Username"].typeText("simulator")
-            app.secureTextFields["Password"].tap(); app.secureTextFields["Password"].typeText("test-password")
-            app.buttons["Sign in"].tap(); dismissPasswordPrompts(app)
-        }
-        var reset = URLRequest(url: URL(string: "http://127.0.0.1:18765/api/v1/test/reset")!)
-        reset.httpMethod = "POST"
-        _ = try await URLSession.shared.data(for: reset)
-        tapTab(app, "Overview")
-        let customize = app.buttons["Customize"]
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: customize)], timeout: 10)
-        customize.tap()
-        let labels = ["Sleep", "Steps", "Heart rate", "Workouts", "Resting heart rate", "HRV SDNN", "Active Energy", "Resting Energy"]
-        for label in labels {
-            let toggle = app.switches[label]
-            reveal(app, toggle)
-            await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: toggle)], timeout: 10)
-            XCTAssertEqual(toggle.value as? String, "1")
-            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        }
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: app.buttons["Back"])], timeout: 10)
-        app.buttons["Back"].tap()
-        XCTAssertTrue(app.staticTexts["No metrics selected. Turn on metrics in Customize."].waitForExistence(timeout: 10))
-        customize.tap()
-        let energy = app.switches["Active Energy"]
-        reveal(app, energy)
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: energy)], timeout: 10)
-        XCTAssertEqual(energy.value as? String, "0")
-        energy.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: app.buttons["Back"])], timeout: 10)
-        app.buttons["Back"].tap()
-        XCTAssertTrue(app.staticTexts["Active Energy"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.staticTexts["Resting Energy"].exists)
-    }
-
     @MainActor func testDataToolsAndErrorFirstCoverage() async throws {
         let app = XCUIApplication(); app.launch()
         dismissPasswordPrompts(app)
@@ -423,7 +360,7 @@ nonisolated final class SmokeTests: XCTestCase {
         app.buttons["Source Aliases"].tap()
         XCTAssertFalse(app.buttons["About Source aliases"].exists)
         XCTAssertFalse(app.staticTexts["Sources"].exists)
-        tapTab(app, "Overview")
+        tapTab(app, "Insights")
         XCTAssertFalse(app.buttons["Breathing practice"].exists)
         app.buttons["Customize"].tap()
         XCTAssertFalse(app.buttons["About Favorites"].exists)
@@ -688,18 +625,6 @@ nonisolated final class SmokeTests: XCTestCase {
         reveal(app, app.buttons["Historical Values"])
         app.buttons["Historical Values"].tap()
         XCTAssertTrue(app.staticTexts["42 ml/kg*min"].waitForExistence(timeout: 10))
-        tapTab(app, "Overview")
-        XCTAssertTrue(app.staticTexts["Today"].exists)
-        XCTAssertTrue(app.staticTexts["Last 7 days"].exists)
-        XCTAssertLessThan(abs(app.staticTexts["Today"].frame.minY - app.staticTexts["Last 7 days"].frame.minY), 30)
-        XCTAssertFalse(app.staticTexts["No reference range set"].exists)
-        XCTAssertFalse(app.staticTexts["Apple Watch"].exists)
-        XCTAssertFalse(app.buttons["Breathing practice"].exists)
-        tapTab(app, "Trends")
-        reveal(app, app.buttons["Past day"])
-        XCTAssertTrue(app.buttons["Past day"].exists)
-        app.buttons["Past day"].tap()
-        XCTAssertTrue(app.buttons["Refresh activity"].exists)
         tapTab(app, "Data")
         XCTAssertFalse(app.staticTexts["Archived sources"].exists)
         XCTAssertFalse(app.staticTexts["10 records"].exists)
@@ -819,25 +744,7 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Page processing"].exists)
         XCTAssertTrue(app.staticTexts["Original OCR output"].exists)
         app.navigationBars.buttons.firstMatch.tap()
-        tapTab(app, "Overview")
-        app.buttons["Customize"].tap()
-        XCTAssertTrue(app.navigationBars["Customize overview"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.staticTexts["Your daily sleep target"].exists)
-        XCTAssertFalse(app.textFields["Minutes, optional"].exists)
-        XCTAssertFalse(app.buttons["Save preferences"].exists)
-        let favorite = app.switches["Sleep"]
-        XCTAssertTrue(app.switches["Active Energy"].exists)
-        XCTAssertTrue(app.switches["Resting Energy"].exists)
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: favorite)], timeout: 10)
-        favorite.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: app.buttons["Back"])], timeout: 10)
-        let savedFavorites = try JSONSerialization.jsonObject(with: await control("wellness/preferences/get")) as! [String: Any]
-        let selected = (savedFavorites["preferences"] as! [String: Any])["favorite_metrics"] as! [String]
-        XCTAssertFalse(selected.contains("sleep"))
-        XCTAssertTrue(selected.contains("active_energy"))
-        XCTAssertTrue(selected.contains("basal_energy"))
-        XCTAssertEqual((savedFavorites["preferences"] as! [String: Any])["overview_show_all"] as? Bool, false)
-        app.buttons["Back"].tap()
+        tapTab(app, "Data")
         app.buttons["Settings"].firstMatch.tap()
         let goal = app.buttons["sleep-goal"]
         reveal(app, goal); goal.tap()
@@ -1171,9 +1078,8 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.buttons["Cancel"].waitForNonExistence(timeout: 5))
         let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         if system.buttons["Not Now"].exists { system.buttons["Not Now"].tap() }
-        tapTab(app, "Overview")
-        XCTAssertTrue(app.staticTexts["Today"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["7 hr 30 min"].firstMatch.waitForExistence(timeout: 10))
+        tapTab(app, "Insights")
+        XCTAssertTrue(app.buttons["insight-card-sleep"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Device trends"].exists)
         XCTAssertFalse(app.buttons["Timeline"].exists)
         XCTAssertFalse(app.buttons["Breathing practice"].exists)
@@ -1205,10 +1111,10 @@ nonisolated final class SmokeTests: XCTestCase {
         app.buttons["Cancel"].tap()
         app.buttons["Discard"].tap()
         XCTAssertTrue(aliasRow.waitForExistence(timeout: 5))
-        tapTab(app, "Overview")
+        tapTab(app, "Insights")
         XCTAssertFalse(app.staticTexts["My Watch"].firstMatch.exists)
         let afterAliases = try await aliasRequestCounts()
-        XCTAssertEqual(afterAliases["wellness/day"], beforeAliases["wellness/day"])
+        XCTAssertEqual(afterAliases["insights/get"], beforeAliases["insights/get"])
         XCTAssertEqual(afterAliases["wellness/preferences/save", default: 0] - beforeAliases["wellness/preferences/save", default: 0], 1)
         tapTab(app, "Data")
         for _ in 0..<4 {
@@ -1251,11 +1157,9 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["See laboratory note"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["NewYork-Presbyterian"].firstMatch.exists)
         app.navigationBars.buttons.firstMatch.tap()
-        tapTab(app, "Trends")
-        XCTAssertTrue(app.switches["Compare a second metric"].waitForExistence(timeout: 5))
-        app.switches["Compare a second metric"].coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Second metric")).firstMatch.waitForExistence(timeout: 5))
         tapTab(app, "Insights")
+        reveal(app, app.buttons["AI Reviews"])
+        app.buttons["AI Reviews"].tap()
         XCTAssertTrue(app.staticTexts["Personal research preview"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Review lipid history and recent health data"].isEnabled)
         tapTab(app, "Health")
@@ -1286,7 +1190,6 @@ nonisolated final class SmokeTests: XCTestCase {
         _ = try await URLSession.shared.data(for: countsRequest)
         tapButton(app, "Cancel")
         XCTAssertTrue(app.buttons["report-info"].waitForExistence(timeout: 5))
-        tapTab(app, "Trends")
         tapTab(app, "Archive")
         XCTAssertTrue(app.buttons["report-info"].waitForExistence(timeout: 5))
         countsRequest.url = URL(string: "http://127.0.0.1:18765/api/v1/test/counts")!
@@ -1385,15 +1288,9 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Synthetic OCR output"].waitForExistence(timeout: 5))
         app.navigationBars.buttons.firstMatch.tap()
         app.swipeDown()
-        tapTab(app, "Trends")
-        let datedResult = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "2026-10-01")).firstMatch
-        reveal(app, datedResult)
-        XCTAssertTrue(datedResult.waitForExistence(timeout: 10))
-        datedResult.tap()
-        XCTAssertTrue(app.navigationBars["Original · page 1"].waitForExistence(timeout: 5))
-        tapButton(app, "Done")
-        XCTAssertTrue(app.navigationBars["Original · page 1"].waitForNonExistence(timeout: 5))
         tapTab(app, "Insights")
+        reveal(app, app.buttons["AI Reviews"])
+        app.buttons["AI Reviews"].tap()
         XCTAssertTrue(app.buttons["Review lipid history and recent health data"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Review lipid history and recent health data"].isEnabled)
         app.buttons["Review lipid history and recent health data"].tap()

@@ -1,11 +1,11 @@
-//! Complete, source-preserving long-term histories for inline Trends cards.
+//! Complete, source-preserving histories used by the Insights assessment.
 use crate::{
     authentication::now,
     database::{Database, queries},
     error::AppError,
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
-use chrono::{Datelike, TimeZone};
+use chrono::TimeZone;
 use futures_util::TryStreamExt;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -38,6 +38,9 @@ struct Card {
     samples: BTreeMap<String, Vec<(i64, f64)>>,
     reference_intervals: BTreeSet<String>,
     recent_start: Option<i64>,
+    assessments: BTreeMap<(i64, u64), Value>,
+    reported_results: Vec<Value>,
+    collection_dates: BTreeMap<(i64, u64), String>,
 }
 
 impl Card {
@@ -82,9 +85,26 @@ impl Card {
             .unwrap_or(0);
         let ready = dates.len() >= 2
             && (["bloodWork", "daily"].contains(&self.category.as_str()) || span >= 30);
-        let monthly = self.category != "bloodWork" && span > 90;
         let mut series = Vec::new();
         for (name, samples) in self.samples {
+            if self.category == "bloodWork" {
+                let samples: BTreeSet<_> = samples
+                    .into_iter()
+                    .map(|(at, value)| (at, value.to_bits()))
+                    .collect();
+                let points: Vec<_> = samples
+                    .into_iter()
+                    .map(|(at, bits)| {
+                        json!({
+                            "at":at,"value":f64::from_bits(bits),
+                            "report_assessment":self.assessments.get(&(at,bits)),"sampled_at":self.collection_dates.get(&(at,bits))
+                        })
+                    })
+                    .collect();
+                series.push(json!({"title":name,"points":points}));
+                continue;
+            }
+            let mut latest_times = BTreeMap::<chrono::NaiveDate, i64>::new();
             let mut buckets = BTreeMap::<chrono::NaiveDate, BTreeSet<(i64, u64)>>::new();
             for (at, value) in samples {
                 let Some(date) = timezone
@@ -94,6 +114,10 @@ impl Card {
                 else {
                     continue;
                 };
+                latest_times
+                    .entry(date)
+                    .and_modify(|latest| *latest = (*latest).max(at))
+                    .or_insert(at);
                 buckets
                     .entry(date)
                     .or_default()
@@ -105,44 +129,14 @@ impl Card {
                     .iter()
                     .map(|(_, bits)| f64::from_bits(*bits))
                     .collect();
-                if self.category == "bloodWork" {
-                    // Dated lab results remain individual observations, with no interpolation.
-                    for (at, bits) in samples {
-                        plotted
-                            .entry(
-                                timezone
-                                    .timestamp_opt(at, 0)
-                                    .single()
-                                    .expect("validated timestamp")
-                                    .date_naive(),
-                            )
-                            .or_default()
-                            .push(f64::from_bits(bits));
-                    }
-                } else {
-                    let day_mean = values.iter().sum::<f64>() / values.len() as f64;
-                    let bucket = if monthly {
-                        date.with_day(1).expect("first of month")
-                    } else {
-                        date
-                    };
-                    plotted.entry(bucket).or_default().push(day_mean);
-                }
+                let day_mean = values.iter().sum::<f64>() / values.len() as f64;
+                plotted.entry(date).or_default().push(day_mean);
             }
             let mut points = Vec::new();
             for (date, values) in plotted {
-                let at = timezone
-                    .from_local_datetime(&date.and_hms_opt(12, 0, 0).expect("valid noon"))
-                    .earliest()
-                    .map(|v| v.timestamp());
+                let at = latest_times.get(&date).copied();
                 let Some(at) = at else { continue };
-                if self.category == "bloodWork" {
-                    for value in values {
-                        points.push(json!({"at":at,"value":value,"date":date.to_string()}));
-                    }
-                } else {
-                    points.push(json!({"at":at,"value":values.iter().sum::<f64>() / values.len() as f64,"date":date.to_string()}));
-                }
+                points.push(json!({"at":at,"value":values.iter().sum::<f64>() / values.len() as f64,"date":date.to_string()}));
             }
             series.push(json!({"title":name,"points":points}));
         }
@@ -175,11 +169,11 @@ impl Card {
             ),
             "heart_bp" => (
                 AHA,
-                "Only explicitly paired systolic and diastolic readings are included. Each day contributes equally to a monthly average. A standardized home blood pressure assessment additionally needs repeated sessions, cuff and posture information.",
+                "Only explicitly paired systolic and diastolic readings are included. Repeated readings are summarized by day. A standardized home blood pressure assessment additionally needs repeated sessions, cuff and posture information.",
             ),
             _ => (
                 APPLE,
-                "Daily means or equally weighted averages of observed days in each month. Each device source is kept separate. Cardio fitness estimates depend on the measurement method and personal context.",
+                "Daily means from observed samples. Each device source is kept separate. Cardio fitness estimates depend on the measurement method and personal context.",
             ),
         };
         let identity = json!([self.metric, self.source, self.unit, self.method]).to_string();
@@ -188,17 +182,22 @@ impl Card {
             "metric_id":self.metric,"title":self.title,"source":self.source,"source_name":self.source_name,
             "unit":self.unit,"category":self.category,"state":if ready {"ready"} else {"insufficient_data"},
             "reference_interval":if self.reference_intervals.len()==1 {self.reference_intervals.first().and_then(|s| serde_json::from_str::<Value>(s).ok()).unwrap_or(Value::Null)} else {Value::Null},
-            "recent_start":self.recent_start,
+            "recent_start":self.recent_start,"reported_results":self.reported_results,
             "series":series,"observed_days":dates.len(),"first_at":first,"last_at":last,
             "record_count":self.records,"missing":needed,"method":self.method,
-            "aggregation":if self.category=="bloodWork" {"Collected results"} else if monthly {"Monthly daily averages"} else {"Daily averages"},
+            "aggregation":if self.category=="bloodWork" {"Collected results"} else {"Daily averages"},
             "explanation":note,"citation":citation,
             "comparison_note":if self.category=="bloodWork" && self.method=="[null,null]" {"Assay and specimen were not recorded."} else {""}
         })
     }
 }
 
-pub async fn get(database: &Database, user: &str, request: Request) -> Result<Value, AppError> {
+/// Normalized histories, including stable and single-date evidence for Insights.
+pub async fn snapshot(
+    database: &Database,
+    user: &str,
+    request: Request,
+) -> Result<Value, AppError> {
     let tz: chrono_tz::Tz = request
         .timezone
         .parse()
@@ -234,22 +233,19 @@ pub async fn get(database: &Database, user: &str, request: Request) -> Result<Va
     cards.extend(laboratory_cards(database, user, as_of, labs).await?);
     cards.extend(daily_cards(database, user, as_of, &request.timezone).await?);
     if revision != database.data_revision(user).await? {
-        return Err(AppError::Conflict("Archive changed; refresh Trends"));
+        return Err(AppError::Conflict("Archive changed; refresh Insights"));
     }
     let cards = database
         .cpu
         .run(move || {
             let mut result: Vec<_> = cards.into_iter().map(|card| card.finish(tz)).collect();
-            result.retain_mut(|card| {
+            for card in &mut result {
                 if let Some(change) =
                     super::trend_change::classify(card, &profile, sleep_minutes, as_of)
                 {
                     card["change"] = change;
-                    true
-                } else {
-                    false
                 }
-            });
+            }
             result.sort_by(|a, b| {
                 (a["change"]["direction"] != "worsening")
                     .cmp(&(b["change"]["direction"] != "worsening"))
@@ -260,7 +256,7 @@ pub async fn get(database: &Database, user: &str, request: Request) -> Result<Va
         })
         .await?;
     Ok(
-        json!({"cards":cards,"data_revision":revision,"computed_at":as_of,"algorithm_version":"directional-trends-v2","complete":true}),
+        json!({"cards":cards,"data_revision":revision,"computed_at":as_of,"algorithm_version":"insights-history-v1","complete":true}),
     )
 }
 
@@ -293,9 +289,12 @@ async fn measurement_cards(
         card.records += 1;
         let at: f64 = row.try_get("at")?;
         let unit: Option<String> = row.try_get("unit")?;
-        if let Some(value) =
-            super::series::convert(&platform, "vo2_max", unit.as_deref(), row.try_get("value")?)
-        {
+        if let Some(value) = crate::wellness::series::convert(
+            &platform,
+            "vo2_max",
+            unit.as_deref(),
+            row.try_get("value")?,
+        ) {
             card.samples
                 .entry("VO₂ Max".into())
                 .or_default()
@@ -580,7 +579,7 @@ async fn laboratory_cards(
         let reference = crate::laboratory::interpret(&observation.payload).reference;
         rows.push(json!({
             "metric_id":metric,"title":definition.name,"source_key":source,"source_name":name,
-            "timestamp":at,"value":normalized.as_ref().map(|(value,_)|value),
+            "sampled_at":observation.payload.sampled_at,"timestamp":at,"value":normalized.as_ref().map(|(value,_)|value),"display_value":observation.payload.raw_result,
             "unit":normalized.as_ref().map(|(_,unit)|unit).or(observation.payload.raw_unit.as_ref()),
             "plotted":normalized.is_some() && at.is_some(),"reference":reference,"original":{}
         }));
@@ -666,6 +665,12 @@ fn group_labs(rows: Vec<Value>, as_of: i64) -> Vec<Card> {
         };
         if reason.is_empty() {
             let value = value.expect("validated value");
+            if let Some(sampled_at) = row["sampled_at"].as_str() {
+                card.collection_dates.insert(
+                    (at.expect("validated date"), value.to_bits()),
+                    sampled_at.into(),
+                );
+            }
             let mut reference_point = row.clone();
             if !row["original"].is_null() && row["original"]["clinical_observation"].is_null() {
                 reference_point["original"] = json!({"clinical_observation":row["original"]});
@@ -674,6 +679,12 @@ fn group_labs(rows: Vec<Value>, as_of: i64) -> Vec<Card> {
                 .or_else(|| {
                     crate::reference_guides::clinical_assessment(&reference_point, value, unit)
                 });
+            if let Some(assessment) = &printed {
+                card.assessments.insert(
+                    (at.expect("validated date"), value.to_bits()),
+                    assessment.clone(),
+                );
+            }
             let bounds = printed
                 .map(|p| json!({"lower":p["lower"],"upper":p["upper"]}).to_string())
                 .unwrap_or_default();
@@ -683,6 +694,9 @@ fn group_labs(rows: Vec<Value>, as_of: i64) -> Vec<Card> {
                 .or_default()
                 .push((at.expect("validated date"), value));
         } else {
+            card.reported_results.push(
+                json!({"at":at,"printed_value":row["display_value"],"sampled_at":row["sampled_at"],"unit":unit,"reason":reason}),
+            );
             *card.missing.entry(reason.into()).or_default() += 1;
         }
     }
@@ -790,14 +804,18 @@ async fn daily_cards(
         .ok_or(AppError::Internal)?
         .timestamp();
     let mut cards = Vec::new();
-    for (kind, title) in [
+    let kinds = [
         ("sleep", "Sleep"),
         ("resting_heart_rate", "Resting Heart Rate"),
-    ] {
+        ("hrv_sdnn", "HRV SDNN"),
+        ("workout", "Workout Duration"),
+        ("active_energy", "Active Energy"),
+    ];
+    for (kind, title) in kinds {
         let aggregate = database
             .daily_period(user, kind, first, last, timezone)
             .await?;
-        let response = super::select_metric(kind, &last.to_string(), &[], &aggregate)?;
+        let response = crate::wellness::select_metric(kind, &last.to_string(), &[], &aggregate)?;
         let mut grouped = BTreeMap::<(String, String), BTreeMap<String, BTreeSet<u64>>>::new();
         for day in response["history"].as_array().into_iter().flatten() {
             let date = day["date"].as_str().unwrap_or("");

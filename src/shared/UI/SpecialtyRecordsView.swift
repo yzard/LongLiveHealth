@@ -3,48 +3,6 @@ import SwiftUI
 import Charts
 #endif
 
-struct SpecialtyRecordsView: View {
-    var model: AppModel
-    @State var kind = "ecg"
-    @State var records: [JSONValue] = []
-    @State var cursor: JSONValue = .null
-    @State var failure: String?
-    @State var loading = false
-    var body: some View {
-        VStack(spacing: 0) {
-            Picker("Record type", selection: $kind) { Text("ECG").tag("ecg"); Text("Clinical and medication records").tag("clinical"); Text("Blood Pressure").tag("blood_pressure") }
-            if kind == "blood_pressure" {
-                CatalogMetricView(model: model, kind: "HKCorrelationTypeIdentifierBloodPressure")
-            } else if kind == "ecg" {
-                ECGRecordsView(model: model)
-            } else {
-            List {
-            InfoHelp(title: "Record interpretation", message: "Source measurements and classifications. No new diagnostic classification is generated.")
-            if let failure { Text(failure).foregroundStyle(.secondary) }
-            if records.isEmpty && !loading { Text("No available records of this type.") }
-            ForEach(Array(HistoricalValue.newestFirst(records, timestamps: ["at", "start_at"], dates: []).enumerated()), id: \.offset) { _, item in
-                NavigationLink { SpecialtyRecordView(model: model, reference: item) } label: {
-                    HistoricalValueRow(timestamp: item["at"].numberValue, dateText: "",
-                        source: model.sourceLabel(SourceNames.key(item)), value: HistoricalValue.record(item))
-                }
-            }
-            if cursor != .null { Button("More records") { Task { await load(reset: false) } }.disabled(loading) }
-            }
-            }
-        }.mobileNavigationTitle("Specialty records").initialTask(id: kind) { if kind == "clinical" { await load(reset: true) } }
-    }
-    private func load(reset: Bool) async {
-        guard let client = model.client, let token = model.session?.token else { return }
-        loading = true; defer { loading = false }
-        if reset { records = []; cursor = .null }
-        do {
-            let response = try await model.request("wellness/records/list", body: .object(["kind": .string(kind), "after": cursor]))
-            guard !Task.isCancelled, model.session?.token == token else { return }
-            records += response["records"].arrayValue; cursor = response["next_cursor"]; failure = nil
-        } catch { if !Task.isCancelled, model.session?.token == token { failure = error.localizedDescription } }
-    }
-}
-
 struct SpecialtyRecordView: View {
     var model: AppModel
     let reference: JSONValue

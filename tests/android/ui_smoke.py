@@ -54,13 +54,13 @@ def login():
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         labels = [n.get("text") for n in tree().iter("node")]
-        if "Overview" in labels:
+        if "Insights" in labels:
             assert "Could not complete the action" not in labels
-            print("PASS: Login and Overview")
+            print("PASS: Login and Insights")
             return
         time.sleep(0.5)
     inspect()
-    raise AssertionError("Login did not open Overview")
+    raise AssertionError("Login did not open Insights")
 
 
 def labels():
@@ -84,7 +84,7 @@ def navigation():
     adb("shell", "wm", "size", "reset")
     adb("shell", "wm", "density", "reset")
     adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
-    wait_for("Overview")
+    wait_for("Insights")
     tap("Browse"); wait_for("Health Categories"); tap("Heart")
     wait_for("Heart rate"); tap("Heart rate"); wait_for("RANGE")
     assert sum((text or "").casefold() == "heart rate" for text in labels()) == 1, "Duplicate chart heading"
@@ -120,13 +120,12 @@ def selectors():
     # before the user could select anything, including with an empty catalog.
     adb("shell", "am", "force-stop", "dev.longlivehealth.android")
     adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
-    wait_for("Overview")
-    tap("Trends"); wait_for("Recorded trends")
+    wait_for("Insights")
     assert "Compare measurements" not in labels()
-    tap("Insights"); tap("Behavior associations"); wait_for("DECLARE AN ANALYSIS")
-    assert "Run declared analysis" in labels()
-    tap("Back")
-    print("PASS: Trends and association selectors render without native crash")
+    tap("Insights"); wait_for("Cardiovascular Review")
+    assert "Not calculated" in labels()
+    assert "Behavior associations" not in labels()
+    print("PASS: Integrated Insights render without native crash")
 
 
 def browse_switch():
@@ -154,7 +153,7 @@ def browse_switch():
         adb("shell", "wm", "size", "2208x1840")
         adb("shell", "wm", "density", "320")
         adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
-        wait_for("Overview")
+        wait_for("Insights")
         tap("Browse")
         wait_for("Health Categories")
         tap("Heart")
@@ -187,7 +186,7 @@ def chart_scroll():
     adb("shell", "wm", "size", "reset")
     adb("shell", "wm", "density", "reset")
     adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
-    wait_for("Overview"); tap("Browse"); wait_for("Health Categories")
+    wait_for("Insights"); tap("Browse"); wait_for("Health Categories")
     tap("Heart"); tap("Heart rate"); wait_for("RANGE")
     bounds = tree().find("node").get("bounds")
     _, _, width, height = map(int, re.findall(r"\d+", bounds))
@@ -234,7 +233,7 @@ def camera_import():
 def original_preview():
     adb("shell", "am", "force-stop", "dev.longlivehealth.android")
     adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
-    wait_for("Overview")
+    wait_for("Insights")
     tap("Data"); tap("Blood Work"); wait_for("Example Laboratory"); tap("Example Laboratory")
     tap("View original report")
     wait_for("Original report")
@@ -251,7 +250,7 @@ def original_preview():
 def rescan_confirmation():
     adb("shell", "am", "force-stop", "dev.longlivehealth.android")
     adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
-    wait_for("Overview")
+    wait_for("Insights")
     tap("Data"); tap("Blood Work"); wait_for("Example Laboratory"); tap("Example Laboratory")
     wait_for("Rescan report")
     actions = ["View original report", "Add result manually", "Rescan report", "Delete report"]
@@ -271,7 +270,7 @@ def rescan_confirmation():
 def blood_work_categories():
     adb("shell", "am", "force-stop", "dev.longlivehealth.android")
     adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
-    wait_for("Overview")
+    wait_for("Insights")
     tap("Browse"); wait_for("Health Categories"); tap("Heart")
     wait_for("Heart rate")
     assert "LDL" not in labels(), "Blood lipid incorrectly appears in Heart"
@@ -301,18 +300,12 @@ def report_settings():
     control("test/reset"); control("test/seed-report"); control("test/report-issue")
     adb("shell", "am", "force-stop", "dev.longlivehealth.android")
     adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
-    wait_for("Overview"); tap("Data"); tap("Blood Work"); wait_for("Example Laboratory"); tap("Example Laboratory")
+    wait_for("Insights"); tap("Data"); tap("Blood Work"); wait_for("Example Laboratory"); tap("Example Laboratory")
     wait_for("Cannot appear in Browse: unit invalid-unit is not supported for this test.")
     assert "PAGE PROCESSING" not in labels()
     tap("Detail"); wait_for("PAGE PROCESSING"); wait_for("ORIGINAL OCR OUTPUT")
     adb("shell", "input", "keyevent", "KEYCODE_BACK")
-    tap("Overview"); tap("Customize"); wait_for("FAVORITE METRICS")
-    assert "Your daily sleep target" not in labels()
-    assert "Save preferences" not in labels()
-    switch = next(n for n in tree().iter("node") if n.get("checkable") == "true" and n.get("enabled") == "true")
-    tap_node(switch); ready()
-    assert control("wellness/preferences/get")["preferences"]["favorite_metrics"] == ["sleep"]
-    tap("chevron.left"); wait_for("gearshape"); tap("gearshape"); wait_for("Sleep Goal")
+    tap("Data"); adb("shell", "input", "keyevent", "KEYCODE_BACK"); wait_for("gearshape"); tap("gearshape"); wait_for("Sleep Goal")
     assert not {"Server processing", "App unlock", "Your server", "Full data export", "Clear this device"}.intersection(labels())
     tap("Sleep Goal"); wait_for("Set a sleep goal")
     switch = next(n for n in tree().iter("node") if n.get("checkable") == "true" and n.get("enabled") == "true")
@@ -350,7 +343,7 @@ def edge_scroll():
             adb("shell", "wm", "size", "2208x1840" if wide else "1080x2400")
             adb("shell", "wm", "density", "320" if wide else "420")
             adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
-            wait_for("Overview")
+            wait_for("Insights")
             tap("Browse"); wait_for("Health Categories")
             original_search = bounds(search_box())
             header = next(n for n in matches("Browse") if bounds(n)[1] < original_search[1])
@@ -388,7 +381,7 @@ def edge_scroll():
         # The same theme must apply outside Browse, not a per-page workaround.
         adb("shell", "wm", "size", "1080x2400")
         adb("shell", "wm", "density", "420")
-        for title in ("Overview", "Trends", "Insights", "Data"):
+        for title in ("Insights", "Browse", "Data"):
             tap(title)
             for _ in range(2):
                 adb("shell", "input", "swipe", "540", "1400", "540", "450", "500")
@@ -407,7 +400,7 @@ def paired_charts():
     adb("shell", "wm", "size", "reset")
     adb("shell", "wm", "density", "reset")
     adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
-    wait_for("Overview"); tap("Browse"); wait_for("Health Categories")
+    wait_for("Insights"); tap("Browse"); wait_for("Health Categories")
     fields = [n for n in tree().iter("node") if n.get("class")=="android.widget.EditText"]
     tap_node(fields[0]); adb("shell","input","text","Blood%spressure")
     adb("shell","input","keyevent","KEYCODE_BACK")

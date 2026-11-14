@@ -1,6 +1,5 @@
 //! Read-only, source-explicit views of the health archive.
 pub mod algorithms;
-pub mod associations;
 pub mod clinical;
 pub mod coach;
 pub mod combined_chart;
@@ -12,7 +11,6 @@ pub mod food;
 pub mod food_lookup;
 pub mod heart_rate;
 pub mod history;
-pub mod hrv;
 pub mod import;
 pub mod materialized;
 pub mod meal_glucose;
@@ -23,16 +21,12 @@ pub mod preferences;
 pub mod records;
 pub mod regularity;
 pub mod reminders;
-pub mod report;
 pub mod review;
 pub mod series;
 pub mod sleep;
-pub mod statistics;
 pub mod steps;
 pub mod timeline;
 pub mod training;
-mod trend_change;
-pub mod trends;
 
 use crate::{
     authentication::now,

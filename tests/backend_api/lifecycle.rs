@@ -3,7 +3,7 @@ use axum::http::StatusCode;
 use serde_json::json;
 
 #[tokio::test]
-async fn iphone_contract_review_trend_export_and_account_isolation() {
+async fn mobile_contract_review_history_export_and_account_isolation() {
     let (_directory, state) = fixture().await;
     add_user(&state, "alice").await;
     add_user(&state, "bob").await;
@@ -27,9 +27,9 @@ async fn iphone_contract_review_trend_export_and_account_isolation() {
         .unwrap();
     let (status, trend) = request(
         &app,
-        "/api/v1/trends/get",
+        "/api/v1/metrics/history/get",
         Some(&alice),
-        json!({"metric_ids":["ldl_cholesterol"]}),
+        json!({"metric_id":"ldl_cholesterol"}),
     )
     .await;
     assert_eq!(status, StatusCode::OK);

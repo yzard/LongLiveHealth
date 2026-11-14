@@ -27,14 +27,14 @@ struct SleepSessionsView: View {
                 let session = sessionRow.value
                 DisclosureGroup {
                     if let seconds = session["asleep_seconds"].numberValue {
-                        Text("\(OverviewSummary.duration(seconds)) asleep").font(.headline)
+                        Text("\(MetricPresentation.duration(seconds)) asleep").font(.headline)
                     } else { Text(session["state"].stringValue.replacingOccurrences(of: "_", with: " ")) }
                     if let efficiency = session["efficiency"].numberValue {
                         Text("Observed sleep efficiency: \((efficiency * 100).formatted())%")
                     } else { Text("Efficiency needs complete in-bed evidence.").font(.caption) }
                     Text(session["classification"].stringValue.replacingOccurrences(of: "_", with: " "))
                     Text(session["correction_state"].stringValue.replacingOccurrences(of: "_", with: " ")).font(.caption)
-                    if let seconds = session["user_asleep_seconds"].numberValue { Text("User estimate: \(OverviewSummary.duration(seconds))") }
+                    if let seconds = session["user_asleep_seconds"].numberValue { Text("User estimate: \(MetricPresentation.duration(seconds))") }
                     if session["corrections"].arrayValue.count <= 1 {
                         Button("Confirm or correct sleep") { correction = SleepCorrectionSelection(source: session["source"].stringValue, session: session) }
                     } else { Text("Delete duplicate corrections in Daily logs before confirming again.").font(.caption) }
@@ -58,7 +58,7 @@ struct SleepSessionsView: View {
                     }
                 } label: {
                     HistoricalValueRow(timestamp: session["end_at"].numberValue, dateText: "",
-                        source: model.sourceLabel(session["source"].stringValue), value: session["asleep_seconds"].numberValue.map(OverviewSummary.duration) ?? "—")
+                        source: model.sourceLabel(session["source"].stringValue), value: session["asleep_seconds"].numberValue.map(MetricPresentation.duration) ?? "—")
                 }
             }
             if result != .null && result["sources"].arrayValue.isEmpty { Text("No supported sleep records in this range.") }

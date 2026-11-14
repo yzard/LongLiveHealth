@@ -12,6 +12,11 @@ struct DailyLogsView: View {
                 Button("Record weight") { editing = LogSelection(entry: nil, kind: "body") }
                 Button("Record an event or observation") { editing = LogSelection(entry: nil) }
             }
+            Section {
+                NavigationLink("Nutrition", destination: NutritionDayView(model: model))
+                NavigationLink("Training planner", destination: TrainingPlannerView(model: model))
+                NavigationLink("Reminders", destination: RemindersView(model: model))
+            }
             Section("Last 30 days") {
                 if entries.isEmpty { Text("No entries in this range.").foregroundStyle(.secondary) }
                 ForEach(entries, id: \.identifier) { item in

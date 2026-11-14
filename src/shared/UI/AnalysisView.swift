@@ -1,18 +1,11 @@
 import SwiftUI
 
-struct AnalysisView: View {
+struct AnalysisHistoryView: View {
     var model: AppModel
     @State var runs: [JSONValue] = []
     var body: some View {
         List {
             Section {
-                NavigationLink("Archive questions", destination: ArchiveCoachView(model: model))
-                NavigationLink("Reminders", destination: RemindersView(model: model))
-                NavigationLink("Specialty records", destination: SpecialtyRecordsView(model: model))
-                NavigationLink("Nutrition", destination: NutritionDayView(model: model))
-                NavigationLink("Training planner", destination: TrainingPlannerView(model: model))
-                NavigationLink("HRV windows", destination: HRVWindowsView(model: model))
-                NavigationLink("Behavior associations", destination: BehaviorAssociationsView(model: model))
                 InfoHelp(title: "Personal research preview", message: "Lipid-related hypotheses are unverified. Review the referenced data and discuss questions with your clinician. New confirmed reports can also start a review when the server's analysis provider is enabled.")
                 Button("Review lipid history and recent health data") { Task { await model.perform {
                     guard let client = model.client else { return }
@@ -32,7 +25,7 @@ struct AnalysisView: View {
                     }
                 }
             }
-        }.mobileNavigationTitle("Insights").initialTask { await reload() }.refreshable { await reload() }
+        }.mobileNavigationTitle("AI Reviews").initialTask { await reload() }.refreshable { await reload() }
     }
     private func reload() async { do { if let client = model.client { runs = try model.cachedResponse("analysis/list", body: .object([:]))?["runs"].arrayValue ?? runs; runs = try await model.request("analysis/list", body: .object([:]))["runs"].arrayValue } } catch { model.errorMessage = error.localizedDescription } }
 }

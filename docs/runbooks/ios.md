@@ -27,7 +27,7 @@ Linux 可执行 `./build_ios.sh --core-only`：在 Swift 6.2 容器内做全部 
 1. 输入 HTTP 或 HTTPS 服务器地址和凭据。首次使用 admin/admin 登录后必须改密码；设置页可改密码，admin 可管理普通账号。HTTP 地址由部署者选择，HTTPS 仍不跳过证书验证，不跟随重定向转发 token。
 2. Reports 导入 PDF/照片或扫描纸质报告。PNG/JPEG 保留所取文件原字节；HEIC/HEIF 同时上传原件和 JPEG 识别副本。扫描器返回的每页 PNG 单独上传，当前各页分别是一份报告。上传前持久化全部待上传字节和 UUID；响应丢失重用 UUID。待上传行可左滑丢弃。
 3. 进入报告看原件、提取状态、页级文字、完整 OCR/解析回复和候选。点选候选，核对原值、单位、采样日期、参考区间、指标映射与出处，再选 Confirmed。也可人工加行、保留 Pending 或 Rejected，全部由 API 保留历史。
-4. Trends 选择指标，可同时比较第二项，各自使用独立纵轴。点击图表附近的点或日期行回到原件页。
+4. 默认首页为 Insights，逐张打开六个健康评估卡片。Browse 查看单项历史；Data 管理导入、导出及设置。
 5. Health 连接权限并同步。视力处方与药物需要在“Select prescriptions and medications”中逐条选择，普通前台同步不会自动弹出这些选择页面。每个查询页拆分出的全部批次先落盘，全部确认后推进锚点；下次自动或手动同步继续。样本 secure archive、可读序列和快照都归档到 API。类型随 OS/权限动态可用，范围与缺口见支持矩阵；临床记录读取另需 Health Records entitlement 和设备支持。
 6. Insights 仅在服务器启用 analysis 后允许创建个人血脂回顾，查看引用、缺失资料、其他解释和就医问题，记录反馈。下拉刷新查看后台任务结果。
 7. Settings 创建、刷新、下载并分享完整 ZIP，也可删除导出、报告或账户。

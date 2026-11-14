@@ -9,6 +9,17 @@ public nonisolated enum HistoricalValue {
         value.dateFormat = "yyyy-MM-dd hh:mm a"
         return value
     }()
+    /// A collection date without a time is a calendar date, not midnight UTC.
+    public static func collectionDate(timestamp: Double?, text: String, timeZone: TimeZone) -> String {
+        if text.count == 10, date(timestamp: nil, text: text) != "—" { return text }
+        guard let timestamp, timestamp.isFinite else { return "—" }
+        let display = DateFormatter()
+        display.locale = Locale(identifier: "en_US_POSIX")
+        display.timeZone = timeZone
+        display.dateStyle = .medium
+        display.timeStyle = .none
+        return display.string(from: Date(timeIntervalSince1970: timestamp))
+    }
     public static func date(timestamp: Double?, text: String) -> String {
         if let timestamp, timestamp.isFinite { return formatter.string(from: Date(timeIntervalSince1970: timestamp)) }
         if text.count == 10 {

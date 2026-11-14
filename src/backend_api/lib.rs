@@ -19,6 +19,7 @@ pub mod health;
 pub mod health_archive;
 pub(crate) mod health_batch;
 pub(crate) mod health_connect;
+pub mod insights;
 pub mod jobs;
 pub mod laboratory;
 mod laboratory_names;

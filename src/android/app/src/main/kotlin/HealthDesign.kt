@@ -160,14 +160,10 @@ private fun HealthTabIcon(index: Int) {
         fun line(x1: Float, y1: Float, x2: Float, y2: Float) = drawLine(
             color, Offset(x1 * unit, y1 * unit), Offset(x2 * unit, y2 * unit), stroke, StrokeCap.Round)
         when (index) {
-            0 -> for (x in listOf(3f, 14f)) for (y in listOf(3f, 14f))
-                drawRoundRect(color, Offset(x * unit, y * unit), Size(7 * unit, 7 * unit), CornerRadius(1.5f * unit))
             1 -> for (y in listOf(5f, 12f, 19f)) {
                 drawCircle(color, 1.5f * unit, Offset(4 * unit, y * unit)); line(9f, y, 21f, y)
             }
-            2 -> { line(3f, 3f, 3f, 21f); line(3f, 21f, 22f, 21f)
-                line(6f, 16f, 11f, 10f); line(11f, 10f, 15f, 13f); line(15f, 13f, 21f, 5f) }
-            3 -> {
+            0 -> {
                 val path = Path().apply {
                     moveTo(12 * unit, 2 * unit); quadraticTo(13 * unit, 10 * unit, 21 * unit, 12 * unit)
                     quadraticTo(13 * unit, 14 * unit, 12 * unit, 22 * unit)

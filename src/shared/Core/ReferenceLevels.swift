@@ -17,8 +17,8 @@ public nonisolated enum ReferenceLevels {
         for group in groups.values {
             let ranked = group.sorted { a, b in
                 let ak = a["source"].stringValue, bk = b["source"].stringValue
-                let ap = OverviewSummary.devicePriority(name: names[ak] ?? ak)
-                let bp = OverviewSummary.devicePriority(name: names[bk] ?? bk)
+                let ap = MetricPresentation.devicePriority(name: names[ak] ?? ak)
+                let bp = MetricPresentation.devicePriority(name: names[bk] ?? bk)
                 if ap != bp { return ap < bp }
                 let at = a["last_at"].numberValue ?? 0, bt = b["last_at"].numberValue ?? 0
                 return at == bt ? ak < bk : at > bt

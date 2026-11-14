@@ -550,13 +550,6 @@ UPDATE users
 RETURNING user_id
 "#;
 
-pub const INSERT_DERIVED_RESULT: &str = "INSERT INTO derived_results (result_id,user_id,kind,algorithm_version,input_revision,parameters_json,input_json,output_json,created_at) VALUES (?,?,'behavior_association',?,?,?,?,?,?)";
-pub const LIST_DERIVED_RESULTS: &str = "SELECT result_id,kind,algorithm_version,input_revision,parameters_json,created_at FROM derived_results WHERE user_id=? ORDER BY created_at DESC,result_id LIMIT 100";
-pub const GET_DERIVED_RESULT: &str =
-    "SELECT output_json FROM derived_results WHERE user_id=? AND result_id=?";
-pub const LIMIT_DERIVED_RESULTS: &str = "DELETE FROM derived_results WHERE user_id=? AND result_id NOT IN (SELECT result_id FROM derived_results WHERE user_id=? ORDER BY created_at DESC,result_id LIMIT 100)";
-
-pub const HRV_WINDOWS: &str = "SELECT platform, source_id, record_id, record_type, start_at, end_at, version, payload_json FROM health_records WHERE user_id = ? AND deleted = 0 AND record_type IN ('nn_intervals', 'heartbeat_series') AND start_at >= ? AND start_at < ? ORDER BY start_at, record_id LIMIT 1001";
 pub const WELLNESS_LIBRARY: &str = "SELECT platform, source_id, record_id, record_type, start_at, end_at, version, payload_json FROM health_records WHERE user_id = ? AND platform = 'manual' AND source_id = 'longlivehealth' AND record_type = ? AND deleted = 0 ORDER BY start_at DESC, record_id LIMIT 1001";
 pub const FOOD_PORTION: &str = "SELECT platform, source_id, record_id, record_type, start_at, end_at, version, payload_json FROM health_records WHERE user_id = ? AND platform = 'manual' AND source_id = 'longlivehealth' AND record_id = ? AND record_type IN ('food', 'recipe') AND deleted = 0";
 

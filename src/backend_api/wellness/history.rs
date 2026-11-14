@@ -1,4 +1,4 @@
-//! Complete source-separated daily history, independent of Overview's baseline window.
+//! Complete source-separated daily history, scoped to the requested Browse period.
 use crate::{
     database::{Database, queries},
     error::AppError,
@@ -95,7 +95,7 @@ impl Database {
         result["last_record_at"] = json!(last);
         Ok(result)
     }
-    pub(super) async fn daily_period(
+    pub(crate) async fn daily_period(
         &self,
         user: &str,
         kind: &str,
