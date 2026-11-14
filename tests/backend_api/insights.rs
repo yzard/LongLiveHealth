@@ -244,6 +244,7 @@ async fn integrated_snapshot_uses_confirmed_labs_paired_pressure_and_report_rang
                     serde_json::from_value(json!({"source_name":"Example Laboratory"})).unwrap(),
                 ),
                 observations,
+                new_metric: None,
             },
         )
         .await
