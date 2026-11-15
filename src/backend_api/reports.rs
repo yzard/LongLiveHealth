@@ -562,7 +562,11 @@ impl StoredObservation {
         let saved_metric = resolved_metric_id
             .as_deref()
             .filter(|_| payload.metric_id.is_some() || self.status == "confirmed");
-        let display_name = saved_metric.map_or(printed_name, |id| {
+        let draft_name = new_metric
+            .map(|metric| metric.name.trim())
+            .filter(|name| !name.is_empty())
+            .unwrap_or(printed_name);
+        let display_name = saved_metric.map_or(draft_name, |id| {
             metadata
                 .aliases
                 .get(id)

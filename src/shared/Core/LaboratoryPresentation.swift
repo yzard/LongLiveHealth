@@ -8,14 +8,22 @@ public nonisolated enum LaboratoryPresentation {
     }
 
     public static func resultTitle(_ observation: JSONValue, renamedMetrics: [String: String]) -> String {
-        let metricID = ReportReview.savedMetricID(observation)
-        if let metricID, let name = renamedMetrics[metricID] {
-            return name
-        }
-        let printed = observation["payload"]["raw_name"].stringValue
+        let payload = observation["payload"]
+        let code = observation["lab_test_code"].stringValue
+        let printed = printedName(payload["raw_name"].stringValue, code: code)
         let display = observation["display_name"].stringValue
-        let name = metricID == nil ? (printed.isEmpty ? display : printed) : (display.isEmpty ? printed : display)
-        return printedName(name, code: observation["lab_test_code"].stringValue)
+        let metricID = ReportReview.savedMetricID(observation)
+        if let metricID {
+            if let name = renamedMetrics[metricID] { return name }
+            if !display.isEmpty {
+                return printedName(display, code: code)
+            }
+        } else if payload["unmapped_choice"]["kind"] == .string("new") {
+            let name = payload["unmapped_choice"]["definition"]["name"].stringValue
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty { return name }
+        }
+        return printed.isEmpty ? printedName(display, code: code) : printed
     }
 
     public static func printedName(_ rawName: String, code: String) -> String {

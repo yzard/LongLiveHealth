@@ -236,6 +236,8 @@ class Handler(BaseHTTPRequestHandler):
                     'payload': change['payload'],
                 }
                 choice = revised['payload'].get('unmapped_choice') or {}
+                if choice.get('kind') == 'new':
+                    revised['display_name'] = choice['definition']['name']
                 if change['status'] == 'confirmed' and choice.get('kind') == 'new':
                     created_metric = dict(choice['definition'], metric_id='custom:fixture')
                 if created_metric:

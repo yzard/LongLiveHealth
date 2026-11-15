@@ -1263,8 +1263,9 @@ async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
         .await
         .unwrap();
     let initial = &initial["observations"][0];
+    assert_eq!(initial["display_name"], "Zyphorin activity");
     payload.unmapped_choice = Some(UnmappedChoice::New(NewMetric {
-        name: "Zyphorin activity".into(),
+        name: "Zyphorin enzyme activity".into(),
         standard_unit: "ZR".into(),
     }));
     assert!(
@@ -1290,6 +1291,8 @@ async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
         .unwrap();
     let wrong = &saved["observations"][0];
     assert_eq!(wrong["status"], "pending");
+    assert_eq!(wrong["display_name"], "Zyphorin enzyme activity");
+    assert_eq!(wrong["payload"]["raw_name"], "Zyphorin activity (2093-3)");
     assert_eq!(wrong["payload"]["unmapped_choice"]["kind"], "new");
     assert!(wrong["resolved_metric_id"].is_null());
     assert_eq!(
@@ -1331,6 +1334,12 @@ async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
         .unwrap();
     let corrected = &corrected["observations"][0];
     assert!(corrected["browse_issues"].as_array().unwrap().is_empty());
+    let reopened = state.database.report(&user.user_id, &report).await.unwrap();
+    assert_eq!(
+        reopened["observations"][0]["display_name"],
+        "Zyphorin enzyme activity"
+    );
+    assert_eq!(reopened["observations"][0]["status"], "pending");
     assert!(
         state
             .database
@@ -1349,6 +1358,7 @@ async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
         .unwrap();
     let row = &confirmed["observations"][0];
     assert_eq!(row["status"], "confirmed");
+    assert_eq!(row["display_name"], "Zyphorin enzyme activity");
     assert_eq!(
         row["payload"]["metric_id"],
         confirmed["created_metrics"][0]["metric_id"]

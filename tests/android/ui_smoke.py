@@ -590,7 +590,7 @@ def report_metric_review():
             tap("Save")
             wait_for("1 result ready to confirm")
             tap("1 result ready to confirm")
-            wait_for("Zyphorin activity")
+            wait_for("Zyphorin panel activity")
             saved = control("reports/get")["observations"][0]
             assert saved["status"] == "pending"
             assert saved["payload"]["metric_id"] is None
