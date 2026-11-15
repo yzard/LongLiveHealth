@@ -602,10 +602,11 @@ struct ReportObservationRow: View {
                     }
                 }.buttonStyle(.plain)
                 Spacer(minLength: 0)
+                let hasSuggestion = ReportReview.suggestedMetricID(observation) != nil
                 if observation["status"] != .string("rejected"),
-                   observation["browse_issues"].arrayValue.contains(where: { $0["code"] == .string("unmapped_metric") }) {
-                    Button(action: chooseMetric) {
-                        Text("New")
+                   hasSuggestion || observation["browse_issues"].arrayValue.contains(where: { $0["code"] == .string("unmapped_metric") }) {
+                    Button(action: hasSuggestion ? edit : chooseMetric) {
+                        Text(hasSuggestion ? "Suggested match" : "New")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(Color.yellow)
                             .padding(.horizontal, 8)
@@ -613,7 +614,7 @@ struct ReportObservationRow: View {
                             .background(Color.yellow.opacity(0.12), in: Capsule())
                             .frame(minHeight: 44)
                     }
-                    .accessibilityIdentifier("report-result-new")
+                    .accessibilityIdentifier(hasSuggestion ? "report-result-suggested" : "report-result-new")
                     .disabled(isBusy)
                 }
             }.frame(minHeight: 44)

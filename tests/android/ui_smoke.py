@@ -392,8 +392,8 @@ def report_metric_review():
             "http://127.0.0.1:18765/api/v1/" + path,
         ], text=True))
 
-    issue = "New"
-    for scenario in ("test/report-metric-suggestions", "test/report-no-metric-suggestions"):
+    for scenario in ("test/report-metric-suggestions", "test/report-negative-suggestion",
+                     "test/report-no-metric-suggestions"):
         control("test/reset")
         control("test/seed-report")
         control(scenario)
@@ -406,30 +406,64 @@ def report_metric_review():
         tap("Blood Work")
         wait_for("Example Laboratory")
         tap("Example Laboratory")
-        if scenario == "test/report-metric-suggestions":
-            wait_for("99.1 mg/dL (5.5 mmol/L)")
-        else:
-            wait_for("5.5 mmol/L")
-        wait_for(issue)
-        tap(issue)
-        wait_for("Create new metric")
-        if scenario == "test/report-metric-suggestions":
-            wait_for("Blood glucose")
-            nodes = list(tree().iter("node"))
-            def top(label):
-                return int(re.findall(r"\d+", next(
-                    node.get("bounds") for node in nodes if node.get("text") == label
-                ))[1])
-            assert top("Create new metric") < top("Blood glucose")
-            wait_for("mg/dL · Unit can be converted")
-            tap("Blood glucose")
-            wait_for("Save")
+        if scenario != "test/report-no-metric-suggestions":
+            negative = scenario == "test/report-negative-suggestion"
+            wait_for("Negative mg/dL" if negative else "99.1 mg/dL (5.5 mmol/L)")
+            tap("Suggested match")
+            wait_for("Review result")
+            wait_for("Appearance - urine" if negative else "Glucose")
+            assert "Unmapped" not in labels()
+            assert "No matching Browse metric. Review this result." not in labels()
+            if not negative:
+                tap("Suggested match")
+                wait_for("Create new metric")
+                tap("Review with the full metric list")
+                wait_for("Glucose")
+            if negative:
+                warnings = labels()
+                assert any("Unit mismatch · mg/dL" in label for label in warnings)
+                assert any("Verify the assay threshold." in label for label in warnings)
+                tap("Appearance - urine")
+                wait_for("Glucose")
+                tap("Glucose")
+                assert "Suggested match" not in labels()
+                tap("Cancel")
+                assert control("reports/get")["observations"][0]["payload"]["metric_id"] is None
+                tap("Suggested match")
+                wait_for("Appearance - urine")
+                size = adb("shell", "wm", "size")
+                width, height = map(int, re.findall(r"(\d+)x(\d+)", size)[-1])
+                for _ in range(5):
+                    unit = next((node for node in tree().iter("node")
+                                 if node.get("class") == "android.widget.EditText"
+                                 and node.get("text") == "mg/dL"), None)
+                    if unit is not None:
+                        break
+                    adb("shell", "input", "swipe", str(width // 2), str(height * 3 // 4),
+                        str(width // 2), str(height // 3), "400")
+                assert unit is not None, "Original unit field missing"
+                tap_node(unit)
+                adb("shell", "input", "keyevent", "KEYCODE_MOVE_END")
+                adb("shell", "input", "keycombination", "KEYCODE_CTRL_LEFT", "KEYCODE_A")
+                adb("shell", "input", "text", "mg/L")
+                adb("shell", "input", "keyevent", "KEYCODE_BACK")
+                wait_for("mg/L")
             tap("Save")
             wait_for("1 result ready to confirm")
-            tap("1 result ready to confirm")
-            wait_for("5.5 mmol/L")
-            assert control("reports/get")["observations"][0]["payload"]["metric_id"] == "glucose"
+            saved = control("reports/get")["observations"][0]
+            assert saved["payload"]["metric_id"] == ("urine_appearance" if negative else "glucose")
+            assert saved["status"] == "pending"
+            if negative:
+                assert saved["payload"]["raw_result"] == "Negative"
+                assert saved["payload"]["raw_unit"] == "mg/L"
+            else:
+                tap("1 result ready to confirm")
+                wait_for("5.5 mmol/L")
         else:
+            issue = "New"
+            wait_for("5.5 mmol/L")
+            tap(issue)
+            wait_for("Create new metric")
             wait_for("No similar Browse metrics found.")
             wait_for("OCR suggestion: Zyphorin panel activity · mmol/L")
             tap("Create new metric")
@@ -451,7 +485,7 @@ def report_metric_review():
                 "name": "Zyphorin panel activity", "standard_unit": "mmol/L", "metric_id": "custom:fixture",
             }
             assert saved["payload"]["raw_result"] == "5.5"
-    print("PASS: converted result with original, candidate mapping, and cancel/create when no match exists")
+    print("PASS: suggested mapping, independent Negative and unit warnings, and cancel/create when no match exists")
 
 
 def report_mapping_layout():

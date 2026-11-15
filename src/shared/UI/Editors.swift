@@ -10,7 +10,7 @@ struct ObservationEditor: View {
     @State var loincCode: String
     @State var choosingMetric: Bool
     @State var creatingMetric = false
-    @State var usesResolvedMapping = true
+    @State var usesDefaultMapping = true
     @State var newMetricName: String
     @State var newMetricUnit: String
     @State var status: String
@@ -62,6 +62,9 @@ struct ObservationEditor: View {
             let originalCode = observation["lab_test_code"].stringValue
             let originalName = LaboratoryPresentation.printedName(payload["raw_name"].stringValue, code: originalCode)
             var reviewedPayload = payload
+            if let suggestedMetricID, usesDefaultMapping, !creatingMetric {
+                reviewedPayload["metric_id"] = .string(suggestedMetricID)
+            }
             if printedName != originalName || loincCode != originalCode {
                 let code = loincCode.trimmingCharacters(in: .whitespacesAndNewlines)
                 reviewedPayload["raw_name"] = .string(code.isEmpty ? printedName : "\(printedName) (\(code))")
@@ -89,8 +92,12 @@ struct ObservationEditor: View {
                 }
             } else {
                 SelectionPicker(title: "Metric mapping", selection: mapping, placeholder: "Unmapped",
-                    choices: metrics.map { MenuChoice(id: $0["metric_id"].stringValue, title: $0["name"].stringValue) }
-                        .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending })
+                    choices: mappingChoices)
+                if suggestedMetricID != nil {
+                    Button(usesDefaultMapping ? "Suggested match" : "Review suggested matches") {
+                        choosingMetric = true
+                    }.font(.caption)
+                }
             }
             mappingIssues
         }
@@ -132,7 +139,7 @@ struct ObservationEditor: View {
         Section {
             Button("Create new metric") {
                 payload["metric_id"] = .null
-                usesResolvedMapping = false
+                usesDefaultMapping = false
                 creatingMetric = true
                 choosingMetric = false
             }.accessibilityIdentifier("create-browse-metric")
@@ -150,7 +157,7 @@ struct ObservationEditor: View {
             }
             ForEach(Array(suggestions.enumerated()), id: \.offset) { _, suggestion in
                 Button {
-                    payload["metric_id"] = suggestion["metric_id"]
+                    mapping.wrappedValue = suggestion["metric_id"].stringValue
                     creatingMetric = false
                     choosingMetric = false
                 } label: {
@@ -179,19 +186,38 @@ struct ObservationEditor: View {
 
     @ViewBuilder private var mappingIssues: some View {
         let messages = observation["browse_issues"].arrayValue
-            .filter { $0["scope"] == .string("browse") }
+            .filter { issue in
+                let code = issue["code"].stringValue
+                if suggestedMetricID != nil && ["unmapped_metric", "metric_identity_uncertain"].contains(code) {
+                    return false
+                }
+                return issue["scope"] == .string("browse")
+                    || ["negative_with_unit", "unsupported_unit", "missing_unit"].contains(code)
+            }
             .map { $0["message"].stringValue }
         if !messages.isEmpty {
             Text(messages.joined(separator: "\n")).font(.caption).foregroundStyle(.secondary)
         }
     }
 
+    private var suggestedMetricID: String? { ReportReview.suggestedMetricID(observation) }
+
+    private var mappingChoices: [MenuChoice] {
+        var ids: Set<String> = []
+        return (metrics + observation["metric_suggestions"].arrayValue).compactMap { metric -> MenuChoice? in
+            let id = metric["metric_id"].stringValue
+            guard !id.isEmpty, ids.insert(id).inserted else { return nil }
+            return MenuChoice(id: id, title: metric["name"].stringValue)
+        }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
     private var mapping: Binding<String> {
         Binding(get: {
             let selected = payload["metric_id"].stringValue
-            return selected.isEmpty && usesResolvedMapping ? observation["resolved_metric_id"].stringValue : selected
+            if !selected.isEmpty || !usesDefaultMapping { return selected }
+            return suggestedMetricID ?? observation["resolved_metric_id"].stringValue
         }, set: {
-            usesResolvedMapping = false
+            usesDefaultMapping = false
             payload["metric_id"] = .optional($0)
         })
     }

@@ -121,7 +121,7 @@ class Handler(BaseHTTPRequestHandler):
                                   raw_unit=None, source={'page': 1, 'quote': 'Appearance (5767-9) Clear'})
         if route == 'test/report-issue':
             observations[0]['browse_issues'] = [{'code': 'unsupported_unit', 'scope': 'browse', 'message': 'Cannot appear in Browse: unit invalid-unit is not supported for this test.'}]
-        if route in ('test/report-metric-suggestions', 'test/report-no-metric-suggestions'):
+        if route in ('test/report-metric-suggestions', 'test/report-no-metric-suggestions', 'test/report-negative-suggestion'):
             row = observations[0]
             row['status'] = 'pending'
             row['payload']['metric_id'] = None
@@ -133,6 +133,20 @@ class Handler(BaseHTTPRequestHandler):
                 'metric_id': 'glucose', 'name': 'Blood glucose', 'standard_unit': 'mg/dL',
                 'unit_match': 'convertible',
             }]
+            if route == 'test/report-negative-suggestion':
+                row['payload'].update(raw_name='Appearance', raw_result='Negative', raw_unit='mg/dL')
+                row['interpretation'] = {}
+                row['metric_suggestions'] = [{
+                    'metric_id': 'urine_appearance', 'name': 'Appearance - urine',
+                    'standard_unit': '1', 'unit_match': 'incompatible',
+                }, {
+                    'metric_id': 'glucose', 'name': 'Blood glucose',
+                    'standard_unit': 'mg/dL', 'unit_match': 'exact',
+                }]
+                row['browse_issues'] += [
+                    {'code': 'unsupported_unit', 'scope': 'browse', 'message': 'Unit mismatch · mg/dL'},
+                    {'code': 'negative_with_unit', 'scope': 'review', 'message': 'Verify the assay threshold.'},
+                ]
             if route == 'test/report-no-metric-suggestions':
                 row['payload']['raw_name'] = 'Zyphorin activity'
                 row['payload']['ocr_new_metric'] = {'name': 'Zyphorin panel activity', 'standard_unit': 'mmol/L'}
