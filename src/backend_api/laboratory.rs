@@ -669,6 +669,16 @@ pub(crate) fn custom_unit(raw: &str) -> &str {
     canonical_unit(raw).unwrap_or_else(|| raw.trim())
 }
 
+pub(crate) fn history_comparison_unit<'a>(metric: &str, raw: &'a str) -> &'a str {
+    let unit = custom_unit(raw);
+    if let Some(definition) = metric_definition(metric)
+        && conversion(metric, definition.standard_unit, unit).is_some()
+    {
+        return definition.standard_unit;
+    }
+    unit
+}
+
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum UnitMatch {

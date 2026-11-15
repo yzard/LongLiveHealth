@@ -20,6 +20,67 @@ async fn read(state: &longlivehealth::app::AppState, user: &str) -> Value {
 }
 
 #[tokio::test]
+async fn conflicting_history_units_disable_the_chart_and_list_all_reported_units() {
+    let (_directory, state) = fixture().await;
+    let alice = add_user(&state, "alice").await;
+    let mut histories = Vec::new();
+    for (index, (result, unit)) in [
+        ("See laboratory note", Some("mg/dL")),
+        ("Negative", None),
+        ("120", Some("mg/dL")),
+        ("3", Some("mmol/L")),
+        ("10", Some("U/L")),
+        ("12", Some("ng/dL")),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut payload = observation_payload();
+        payload.raw_result = result.into();
+        payload.raw_unit = unit.map(str::to_owned);
+        payload.sampled_at = Some(format!("2026-08-{:02}", index + 1));
+        state
+            .database
+            .review(
+                &alice.user_id,
+                ReviewRequest {
+                    report_id: archive(&state, "alice").await,
+                    expected_revision: 1,
+                    new_metric: None,
+                    context: None,
+                    observations: vec![ReviewItem {
+                        observation_id: None,
+                        expected_revision: None,
+                        status: "confirmed".into(),
+                        payload,
+                    }],
+                },
+            )
+            .await
+            .unwrap();
+        histories.push(read(&state, &alice.user_id).await);
+    }
+    assert_eq!(histories[0]["points"], json!([]));
+    assert_eq!(histories[1]["chart_unit_conflict"], json!([]));
+    assert_eq!(histories[3]["chart_unit_conflict"], json!([]));
+    assert_eq!(histories[3]["points"].as_array().unwrap().len(), 2);
+    assert!(
+        !histories[3]["chart_ranges"]["D"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let mixed = &histories[5];
+    assert_eq!(
+        mixed["chart_unit_conflict"],
+        json!(["U/L", "mg/dL", "mmol/L", "ng/dL"])
+    );
+    assert_eq!(mixed["chart_ranges"], json!({}));
+    assert_eq!(mixed["points"].as_array().unwrap().len(), 2);
+    assert_eq!(mixed["records"].as_array().unwrap().len(), 6);
+}
+
+#[tokio::test]
 async fn metric_history_preserves_three_sources_normalizes_and_isolates_users() {
     let (_directory, state) = fixture().await;
     let alice = add_user(&state, "alice").await;
@@ -503,6 +564,8 @@ async fn browse_discovers_clinical_items_groups_codes_and_retains_text_and_bound
     .unwrap();
     assert_eq!(result["records"].as_array().unwrap().len(), 5);
     assert_eq!(result["points"].as_array().unwrap().len(), 3);
+    assert_eq!(result["chart_unit_conflict"], json!(["mg/dL", "mmol/L"]));
+    assert_eq!(result["chart_ranges"], json!({}));
     assert!(
         result["records"]
             .as_array()

@@ -388,6 +388,13 @@ class Handler(BaseHTTPRequestHandler):
             'reports/extraction/get': {'content': 'Synthetic OCR output', 'response_body': '{"synthetic": true}'},
             'test/state': {'upload_ids': upload_ids, 'context': context},
         }.get(route, {})
+        if route == 'metrics/history/get' and body.get('metric_id') == 'ldl_cholesterol' and not report_status_chart:
+            response.update(
+                excluded_count=1,
+                excluded=[{'reason': 'not_numeric'}],
+                records=[{'point_id': 'ldl-note', 'display_value': 'See LDL note', 'unit': 'mg/dL',
+                          'sampled_at': '2026-10-04', 'source_name': 'Local Clinic'}],
+            )
         if route == 'metrics/history/get' and report_status_chart and body.get('metric_id') == 'ldl_cholesterol':
             response = {'points': [
                 {
@@ -400,7 +407,8 @@ class Handler(BaseHTTPRequestHandler):
         if route == 'metrics/history/get' and body.get('metric_id') == 'clinical:calcium':
             response = {
                 'points': [],
-                'excluded_count': 0,
+                'excluded_count': 1,
+                'excluded': [{'reason': 'not_numeric'}],
                 'records': [
                     {
                         'point_id': 'calcium-text',
@@ -412,6 +420,12 @@ class Handler(BaseHTTPRequestHandler):
                     }
                 ],
             }
+        if route == 'metrics/history/get' and body.get('metric_id') == 'hdl_cholesterol':
+            response.update(
+                chart_unit_conflict=['U/L', 'mg/dL', 'ng/dL'],
+                records=[{'point_id': 'hdl-raw-unit', 'display_value': '50', 'unit': 'U/L',
+                          'sampled_at': '2026-10-04', 'source_name': 'Local Clinic'}],
+            )
         if route == 'session/refresh':
             time.sleep(0.2)
             if refresh_failure:
@@ -499,7 +513,7 @@ class Handler(BaseHTTPRequestHandler):
                 if body['record_id'].endswith('DateOfBirth'):
                     details = {'date_of_birth': {'NS.year':1980, 'NS.month':2, 'NS.day':3}}
                 response = {'record_type':body['record_id'], 'start_at':int(time.time())-60, 'details':details, 'notes':[]}
-        if route == 'metrics/history/get':
+        if route == 'metrics/history/get' and not response.get('chart_unit_conflict'):
             response['chart_ranges'] = chart_ranges([(p.get('source_key', p.get('source_id', '')), p['unit'], p['timestamp'], float(p['value'])) for p in response.get('points', [])])
         if route in ('wellness/chart', 'wellness/measurements'):
             kind = body['record_type']
@@ -594,7 +608,7 @@ class Handler(BaseHTTPRequestHandler):
                 category = next((r['category'] for r in taxonomy['rules'] if any(t in text for t in r['terms'])), 'other')
                 presentation = 'sleep' if kind == 'sleep' else 'daily' if kind in ('steps','active_energy','basal_energy','resting_heart_rate','hrv_sdnn','workout') else 'measurement' if d['family'] in ('quantity','correlation') else 'records'
                 entries.append(dict(id='health:'+kind,kind=kind,title=title,category_id=category,presentation=presentation,definition=d))
-            for kind,title in [('ldl_cholesterol','LDL'),('clinical:calcium','Calcium')]:
+            for kind,title in [('ldl_cholesterol','LDL'),('hdl_cholesterol','HDL'),('clinical:calcium','Calcium')]:
                 entries.append(dict(id='lab:'+kind,kind=kind,title=title,category_id='bloodWork',presentation='lab',definition=dict(metric_id=kind,name=title)))
             entries.sort(key=lambda e: e['title'].lower())
             response = dict(categories=[c for c in taxonomy['categories'] if any(e['category_id']==c['id'] for e in entries)],entries=entries)

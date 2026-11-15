@@ -10,7 +10,7 @@ struct MetricHistoryView: View {
     @State var historyRevision: Int?
     @State var loading = false
     @State var failure: String?
-    @State var renaming = false
+    @State var editing = false
 
     private var metricName: String {
         model.renamedLabMetrics[metric["metric_id"].stringValue]
@@ -21,34 +21,28 @@ struct MetricHistoryView: View {
     private var currentHistory: JSONValue { historyRevision == model.reportDataRevision ? history : .null }
     private var points: [JSONValue] { currentHistory["points"].arrayValue }
     private var records: [JSONValue] { currentHistory["records"].arrayValue }
+    private var incompatibleUnits: [String] { currentHistory["chart_unit_conflict"].arrayValue.map(\.stringValue) }
+    private var showsChart: Bool { !points.isEmpty && incompatibleUnits.isEmpty }
     private var chartUnits: [String] { Array(Set(points.map { $0["unit"].stringValue })).sorted() }
     private var sourceKeys: [String] { Array(Set(points.map(SourceNames.key))).sorted() }
     private var sourceNames: [String: String] { Dictionary(points.map { (SourceNames.key($0), $0["source_name"].stringValue) }, uniquingKeysWith: { first, _ in first }) }
 
     var body: some View {
         MetricDetailScreen(title: metricName) {
-            MetricChartSection {
-                if loading { ProgressView("Loading measurements") }
-                if let failure { Text(failure).foregroundStyle(.secondary) }
-                if !loading && points.isEmpty && records.isEmpty && failure == nil {
-                    Text("No comparable measurements yet. Confirm imported results with a metric, unit and collection date.").foregroundStyle(.secondary)
-                }
-                if !loading && points.isEmpty && !records.isEmpty { Text("Open Historical Values to see the results. A chart requires an exact numeric result, unit and collection date.").font(.caption).foregroundStyle(.secondary) }
-                if !points.isEmpty {
+            if loading {
+                ProgressView("Loading measurements")
+            } else if let failure {
+                Text(failure).foregroundStyle(.secondary)
+            } else if currentHistory != .null && points.isEmpty && records.isEmpty {
+                Text("No historical values yet.").foregroundStyle(.secondary)
+            }
+            if showsChart {
+                MetricChartSection {
                     ForEach(chartUnits, id: \.self) { unit in
-                    MetricChart(model: model, guidance: currentHistory["reference_guidance"], ranges: currentHistory["chart_ranges"], unit: unit, metricKind: metric["metric_id"].stringValue,
-                                divisor: 1, sourceKeys: sourceKeys, names: sourceNames,
-                                initialPeriod: .week, showsHour: false, heartRate: false, navigationTimestamps: nil, onWindowChange: nil)
-                        .environment(\.timeZone, .gmt)
-
-                    }
-                }
-                if let count = currentHistory["excluded_count"].numberValue, count > 0 {
-                    DisclosureGroup("\(Int(count)) records could not be plotted") {
-                        ForEach(Array(currentHistory["excluded"].arrayValue.enumerated()), id: \.offset) { _, record in
-                            Text(record["reason"].stringValue.replacingOccurrences(of: "_", with: " ")).font(.caption)
-                        }
-                        Text("Original data remains in your archive.").font(.caption)
+                        MetricChart(model: model, guidance: currentHistory["reference_guidance"], ranges: currentHistory["chart_ranges"], unit: unit, metricKind: metric["metric_id"].stringValue,
+                                    divisor: 1, sourceKeys: sourceKeys, names: sourceNames,
+                                    initialPeriod: .week, showsHour: false, heartRate: false, navigationTimestamps: nil, onWindowChange: nil)
+                            .environment(\.timeZone, .gmt)
                     }
                 }
             }
@@ -62,20 +56,28 @@ struct MetricHistoryView: View {
                     }
                 }
             }
-            Section {
-                NavigationLink("Historical Values") {
-                    MetricHistoricalValuesView(model: model, records: records, points: points)
+            if showsChart {
+                Section {
+                    NavigationLink("Historical Values") {
+                        List {
+                            MetricHistoricalValuesSection(model: model, records: records, points: points)
+                        }
+                        .mobileNavigationTitle("Historical Values")
+                        .navigationBarTitleDisplayMode(.inline)
+                    }
                 }
+            } else if !records.isEmpty || !points.isEmpty {
+                MetricHistoricalValuesSection(model: model, records: records, points: points, incompatibleUnits: incompatibleUnits)
             }
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("Rename") { renaming = true }
+                Button("Edit") { editing = true }
             }
         }
-        .sheet(isPresented: $renaming) {
+        .sheet(isPresented: $editing) {
             NavigationStack {
-                RenameLabMetricView(model: model, metricID: metric["metric_id"].stringValue, initialName: metricName)
+                EditLabMetricView(model: model, metricID: metric["metric_id"].stringValue, initialName: metricName)
             }
         }
         .initialTask(id: model.reportDataRevision) { await reload() }
@@ -99,10 +101,9 @@ struct MetricHistoryView: View {
             failure = error.localizedDescription
         }
     }
-
 }
 
-struct RenameLabMetricView: View {
+struct EditLabMetricView: View {
     var model: AppModel
     let metricID: String
     let initialName: String
@@ -119,7 +120,7 @@ struct RenameLabMetricView: View {
             TextField("Metric name", text: $name)
             if let failure { Text(failure).foregroundStyle(.red) }
         }
-        .mobileNavigationTitle("Rename metric")
+        .mobileNavigationTitle("Edit metric")
         .onAppear { name = initialName }
         .interactiveDismissDisabled(name != initialName || saving)
         .toolbar {
@@ -153,49 +154,49 @@ struct RenameLabMetricView: View {
     }
 }
 
-struct MetricHistoricalValuesView: View {
+struct MetricHistoricalValuesSection: View {
     var model: AppModel
     let records: [JSONValue]
     let points: [JSONValue]
+    var incompatibleUnits: [String] = []
     @State var preview: DocumentLocation?
     @State var failure: String?
 
     var body: some View {
-        List {
+        Section("Historical values") {
+            if !incompatibleUnits.isEmpty {
+                Text("A chart is unavailable because these units cannot be converted to a common unit: \(incompatibleUnits.joined(separator: ", ")).")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if let failure { Text(failure).foregroundStyle(.secondary) }
-            if records.isEmpty && points.isEmpty { Text("No historical values yet.").foregroundStyle(.secondary) }
-            Section("Historical values") {
-                let ids = Set(records.map(\.historyPointID).filter { !$0.isEmpty })
-                let all = records + points.filter { $0.historyPointID.isEmpty || !ids.contains($0.historyPointID) }
-                ForEach(Array(HistoricalValue.newestFirst(all, timestamps: ["timestamp"], dates: ["sampled_at"]).enumerated()), id: \.offset) { _, record in
-                    DisclosureGroup {
-                        Text(model.sourceLabel(record: record)).font(.subheadline)
-                        if !record["original_records"].arrayValue.isEmpty {
-                            DisclosureGroup("Original results (\(record["original_records"].arrayValue.count))") {
-                                ForEach(Array(record["original_records"].arrayValue.enumerated()), id: \.offset) { _, item in
-                                    let quantity = item["observation"]["valueQuantity"]
-                                    let unit = quantity["unit"].stringValue.isEmpty ? quantity["code"].stringValue : quantity["unit"].stringValue
-                                    Text("\(quantity["comparator"].stringValue)\(quantity["value"].numberValue?.formatted() ?? record["display_value"].stringValue) \(HistoricalValue.displayUnit(unit, kind: ""))").font(.caption)
-                                }
+            let ids = Set(records.map(\.historyPointID).filter { !$0.isEmpty })
+            let all = records + points.filter { $0.historyPointID.isEmpty || !ids.contains($0.historyPointID) }
+            ForEach(Array(HistoricalValue.newestFirst(all, timestamps: ["timestamp"], dates: ["sampled_at"]).enumerated()), id: \.offset) { _, record in
+                DisclosureGroup {
+                    Text(model.sourceLabel(record: record)).font(.subheadline)
+                    if !record["original_records"].arrayValue.isEmpty {
+                        DisclosureGroup("Original results (\(record["original_records"].arrayValue.count))") {
+                            ForEach(Array(record["original_records"].arrayValue.enumerated()), id: \.offset) { _, item in
+                                let quantity = item["observation"]["valueQuantity"]
+                                let unit = quantity["unit"].stringValue.isEmpty ? quantity["code"].stringValue : quantity["unit"].stringValue
+                                Text("\(quantity["comparator"].stringValue)\(quantity["value"].numberValue?.formatted() ?? record["display_value"].stringValue) \(HistoricalValue.displayUnit(unit, kind: ""))").font(.caption)
                             }
                         }
-                        if !record["report_id"].stringValue.isEmpty {
-                            Button("View original report") { Task { await showSource(record) } }
-                            NavigationLink("Review report", destination: ReportView(model: model, reportID: record["report_id"].stringValue))
-                        }
-                        if !record["status"].stringValue.isEmpty { Text(record["status"].stringValue.capitalized).font(.caption) }
-                    } label: {
-                        let value = record["display_value"] == .null ? record["value"] : record["display_value"]
-                        let unit = record["unit"].stringValue
-                        let numeric = value.numberValue != nil
-                        HistoricalValueRow(timestamp: nil, dateText: record["sampled_at"].stringValue,
-                            source: model.sourceLabel(record: record), value: HistoricalValue.quantity(value, unit: unit.isEmpty && numeric ? "Unit Not Specified" : unit))
                     }
+                    if !record["report_id"].stringValue.isEmpty {
+                        Button("View original report") { Task { await showSource(record) } }
+                        NavigationLink("Review report", destination: ReportView(model: model, reportID: record["report_id"].stringValue))
+                    }
+                    if !record["status"].stringValue.isEmpty { Text(record["status"].stringValue.capitalized).font(.caption) }
+                } label: {
+                    let value = record["display_value"] == .null ? record["value"] : record["display_value"]
+                    let unit = record["unit"].stringValue
+                    let numeric = value.numberValue != nil
+                    HistoricalValueRow(timestamp: nil, dateText: record["sampled_at"].stringValue,
+                        source: model.sourceLabel(record: record), value: HistoricalValue.quantity(value, unit: unit.isEmpty && numeric ? "Unit Not Specified" : unit))
                 }
             }
         }
-        .mobileNavigationTitle("Historical Values")
-        .navigationBarTitleDisplayMode(.inline)
         .originalReportPreview($preview)
     }
 

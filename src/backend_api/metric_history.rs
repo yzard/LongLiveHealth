@@ -9,7 +9,7 @@ use futures_util::TryStreamExt;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::Row;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -126,8 +126,10 @@ pub async fn history(
         || crate::lab_metric_metadata::is_clinical_id(&request.metric_id)
     {
         points.sort_by_key(|point| point["timestamp"].as_i64());
+        let (chart_ranges, chart_unit_conflict) =
+            history_chart(&request.metric_id, &report_records, &points);
         return Ok(
-            json!({"chart_ranges":point_ranges(&points),"metric":definition,"records":report_records,"points":points,
+            json!({"chart_ranges":chart_ranges,"chart_unit_conflict":chart_unit_conflict,"metric":definition,"records":report_records,"points":points,
             "excluded":report_history["excluded"],"excluded_count":report_history["incomparable_count"],
             "algorithm_version":"metric-history-v2","conversion_version":crate::laboratory::CONVERSION_VERSION}),
         );
@@ -152,16 +154,59 @@ pub async fn history(
         let mut records = groups.get(&request.metric_id).map(|g| g.records.clone()).unwrap_or_default();
         records.extend(report_records);
         let mut unassigned = Vec::new();
-        for record in health { append_health(&record, &request.metric_id, &mut points, &mut excluded, &mut unassigned); }
+        for record in health { append_health(&record, &request.metric_id, &mut records, &mut points, &mut excluded, &mut unassigned); }
         // Clinical charts and historical rows share normalization and duplicate grouping.
         points.retain(|point| point["original"]["clinical_observation"].is_null());
         if let Some(group) = groups.get(&request.metric_id) { points.extend(group.points.clone()); }
         points.sort_by(|a,b| a["timestamp"].as_i64().cmp(&b["timestamp"].as_i64()).then_with(|| a["point_id"].as_str().cmp(&b["point_id"].as_str())));
-        let chart_ranges = point_ranges(&points);
-        Ok(json!({"chart_ranges":chart_ranges,"metric":definition,"records":records,"points":points,"excluded":excluded,"excluded_count":excluded.len(),
+        let (chart_ranges, chart_unit_conflict) = history_chart(&request.metric_id, &records, &points);
+        Ok(json!({"chart_ranges":chart_ranges,"chart_unit_conflict":chart_unit_conflict,"metric":definition,"records":records,"points":points,"excluded":excluded,"excluded_count":excluded.len(),
             "unassigned_clinical_records":unassigned,"unassigned_clinical_count":unassigned.len(),
             "algorithm_version":"metric-history-v2","conversion_version":crate::laboratory::CONVERSION_VERSION}))
     }).await
+}
+
+fn history_chart<'a>(
+    metric: &str,
+    records: &'a [Value],
+    points: &[Value],
+) -> (Value, Vec<&'a str>) {
+    let mut reported = BTreeSet::new();
+    let mut comparable = BTreeSet::new();
+    for record in records {
+        let originals = record["original_records"].as_array();
+        if let Some(originals) = originals.filter(|items| !items.is_empty()) {
+            for original in originals {
+                let quantity = &original["observation"]["valueQuantity"];
+                let code = reported_unit(&quantity["code"]);
+                if let Some(label) = reported_unit(&quantity["unit"]).or(code) {
+                    reported.insert(label);
+                    comparable.insert(crate::laboratory::history_comparison_unit(
+                        metric,
+                        code.unwrap_or(label),
+                    ));
+                }
+            }
+        } else if let Some(unit) = reported_unit(&record["unit"]) {
+            reported.insert(unit);
+            comparable.insert(crate::laboratory::history_comparison_unit(metric, unit));
+        }
+    }
+    let plotted: BTreeSet<_> = points
+        .iter()
+        .filter_map(|point| reported_unit(&point["unit"]))
+        .collect();
+    if reported.len() > 1 && (comparable.len() > 1 || plotted.len() > 1) {
+        return (json!({}), reported.into_iter().collect());
+    }
+    (point_ranges(points), Vec::new())
+}
+
+fn reported_unit(value: &Value) -> Option<&str> {
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|unit| !unit.is_empty() && *unit != "Not reported")
 }
 
 fn point_ranges(points: &[Value]) -> Value {
@@ -186,6 +231,7 @@ fn point_ranges(points: &[Value]) -> Value {
 fn append_health(
     record: &Value,
     metric: &str,
+    records: &mut Vec<Value>,
     points: &mut Vec<Value>,
     excluded: &mut Vec<Value>,
     unassigned: &mut Vec<Value>,
@@ -201,6 +247,8 @@ fn append_health(
             .as_i64()
             .and_then(|time| chrono::DateTime::from_timestamp(time, 0))
             .map(|time| time.to_rfc3339());
+        records.push(json!({"point_id":id,"source_key":format!("apple_health:{}", record["source_id"].as_str().unwrap_or("")),"source_id":record["source_id"],"source_name":"Apple Health",
+            "sampled_at":date,"timestamp":record["start_at"],"display_value":payload["value"],"unit":payload["unit"],"original":record}));
         append_value(
             metric,
             &id,
