@@ -15,6 +15,18 @@ pub(crate) const CODE_QUALIFIED_ALIASES: &[(&str, &str)] = &[
     ("urine_clarity", "clarity"),
 ];
 
+pub(crate) const COUNT_HIERARCHIES: &[(&str, &[&str])] = &[(
+    "wbc",
+    &[
+        "neutrophil_count",
+        "lymphocyte_count",
+        "monocyte_count",
+        "eosinophil_count",
+        "basophil_count",
+        "immature_granulocyte_count",
+    ],
+)];
+
 // The source name and the printed unit are part of these published panel labels.
 pub(crate) const SOURCE_QUALIFIED_ALIASES: &[(&str, &str, &str, &str, &str)] = &[(
     "Function Health",

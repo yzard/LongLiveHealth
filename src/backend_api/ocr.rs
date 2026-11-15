@@ -367,6 +367,7 @@ pub fn wrap_completion(
                     observation.ocr_normalization = Some(proposal);
                 }
             }
+            crate::laboratory::flag_inconsistent_subcounts(&mut rows.observations);
             envelope["report_title"] = json!(rows.report_title);
             envelope["source_name"] = json!(rows.source_name);
             envelope["observations"] = serde_json::to_value(rows.observations)?;

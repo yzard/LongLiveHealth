@@ -184,6 +184,50 @@ pub(crate) fn incompatible_unitless_candidate(
             })
 }
 
+pub(crate) fn flag_inconsistent_subcounts(rows: &mut [ObservationPayload]) {
+    use std::collections::BTreeMap;
+
+    let counts: Vec<_> = rows
+        .iter()
+        .map(|row| {
+            let id = infer_metric(&row.raw_name, row.raw_unit.as_deref())?;
+            let date = crate::reports::parse_time(row.sampled_at.as_deref()?).ok()?;
+            let quantity = interpret_metric(row, Some(id), None).result;
+            let value = Decimal::from_str(quantity.value.as_deref()?).ok()?;
+            let section = row
+                .ocr_section_heading
+                .as_deref()
+                .map(crate::laboratory_names::key);
+            Some((id, (row.source.page, date, section, quantity.unit?), value))
+        })
+        .collect();
+    for &(parent, children) in crate::laboratory_names::COUNT_HIERARCHIES {
+        let mut totals = BTreeMap::new();
+        for (id, sample, value) in counts.iter().flatten() {
+            if *id == parent {
+                totals
+                    .entry(sample)
+                    .and_modify(|previous| *previous = None)
+                    .or_insert(Some(*value));
+            }
+        }
+        for (row, count) in rows.iter_mut().zip(&counts) {
+            if let Some((id, sample, value)) = count
+                && children.contains(id)
+                && totals
+                    .get(sample)
+                    .and_then(|total| *total)
+                    .is_some_and(|total| *value > total)
+            {
+                row.ocr_normalization = None;
+                row.ocr_mapping_note = Some(
+                    "The printed subcount exceeds its total. Verify the unit and scale.".into(),
+                );
+            }
+        }
+    }
+}
+
 pub(crate) fn verified_custom_candidate<'a>(
     payload: &ObservationPayload,
     custom: &'a [CustomMetric],

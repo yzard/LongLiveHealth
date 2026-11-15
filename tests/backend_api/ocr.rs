@@ -350,6 +350,73 @@ fn model_candidates_cannot_override_a_conflicting_printed_measurement_scale() {
 }
 
 #[test]
+fn subcounts_are_checked_against_their_own_sample_and_panel() {
+    let rows: Vec<_> = [
+        ("WBC", "4.5", "10^9/L", "CBC", "2018-10-20"),
+        (
+            "Absolute neutrophil count",
+            "3660",
+            "10E3/uL",
+            "CBC",
+            "2018-10-20",
+        ),
+        (
+            "Absolute lymphocyte count",
+            "900",
+            "cells/uL",
+            "CBC",
+            "2018-10-20",
+        ),
+        (
+            "Absolute monocyte count",
+            "900",
+            "10E3/uL",
+            "CBC",
+            "2018-10-21",
+        ),
+        (
+            "Absolute eosinophil count",
+            "900",
+            "10E3/uL",
+            "Other panel",
+            "2018-10-20",
+        ),
+    ]
+    .into_iter()
+    .map(|(name, value, unit, heading, date)| {
+        let mut row = crate::observation_payload();
+        row.metric_id = None;
+        row.raw_name = name.into();
+        row.raw_result = value.into();
+        row.raw_unit = Some(unit.into());
+        row.sampled_at = Some(date.into());
+        row.ocr_section_heading = Some(heading.into());
+        row
+    })
+    .collect();
+    let response = ocr::wrap_completion(
+        Completion {
+            response_body: json!({"choices":[{"message":{"content":json!(rows).to_string()},"finish_reason":"stop"}]}).to_string(),
+            status_code: 200,
+        },
+        "fixture",
+        1,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(response.status_code, 200);
+    let data: Value = serde_json::from_str(&response.response_body).unwrap();
+    let actual = data["observations"].as_array().unwrap();
+    for (index, (row, original)) in actual.iter().zip(rows).enumerate() {
+        assert_eq!(row["raw_result"], original.raw_result);
+        assert_eq!(row["raw_unit"].as_str(), original.raw_unit.as_deref());
+        assert_eq!(row["ocr_mapping_note"].is_string(), index == 1);
+    }
+    assert_eq!(actual[1]["ocr_metric_candidate"], "neutrophil_count");
+    assert!(actual[1]["ocr_normalization"].is_null());
+}
+
+#[test]
 fn coded_cbc_percentages_keep_the_printed_label_and_resolve_to_the_percentage() {
     use longlivehealth::laboratory::{infer_metric, test_code_conflicts};
 
