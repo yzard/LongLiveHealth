@@ -67,7 +67,7 @@ import Testing
         #expect(other.sourceLabel("apple_health:watch") == "apple_health:watch")
         try other.clearLocalSession()
         let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
-        _ = try await control.post("test/reset", body: .object([:]))
+        _ = try await control.post("test/reset", body: .object([:]), readOnly: false)
     }
 
     @Test func automaticConnectivityFailureRetriesWithoutAlertOrDiscardingLogin() async throws {
@@ -110,11 +110,11 @@ import Testing
         await model.login(server: "http://localhost:18765", username: "simulator", password: "synthetic-test-password")
         let client = try #require(model.client)
         try model.archive?.save(false, name: "health-enabled.json")
-        _ = try await client.post("test/reset-counts", body: .object([:]))
+        _ = try await client.post("test/reset-counts", body: .object([:]), readOnly: false)
         async let first: Void = model.resumeForeground()
         async let second: Void = model.resumeForeground()
         _ = await (first, second)
-        let counts = try await client.post("test/counts", body: .object([:]))
+        let counts = try await client.post("test/counts", body: .object([:]), readOnly: true)
         #expect(counts["user/get"].numberValue == 1)
         #expect(counts["reports/list"].numberValue == 1)
         #expect(model.errorMessage == nil)
@@ -124,7 +124,7 @@ import Testing
     @Test func renewalCoalescesRequestsAndPersistsAcrossRelaunch() async throws {
         try SessionVault.clear()
         let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
-        _ = try await control.post("test/reset", body: .object([:]))
+        _ = try await control.post("test/reset", body: .object([:]), readOnly: false)
         var saved = StoredSession(server: control.server, userID: "simulator-only", username: "simulator", token: "expired-access")
         saved.refreshToken = String(repeating: "a", count: 64); saved.refreshAfter = 0
         try SessionVault.save(saved)
@@ -137,7 +137,7 @@ import Testing
         #expect(restored.token == tokens.0 && restored.pendingRefreshToken == nil)
         let relaunched = SessionController(restored)
         #expect(try await relaunched.credential(force: false) == tokens.0)
-        let counts = try await control.post("test/counts", body: .object([:]))
+        let counts = try await control.post("test/counts", body: .object([:]), readOnly: true)
         #expect(counts["session/refresh"].numberValue == 1)
         owner.retire(); relaunched.retire(); try SessionVault.clear()
     }
@@ -145,8 +145,8 @@ import Testing
     @Test func renewalFailureRetainsPendingSuccessorAndRetirementCannotRestoreLogin() async throws {
         try SessionVault.clear()
         let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
-        _ = try await control.post("test/reset", body: .object([:]))
-        _ = try await control.post("test/fail-refresh", body: .object([:]))
+        _ = try await control.post("test/reset", body: .object([:]), readOnly: false)
+        _ = try await control.post("test/fail-refresh", body: .object([:]), readOnly: false)
         var saved = StoredSession(server: control.server, userID: "simulator-only", username: "simulator", token: "expired-access")
         saved.refreshToken = String(repeating: "b", count: 64); saved.refreshAfter = 0
         try SessionVault.save(saved)
@@ -201,8 +201,8 @@ import Testing
 
     @Test func backgroundUploadSurvivesCallerCancellationAndCoalescesRetries() async throws {
         let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
-        _ = try await control.post("test/reset", body: .object([:]))
-        _ = try await control.post("test/slow-upload", body: .object([:]))
+        _ = try await control.post("test/reset", body: .object([:]), readOnly: false)
+        _ = try await control.post("test/slow-upload", body: .object([:]), readOnly: false)
         let client = APIClient(server: URL(string: "http://localhost:18765")!, token: "synthetic-background", uploadTransport: BackgroundTransfer.transport)
         let draft = UploadDraft(id: UUID(), filename: "background.pdf", contentType: "application/pdf", createdAt: Date(), sourceName: "Synthetic Lab", originalFilename: nil, originalContentType: nil)
         let bytes = Data("%PDF-1.4\nsynthetic background transfer".utf8)
@@ -214,13 +214,13 @@ import Testing
         let secondResult = try await second.value
         #expect(firstResult == secondResult)
         #expect(firstResult["file"]["file_id"].stringValue == "fixture-report")
-        let counts = try await control.post("test/counts", body: .object([:]))
+        let counts = try await control.post("test/counts", body: .object([:]), readOnly: true)
         #expect(counts["files/upload"].numberValue == 1)
     }
     @Test func sharedReportWaitsForAccountAndRetriesWithStableUploadIdentity() async throws {
         try SessionVault.clear()
         let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
-        _ = try await control.post("test/reset", body: .object([:]))
+        _ = try await control.post("test/reset", body: .object([:]), readOnly: false)
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("shared-\(UUID()).pdf")
         try Data("%PDF-1.4\nsynthetic report".utf8).write(to: file)
         defer { try? FileManager.default.removeItem(at: file) }
@@ -236,7 +236,7 @@ import Testing
         let restored = AppModel()
         #expect(restored.sharedReports.contains { $0.id == shared.id })
         await restored.login(server: "http://localhost:18765", username: "simulator", password: "synthetic-test-password")
-        _ = try await control.post("test/fail-upload", body: .object([:]))
+        _ = try await control.post("test/fail-upload", body: .object([:]), readOnly: false)
         await restored.importSharedReports()
         #expect(restored.sharedReports.isEmpty)
         #expect(restored.drafts.map(\.id) == [shared.id])
@@ -244,7 +244,7 @@ import Testing
         #expect(restored.selectedTab == "Data" && restored.dataPath == [.reports])
         await restored.sendDrafts(automatic: false)
         #expect(restored.drafts.isEmpty)
-        let state = try await control.post("test/state", body: .object([:]))
+        let state = try await control.post("test/state", body: .object([:]), readOnly: true)
         #expect(state["upload_ids"].arrayValue == Array(repeating: .string(shared.id.uuidString), count: 2))
         #expect(state["context"]["source_name"] == .null)
         await restored.logout()
@@ -253,7 +253,7 @@ import Testing
     @Test func unconnectedHealthDoesNotReplaceCompletedWriteStatus() async throws {
         try SessionVault.clear()
         let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
-        _ = try await control.post("test/reset", body: .object([:]))
+        _ = try await control.post("test/reset", body: .object([:]), readOnly: false)
         let model = AppModel()
         await model.login(server: "http://localhost:18765", username: "simulator", password: "synthetic-test-password")
         let archive = try #require(model.archive)
@@ -262,7 +262,7 @@ import Testing
         await model.synchronizeHealth(requestAccess: false, requestSelectedAccess: false, automatic: false)
         #expect(model.health.status == "Reviewed glucose saved to Apple Health")
         #expect(!model.isBusy && !model.isHealthSyncRunning)
-        let counts = try await control.post("test/counts", body: .object([:]))
+        let counts = try await control.post("test/counts", body: .object([:]), readOnly: true)
         #expect(counts["health/connect"] == .null)
         await model.logout()
     }
@@ -270,7 +270,7 @@ import Testing
     @Test func pausingIndependentHealthSyncPreservesProgress() async throws {
         try SessionVault.clear()
         let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
-        _ = try await control.post("test/reset", body: .object([:]))
+        _ = try await control.post("test/reset", body: .object([:]), readOnly: false)
         let model = AppModel()
         await model.login(server: "http://localhost:18765", username: "simulator", password: "synthetic-test-password")
         let archive = try #require(model.archive)
@@ -290,10 +290,10 @@ import Testing
         #expect(!model.isBusy && !model.health.isSyncing)
         #expect(model.errorMessage == nil)
         #expect(try archive.load(Bool.self, name: "health-auto-paused.json") == true)
-        _ = try await control.post("test/reset-counts", body: .object([:]))
+        _ = try await control.post("test/reset-counts", body: .object([:]), readOnly: false)
         let restored = AppModel()
         await restored.automaticHealthSync()
-        let counts = try await control.post("test/counts", body: .object([:]))
+        let counts = try await control.post("test/counts", body: .object([:]), readOnly: true)
         #expect(counts["health/connect"] == .null)
         #expect(!restored.isBusy)
         #expect(try archive.load(Data.self, name: "anchor-pause-test.json") == marker)
@@ -305,7 +305,7 @@ import Testing
     @Test func completedHealthSyncCooldownSurvivesRelaunchAndCoalescesAutomaticTriggers() async throws {
         try SessionVault.clear()
         let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
-        _ = try await control.post("test/reset", body: .object([:]))
+        _ = try await control.post("test/reset", body: .object([:]), readOnly: false)
         let model = AppModel()
         await model.login(server: "http://localhost:18765", username: "simulator", password: "synthetic-test-password")
         let archive = try #require(model.archive)
@@ -321,7 +321,7 @@ import Testing
         await restored.automaticHealthSync()
         #expect(!restored.isHealthSyncRunning && !restored.isBusy)
         #expect(restored.health.status == "Sync complete")
-        let counts = try await control.post("test/counts", body: .object([:]))
+        let counts = try await control.post("test/counts", body: .object([:]), readOnly: true)
         #expect(counts["health/connect"] == .null)
         #expect(try archive.load(Date.self, name: "health-next-automatic-sync.json") == deadline)
         restored.pauseHealthSync()
@@ -332,7 +332,7 @@ import Testing
     @Test func manualHealthSyncBypassesCooldownAndConcurrentAutomaticRequestDoesNotRunAgain() async throws {
         try SessionVault.clear()
         let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
-        _ = try await control.post("test/reset", body: .object([:]))
+        _ = try await control.post("test/reset", body: .object([:]), readOnly: false)
         let model = AppModel()
         await model.login(server: "http://localhost:18765", username: "simulator", password: "synthetic-test-password")
         let archive = try #require(model.archive)
@@ -349,7 +349,7 @@ import Testing
         await model.automaticHealthSync()
         await manual.value
         await model.automaticHealthSync()
-        let counts = try await control.post("test/counts", body: .object([:]))
+        let counts = try await control.post("test/counts", body: .object([:]), readOnly: true)
         #expect(counts["health/connect"].numberValue == 1)
         #expect(!model.isBusy && !model.isHealthSyncRunning)
         let next = try #require(try archive.load(Date.self, name: "health-next-automatic-sync.json"))
@@ -361,7 +361,7 @@ import Testing
     @Test func explicitReportImportWaitsForForegroundRefresh() async throws {
         try SessionVault.clear()
         let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
-        _ = try await control.post("test/reset", body: .object([:]))
+        _ = try await control.post("test/reset", body: .object([:]), readOnly: false)
         let model = AppModel()
         await model.login(server: "http://localhost:18765", username: "simulator", password: "synthetic-test-password")
         let foreground = Task { await model.perform { try await Task.sleep(for: .milliseconds(300)) } }
@@ -369,7 +369,7 @@ import Testing
         let retained = await model.addDocument(Data("synthetic report".utf8), filename: "fixture.png", contentType: "image/png", sourceName: nil, originalBytes: nil, originalFilename: nil, originalContentType: nil)
         await foreground.value
         #expect(retained && model.drafts.isEmpty && model.errorMessage == nil)
-        let state = try await control.post("test/state", body: .object([:]))
+        let state = try await control.post("test/state", body: .object([:]), readOnly: true)
         #expect(state["upload_ids"].arrayValue.count == 1)
         await model.logout()
     }
@@ -377,7 +377,7 @@ import Testing
     @Test func initialAdminSessionBlocksBackgroundWorkUntilPasswordChange() async throws {
         try SessionVault.clear()
         let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
-        _ = try await control.post("test/reset", body: .object([:]))
+        _ = try await control.post("test/reset", body: .object([:]), readOnly: false)
         let model = AppModel()
         await model.login(server: "http://localhost:18765", username: "admin", password: "admin")
         #expect(model.mustChangePassword)
@@ -387,7 +387,7 @@ import Testing
         await restored.refresh(automatic: false)
         await restored.sendDrafts(automatic: false)
         await restored.synchronizeHealth(requestAccess: false, requestSelectedAccess: false, automatic: false)
-        let counts = try await control.post("test/counts", body: .object([:]))
+        let counts = try await control.post("test/counts", body: .object([:]), readOnly: true)
         #expect(counts["reports/list"] == .null)
         #expect(counts["health/connect"] == .null)
         await restored.changePassword(current: "admin", replacement: "new-admin-password")
@@ -401,7 +401,7 @@ import Testing
     @Test func sessionUploadRetryCacheAndLogout() async throws {
         try SessionVault.clear()
         let control = APIClient(server: URL(string: "http://localhost:18765")!, token: nil, uploadTransport: BackgroundTransfer.transport)
-        _ = try await control.post("test/reset", body: .object([:]))
+        _ = try await control.post("test/reset", body: .object([:]), readOnly: false)
         let model = AppModel()
         await model.login(server: "http://localhost:18765", username: "simulator", password: "synthetic-test-password")
         #expect(model.errorMessage == nil)
@@ -413,7 +413,7 @@ import Testing
         await model.addDocument(Data(), filename: "invalid-pair.jpg", contentType: "image/jpeg", sourceName: "Test Clinic", originalBytes: Data(), originalFilename: nil, originalContentType: nil)
         #expect(model.errorMessage != nil && model.drafts.isEmpty)
         model.errorMessage = nil
-        _ = try await control.post("test/fail-upload", body: .object([:]))
+        _ = try await control.post("test/fail-upload", body: .object([:]), readOnly: false)
         await model.addDocument(Data("synthetic report".utf8), filename: "fixture.png", contentType: "image/png", sourceName: "Test Clinic", originalBytes: nil, originalFilename: nil, originalContentType: nil)
         #expect(model.drafts.count == 1)
         let draftID = try #require(model.drafts.first?.id)
@@ -422,14 +422,14 @@ import Testing
         await restored.sendDrafts(automatic: false)
         #expect(restored.errorMessage == nil)
         #expect(restored.drafts.isEmpty)
-        let state = try await control.post("test/state", body: .object([:]))
+        let state = try await control.post("test/state", body: .object([:]), readOnly: true)
         #expect(state["upload_ids"].arrayValue == [.string(draftID.uuidString), .string(draftID.uuidString)])
         #expect(restored.reports.count == 1)
         let report = try await restored.report("fixture-report")
         #expect(report["report"]["report_id"] == .string("fixture-report"))
         let source = try await restored.source("fixture-report")
         #expect(FileManager.default.fileExists(atPath: source.path))
-        _ = try await control.post("test/delete-report", body: .object([:]))
+        _ = try await control.post("test/delete-report", body: .object([:]), readOnly: false)
         do { _ = try await restored.report("fixture-report"); Issue.record("Deleted report returned from cache") }
         catch { #expect(!FileManager.default.fileExists(atPath: source.path)) }
         await restored.refresh(automatic: false)

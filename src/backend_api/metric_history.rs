@@ -2,7 +2,7 @@
 use crate::{
     database::{Database, queries},
     error::AppError,
-    reports::{ObservationPayload, Source, TrendRequest, parse_time},
+    reports::{ObservationPayload, REPORTED_METRIC_PREFIX, Source, TrendRequest, parse_time},
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
 use futures_util::TryStreamExt;
@@ -23,12 +23,6 @@ pub async fn history(
     mut request: HistoryRequest,
 ) -> Result<Value, AppError> {
     request.metric_id = crate::laboratory::canonical_history_id(&request.metric_id).to_owned();
-    if request.metric_id.starts_with("report-review:")
-        || (request.metric_id.starts_with("clinical:")
-            && !crate::lab_metric_metadata::is_clinical_id(&request.metric_id))
-    {
-        return Err(AppError::NotFound);
-    }
     let clinical = if crate::lab_metric_metadata::is_clinical_id(&request.metric_id) {
         Some(
             crate::lab_metric_metadata::clinical_groups(database, user_id)
@@ -39,8 +33,11 @@ pub async fn history(
     } else {
         None
     };
-    let mut definition = if let Some(group) = &clinical {
-        group.definition.clone()
+    let reported = request.metric_id.starts_with(REPORTED_METRIC_PREFIX);
+    let definition = if reported {
+        None
+    } else if let Some(group) = &clinical {
+        Some(group.definition.clone())
     } else if request.metric_id.starts_with("custom:") {
         let metric = database
             .custom_metrics(user_id)
@@ -48,16 +45,14 @@ pub async fn history(
             .into_iter()
             .find(|metric| metric.metric_id == request.metric_id)
             .ok_or(AppError::NotFound)?;
-        serde_json::to_value(metric)?
+        Some(serde_json::to_value(metric)?)
     } else {
         let metric = crate::laboratory::metrics()
             .into_iter()
             .find(|metric| metric.metric_id == request.metric_id)
-            .ok_or(AppError::Invalid("Unknown metric_id"))?;
-        serde_json::to_value(metric)?
+            .ok_or(AppError::NotFound)?;
+        Some(serde_json::to_value(metric)?)
     };
-    let metadata = database.lab_metric_metadata(user_id).await?;
-    metadata.apply_name(&mut definition);
     let report_history = crate::reports::trends(
         database,
         user_id,
@@ -68,6 +63,16 @@ pub async fn history(
         },
     )
     .await?;
+    let mut definition = definition
+        .or_else(|| {
+            report_history
+                .get("reported_metric")
+                .filter(|metric| !metric.is_null())
+                .cloned()
+        })
+        .ok_or(AppError::NotFound)?;
+    let metadata = database.lab_metric_metadata(user_id).await?;
+    metadata.apply_name(&mut definition);
     let mut points = report_history["points"]
         .as_array()
         .cloned()
@@ -116,7 +121,8 @@ pub async fn history(
         points.extend(group.points);
         report_records.extend(group.records);
     }
-    if request.metric_id.starts_with("custom:")
+    if reported
+        || request.metric_id.starts_with("custom:")
         || crate::lab_metric_metadata::is_clinical_id(&request.metric_id)
     {
         points.sort_by_key(|point| point["timestamp"].as_i64());
@@ -406,7 +412,7 @@ pub async fn browse(database: &Database, user_id: &str) -> Result<Value, AppErro
                 .map(|metric| (metric.metric_id, metric))
                 .collect();
             for observation in reports {
-                let Some(id) = observation.resolved_metric_id.as_deref() else {
+                let Some(id) = observation.browse_metric_id() else {
                     continue;
                 };
                 if entries.contains_key(id) {
@@ -418,6 +424,8 @@ pub async fn browse(database: &Database, user_id: &str) -> Result<Value, AppErro
                     custom_metrics.iter().find(|metric| metric.metric_id == id)
                 {
                     entries.insert(id.into(), serde_json::to_value(metric)?);
+                } else if let Some(metric) = observation.reported_metric() {
+                    entries.insert(id.into(), metric);
                 }
             }
             let mut metrics: Vec<Value> = entries.into_values().collect();

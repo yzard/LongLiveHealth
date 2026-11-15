@@ -1,4 +1,50 @@
 //! Explicit report-name aliases. Never use fuzzy matching or remove specimen qualifiers.
+
+// These labels need the specimen or property carried by a compatible LOINC.
+pub(crate) const CODE_QUALIFIED_ALIASES: &[(&str, &str)] = &[
+    ("lymphocyte_percent", "lymphocytes"),
+    ("eosinophil_percent", "eosinophils"),
+    ("basophil_percent", "basophils"),
+    ("vitamin_d_25_oh_total", "vitamind"),
+    ("serum_magnesium", "magnesium"),
+    ("urine_protein", "protein"),
+    ("urine_glucose", "glucose"),
+    ("urine_color", "color"),
+    ("urine_appearance", "appearance"),
+    ("urine_clarity", "appearance"),
+    ("urine_clarity", "clarity"),
+];
+
+// The source name and the printed unit are part of these published panel labels.
+pub(crate) const SOURCE_QUALIFIED_ALIASES: &[(&str, &str, &str, &str, &str)] = &[(
+    "Function Health",
+    "vitamind",
+    "ng/mL",
+    "vitamin_d_unspecified",
+    "vitamin_d_25_oh_total",
+)];
+
+pub(crate) fn section_specimen(heading: &str) -> Option<&'static str> {
+    let heading = key(heading);
+    if heading.starts_with("urinalysis")
+        || [
+            "urine",
+            "urinetest",
+            "urineroutine",
+            "urineanalysis",
+            "urinemacroscopic",
+            "urinemicroscopic",
+            "urinephysicalexamination",
+        ]
+        .contains(&heading.as_str())
+    {
+        return Some("urine");
+    }
+    [("serum", "serum"), ("plasma", "plasma"), ("blood", "blood")]
+        .into_iter()
+        .find_map(|(label, specimen)| (heading == label).then_some(specimen))
+}
+
 pub(crate) const EXTRA: &[(&str, &str, &str, &[&str])] = &[
     (
         "immature_granulocyte_percent",

@@ -35,7 +35,7 @@ import SkipFuse
         try archive.save(installation, name: "installation.json")
         let connection = try await client.post("health/connect", body: .object([
             "platform": .string("health_connect"), "installation_id": .string(installation.uuidString)
-        ]))
+        ]), readOnly: false)
         let connectionID = connection["connection_id"].stringValue
         guard !connectionID.isEmpty else { throw APIError.invalidResponse }
         activity = HealthSyncActivity()
@@ -44,7 +44,7 @@ import SkipFuse
             try archive.save(block, name: pendingName)
             activity?.beginSending(records: block.request["records"].arrayValue.count, at: Date())
             defer { activity?.endSending() }
-            _ = try await client.post("health/sync", body: block.request)
+            _ = try await client.post("health/sync", body: block.request, readOnly: false)
             try await block.commit(to: archive)
             try archive.remove(name: pendingName)
             activity?.confirmSending()
@@ -92,7 +92,7 @@ import SkipFuse
             }
         }
         if let block = batch.finish() { try await send(block) }
-        let response = try await client.post("health/coverage", body: .object([:]))
+        let response = try await client.post("health/coverage", body: .object([:]), readOnly: true)
         totalRecords = try HealthSyncProgress.totalRecords(in: response)
         coverage = response["coverage"].arrayValue
         status = "Up to date"

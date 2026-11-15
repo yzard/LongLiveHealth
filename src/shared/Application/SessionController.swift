@@ -36,7 +36,7 @@ import Foundation
         let task = Task { @MainActor [self] in
             let response = try await APIClient(server: server, token: nil, uploadTransport: MobilePlatform.uploadTransport).post("session/refresh", body: .object([
                 "refresh_token": .string(refresh), "next_refresh_token": .string(successor)
-            ]))
+            ]), readOnly: false)
             guard !retired, !Task.isCancelled else { throw CancellationError() }
             guard response["refresh_token"].stringValue == successor,
                   response["user"]["user_id"].stringValue == saved.userID,

@@ -376,27 +376,14 @@ pub fn resolved_metric(payload: &ObservationPayload) -> Option<&str> {
         }
         infer_metric(&payload.raw_name, payload.raw_unit.as_deref()).or_else(|| {
             let (label, code) = split_test_code(&payload.raw_name);
-            let heading = crate::laboratory_names::key(payload.ocr_section_heading.as_deref()?);
-            let urine_section = heading == "urine"
-                || heading.starts_with("urinalysis")
-                || matches!(
-                    heading.as_str(),
-                    "urinetest"
-                        | "urineroutine"
-                        | "urineanalysis"
-                        | "urinemacroscopic"
-                        | "urinemicroscopic"
-                        | "urinephysicalexamination"
-                );
-            (payload.ocr_metric_candidate.as_deref() == Some("urine_appearance")
-                && crate::laboratory_names::key(label) == "appearance"
-                && code.is_none()
-                && urine_section
-                && payload
-                    .raw_unit
-                    .as_deref()
-                    .is_none_or(|unit| unit.trim().is_empty() || canonical_unit(unit) == Some("1")))
-            .then_some("urine_appearance")
+            let specimen =
+                crate::laboratory_names::section_specimen(payload.ocr_section_heading.as_deref()?)?;
+            let qualified = infer_metric(
+                &format!("{label} - {specimen}"),
+                payload.raw_unit.as_deref(),
+            )?;
+            (code.is_none() && payload.ocr_metric_candidate.as_deref() == Some(qualified))
+                .then_some(qualified)
         })
     })
 }
@@ -504,17 +491,22 @@ pub(crate) fn resolved_report_metric<'a>(
     source_name: Option<&str>,
 ) -> Option<&'a str> {
     let resolved = resolved_metric(payload);
-    // The Function Health report label "Vitamin D" denotes its blood 25(OH)D test.
-    // A bare label from another provider remains unspecified.
-    if payload.metric_id.is_none()
-        && resolved == Some("vitamin_d_unspecified")
-        && source_name.is_some_and(|source| source.trim().eq_ignore_ascii_case("Function Health"))
-        && crate::laboratory_names::key(&payload.raw_name) == "vitamind"
-        && payload.raw_unit.as_deref().and_then(canonical_unit) == Some("ng/mL")
-    {
-        return Some("vitamin_d_25_oh_total");
+    if payload.metric_id.is_some() {
+        return resolved;
     }
-    resolved
+    let source = source_name.unwrap_or("").trim();
+    let label = crate::laboratory_names::key(&payload.raw_name);
+    let unit = payload.raw_unit.as_deref().and_then(canonical_unit);
+    crate::laboratory_names::SOURCE_QUALIFIED_ALIASES
+        .iter()
+        .find_map(|&(provider, name, required_unit, base, qualified)| {
+            (resolved == Some(base)
+                && source.eq_ignore_ascii_case(provider)
+                && label == name
+                && unit == Some(required_unit))
+            .then_some(qualified)
+        })
+        .or(resolved)
 }
 
 // These codes are used with misleading labels in some reports. Their
@@ -577,20 +569,7 @@ pub fn infer_metric(name: &str, raw_unit: Option<&str>) -> Option<&'static str> 
     if let Some(id) = code.and_then(loinc_metric) {
         let metric = DEFINITIONS.get(id)?;
         let name_matches = key == "test"
-            // Some CBC tables use the same bare label for percentage and
-            // absolute rows. Require the percentage LOINC for these aliases.
-            || matches!(
-                (id, key.as_str()),
-                ("lymphocyte_percent", "lymphocytes")
-                    | ("eosinophil_percent", "eosinophils")
-                    | ("basophil_percent", "basophils")
-            )
-            || (id == "vitamin_d_25_oh_total" && key == "vitamind")
-            || (id == "serum_magnesium" && key == "magnesium")
-            || (matches!(id, "urine_protein" | "urine_glucose" | "urine_color")
-                && key == id.trim_start_matches("urine_"))
-            || (matches!(id, "urine_appearance" | "urine_clarity") && key == "appearance")
-            || (id == "urine_clarity" && key == "clarity")
+            || crate::laboratory_names::CODE_QUALIFIED_ALIASES.contains(&(id, key.as_str()))
             || named.is_some_and(|candidates| candidates.iter().any(|(name_id, _)| *name_id == id));
         return (name_matches && accepts_unit(id, metric.standard_unit)).then_some(id);
     }

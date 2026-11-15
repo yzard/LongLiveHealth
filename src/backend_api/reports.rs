@@ -9,6 +9,7 @@ use crate::{
 use chrono::{DateTime, NaiveDate};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use sqlx::Row;
 use std::collections::HashSet;
 
@@ -177,6 +178,8 @@ pub struct Observation {
     pub payload: ObservationPayload,
     pub interpretation: crate::laboratory::Interpretation,
     pub resolved_metric_id: Option<String>,
+    #[serde(skip)]
+    reported_metric_id: Option<String>,
     pub display_name: String,
     pub lab_test_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -186,6 +189,28 @@ pub struct Observation {
     pub reported_negative_bound: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metric_suggestions: Option<Value>,
+}
+
+pub(crate) const REPORTED_METRIC_PREFIX: &str = "reported:";
+
+impl Observation {
+    pub(crate) fn browse_metric_id(&self) -> Option<&str> {
+        self.resolved_metric_id
+            .as_deref()
+            .or(self.reported_metric_id.as_deref())
+    }
+
+    pub(crate) fn reported_metric(&self) -> Option<Value> {
+        let id = self.reported_metric_id.as_deref()?;
+        Some(json!({
+            "metric_id": id,
+            "name": self.display_name,
+            "standard_unit": self.payload.raw_unit.as_deref().unwrap_or("").trim(),
+            "loinc": self.lab_test_code.iter().map(|code| json!({
+                "code": code, "official_name": self.lab_test_name,
+            })).collect::<Vec<_>>(),
+        }))
+    }
 }
 
 #[derive(Serialize)]
@@ -448,6 +473,31 @@ impl StoredObservation {
                 .or_else(|| custom.map(|metric| metric.name.as_str()))
                 .unwrap_or_else(|| crate::laboratory::display_name(printed_name, Some(id)))
         });
+        // Keep unresolved measurements under their reported identity. Only
+        // records with the same source, label, section, code, and unit share it.
+        let reported_metric_id = (self.status == "confirmed"
+            && resolved_metric_id.is_none()
+            && !crate::laboratory::is_administrative_name(&payload.raw_name))
+        .then(|| {
+            let source =
+                crate::sources::report_key(context["source_name"].as_str(), &self.report_id);
+            let identity = json!([
+                source,
+                printed_name.trim().to_lowercase(),
+                payload
+                    .ocr_section_heading
+                    .as_deref()
+                    .unwrap_or("")
+                    .trim()
+                    .to_lowercase(),
+                lab_test_code,
+                payload.raw_unit.as_deref().unwrap_or("").trim()
+            ]);
+            format!(
+                "{REPORTED_METRIC_PREFIX}{}",
+                hex::encode(Sha256::digest(identity.to_string()))
+            )
+        });
         Ok(Observation {
             display_name: display_name.to_owned(),
             lab_test_code: lab_test_code.map(str::to_owned),
@@ -461,6 +511,7 @@ impl StoredObservation {
             status: self.status,
             payload,
             resolved_metric_id,
+            reported_metric_id,
             interpretation,
         })
     }
@@ -1267,13 +1318,16 @@ pub async fn trends(
     let mut records = Vec::new();
     let mut incomparable = 0;
     let mut excluded = Vec::new();
+    let mut reported_metric = None;
     for observation in database.confirmed(user_id).await? {
-        if !observation
-            .resolved_metric_id
-            .as_ref()
-            .is_some_and(|id| request.metric_ids.contains(id))
-        {
+        let Some(id) = observation.browse_metric_id() else {
             continue;
+        };
+        if !request.metric_ids.iter().any(|metric| metric == id) {
+            continue;
+        }
+        if reported_metric.is_none() {
+            reported_metric = observation.reported_metric();
         }
         records.push(history_record(&observation));
         let Some(date) = observation.payload.sampled_at.as_deref() else {
@@ -1286,21 +1340,40 @@ pub async fn trends(
             continue;
         }
         let quantity = &observation.interpretation.result;
-        let Some((number, unit)) = (quantity.status == "exact")
-            .then(|| quantity.value.as_ref().zip(quantity.unit.as_ref()))
-            .flatten()
-        else {
+        let raw_number = observation.reported_metric_id.as_ref().and_then(|_| {
+            rust_decimal::Decimal::from_str_exact(observation.payload.raw_result.trim())
+                .ok()
+                .map(|value| value.to_string())
+        });
+        let exact = if observation.reported_metric_id.is_some() {
+            raw_number.as_deref().map(|value| {
+                let unit = observation.payload.raw_unit.as_deref().unwrap_or("").trim();
+                (
+                    value,
+                    if unit.is_empty() {
+                        "Not reported"
+                    } else {
+                        unit
+                    },
+                )
+            })
+        } else {
+            (quantity.status == "exact")
+                .then(|| quantity.value.as_deref().zip(quantity.unit.as_deref()))
+                .flatten()
+        };
+        let Some((number, unit)) = exact else {
             excluded.push(json!({"observation_id":observation.observation_id,"reason":observation.interpretation.result.status}));
             incomparable += 1;
             continue;
         };
         points.push(json!({"observation_id":observation.observation_id,"report_id":observation.report_id,"revision":observation.revision,
-            "metric_id":observation.resolved_metric_id,"sampled_at":date,"timestamp":timestamp,"date_precision":if date.len()==10{"day"}else{"second"},
+            "metric_id":id,"sampled_at":date,"timestamp":timestamp,"date_precision":if date.len()==10{"day"}else{"second"},
             "value":number,"unit":unit,"reference":observation.interpretation.reference,"original":observation.payload}));
     }
     points.sort_by_key(|point| point["timestamp"].as_i64());
     Ok(
-        json!({"records":records,"points":points,"incomparable_count":incomparable,"excluded":excluded,"algorithm_version":"lab-trend-v1","conversion_version":crate::laboratory::CONVERSION_VERSION}),
+        json!({"records":records,"points":points,"reported_metric":reported_metric,"incomparable_count":incomparable,"excluded":excluded,"algorithm_version":"lab-trend-v1","conversion_version":crate::laboratory::CONVERSION_VERSION}),
     )
 }
 

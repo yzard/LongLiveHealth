@@ -1144,6 +1144,107 @@ fn numeric_suffixes_preserve_qualifiers_and_reject_code_conflicts() {
 }
 
 #[tokio::test]
+async fn browse_keeps_confirmed_unmapped_results_searchable_with_original_history() {
+    let (_directory, state) = fixture().await;
+    let alice = add_user(&state, "alice").await;
+    let bob = add_user(&state, "bob").await;
+    let mut report_ids = Vec::new();
+    for (index, (source, unit, value, status)) in [
+        ("Lab A", None, "6.0", "confirmed"),
+        ("Lab A", None, "<6.5", "confirmed"),
+        ("Lab A", Some("mmol/L"), "7", "confirmed"),
+        ("Lab B", None, "8", "confirmed"),
+        ("Lab A", None, "9", "pending"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let report_id = archive(&state, "alice").await;
+        let mut payload = observation_payload();
+        payload.raw_name = "pH (50560-2)".into();
+        payload.raw_result = value.into();
+        payload.raw_unit = unit.map(str::to_owned);
+        payload.sampled_at = Some(format!("2018-10-2{index}"));
+        payload.metric_id = None;
+        let result = state
+            .database
+            .review(
+                &alice.user_id,
+                ReviewRequest {
+                    new_metric: None,
+                    report_id: report_id.clone(),
+                    expected_revision: 1,
+                    context: Some(serde_json::from_value(json!({"source_name":source})).unwrap()),
+                    observations: vec![ReviewItem {
+                        observation_id: None,
+                        expected_revision: None,
+                        status: status.into(),
+                        payload,
+                    }],
+                },
+            )
+            .await
+            .unwrap();
+        assert!(result["observations"][0]["payload"]["metric_id"].is_null());
+        report_ids.push(report_id);
+    }
+
+    let catalog = longlivehealth::browse_catalog::get(&state.database, &alice.user_id)
+        .await
+        .unwrap();
+    let entries = catalog["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 3);
+    let mut found = false;
+    for entry in entries {
+        assert_eq!(entry["title"], "pH");
+        let metric_id = entry["kind"].as_str().unwrap();
+        assert!(metric_id.starts_with("reported:"));
+        let read = |owner| {
+            history(
+                &state.database,
+                owner,
+                HistoryRequest {
+                    metric_id: metric_id.into(),
+                },
+            )
+        };
+        assert!(matches!(
+            read(&bob.user_id).await,
+            Err(longlivehealth::error::AppError::NotFound)
+        ));
+        let result = read(&alice.user_id).await.unwrap();
+        let records = result["records"].as_array().unwrap();
+        if records.len() == 2 {
+            found = true;
+            assert!(
+                records
+                    .iter()
+                    .any(|row| row["report_id"] == report_ids[0] && row["display_value"] == "6.0")
+            );
+            assert!(
+                records
+                    .iter()
+                    .any(|row| row["report_id"] == report_ids[1] && row["display_value"] == "<6.5")
+            );
+            assert_eq!(result["points"].as_array().unwrap().len(), 1);
+            assert_eq!(result["points"][0]["original"]["raw_name"], "pH (50560-2)");
+            assert_eq!(result["metric"]["loinc"][0]["code"], "50560-2");
+            assert_eq!(
+                result["metric"]["loinc"][0]["official_name"],
+                "pH of Urine by Automated test strip"
+            );
+        } else {
+            assert_eq!(records.len(), 1);
+            assert!(
+                records[0]["report_id"] == report_ids[2]
+                    || records[0]["report_id"] == report_ids[3]
+            );
+        }
+    }
+    assert!(found);
+}
+
+#[tokio::test]
 async fn browse_hides_drafts_but_reports_keep_review_issues() {
     let (_directory, state) = fixture().await;
     let alice = add_user(&state, "alice").await;

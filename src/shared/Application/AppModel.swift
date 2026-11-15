@@ -81,6 +81,7 @@ final class AppModel {
         "wellness/entries/list", "wellness/library", "wellness/nutrition/day", "wellness/diet", "wellness/meals",
         "wellness/meal-glucose", "wellness/import/list", "wellness/records/list", "wellness/records/get", "metrics/history/get", "browse/catalog", "reports/list", "reports/get", "reports/extraction/get", "metrics/list", "exports/list", "reports/input/get", "wellness/food/lookup", "wellness/food/portion", "wellness/reminders"
     ]
+    private static let uncachedReads: Set<String> = ["jobs/list", "health/coverage", "user/get"]
     func request(_ path: String, body: JSONValue) async throws -> JSONValue {
         try await request(path, body: body, permitsOfflineFallback: true)
     }
@@ -88,10 +89,11 @@ final class AppModel {
     private func request(_ path: String, body: JSONValue, permitsOfflineFallback: Bool) async throws -> JSONValue {
         guard let client, let responseCache, let token = session?.token else { throw APIError.invalidResponse }
         let cacheable = Self.cachedReads.contains(path)
+        let readOnly = cacheable || Self.uncachedReads.contains(path)
         let reportRevision = ["browse/catalog", "metrics/history/get", "insights/get"].contains(path)
             ? reportDataRevision : nil
         do {
-            let result = try await client.post(path, body: body)
+            let result = try await client.post(path, body: body, readOnly: readOnly)
             guard !Task.isCancelled, session?.token == token,
                   reportRevision == nil || reportRevision == reportDataRevision else { throw CancellationError() }
             if path == "wellness/preferences/get" || path == "wellness/preferences/save" {
@@ -109,7 +111,7 @@ final class AppModel {
                     try responseCache.remove(path, body: body)
                     throw CancellationError()
                 }
-            } else if !["jobs/list", "health/coverage", "user/get"].contains(path) {
+            } else if !readOnly {
                 try clearReadCache()
                 if path == "wellness/preferences/save" { try await responseCache.save(result, path: "wellness/preferences/get", body: .object([:])) }
             }
@@ -155,7 +157,7 @@ final class AppModel {
     func login(server: String, username: String, password: String) async {
         await perform {
             let address = try APIClient.serverURL(server)
-            let response = try await APIClient(server: address, token: nil, uploadTransport: MobilePlatform.uploadTransport).post("session/login", body: .object(["username": .string(username), "password": .string(password)]))
+            let response = try await APIClient(server: address, token: nil, uploadTransport: MobilePlatform.uploadTransport).post("session/login", body: .object(["username": .string(username), "password": .string(password)]), readOnly: false)
             var saved = StoredSession(server: address, userID: response["user"]["user_id"].stringValue, username: response["user"]["username"].stringValue, token: response["token"].stringValue)
             saved.mustChangePassword = response["user"]["must_change_password"].boolValue
             saved.refreshToken = response["refresh_token"].stringValue.isEmpty ? nil : response["refresh_token"].stringValue
@@ -182,7 +184,7 @@ final class AppModel {
     func refresh(automatic: Bool) async {
         guard let client, let archive, let identity = session?.token, !isBusy else { return }
         await performRecoverable(automatic: automatic) {
-            let account = try await client.post("user/get", body: .object([:]))
+            let account = try await client.post("user/get", body: .object([:]), readOnly: true)
             if account["must_change_password"].boolValue {
                 guard session?.token == identity else { return }
                 session?.mustChangePassword = true
@@ -311,7 +313,7 @@ final class AppModel {
                 if let sourceName = draft.sourceName {
                     let reportID = uploaded["file"]["file_id"].stringValue
                     guard !reportID.isEmpty else { throw APIError.invalidResponse }
-                    let report = try await client.post("reports/get", body: .object(["report_id": .string(reportID)]))
+                    let report = try await client.post("reports/get", body: .object(["report_id": .string(reportID)]), readOnly: true)
                     guard session?.token == identity else { return }
                     if report["context"]["source_name"].stringValue != sourceName {
                         var context = report["context"] == .null ? JSONValue.object([:]) : report["context"]
@@ -481,7 +483,7 @@ final class AppModel {
     func changePassword(current: String, replacement: String) async {
         guard let saved = session, let credentials, !isHealthSyncRunning else { return }
         await perform {
-            _ = try await credentials.client().post("user/password/change", body: .object(["current_password": .string(current), "new_password": .string(replacement)]))
+            _ = try await credentials.client().post("user/password/change", body: .object(["current_password": .string(current), "new_password": .string(replacement)]), readOnly: false)
             guard session?.token == saved.token else { return }
             deferredHealthSync?.cancel(); deferredHealthSync = nil
             credentials.retire(); self.credentials = nil
@@ -502,8 +504,8 @@ final class AppModel {
         // Local removal does not wait for a network timeout. Server revocation is best effort.
         if let previous { Task {
             if let refresh = previousSession?.refreshToken {
-                _ = try? await previous.post("session/revoke", body: .object(["refresh_token": .string(refresh)]))
-            } else { _ = try? await previous.post("session/logout", body: .object([:])) }
+                _ = try? await previous.post("session/revoke", body: .object(["refresh_token": .string(refresh)]), readOnly: false)
+            } else { _ = try? await previous.post("session/logout", body: .object([:]), readOnly: false) }
         } }
     }
 

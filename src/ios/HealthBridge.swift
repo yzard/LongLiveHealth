@@ -85,10 +85,10 @@ final class HealthBridge {
             }
             let installation = try await archive.loadAsync(UUID.self, name: "installation.json") ?? UUID()
             try await archive.saveAsync(installation, name: "installation.json")
-            let connection = try await client.post("health/connect", body: .object(["platform": .string("apple_health"), "installation_id": .string(installation.uuidString)]))
+            let connection = try await client.post("health/connect", body: .object(["platform": .string("apple_health"), "installation_id": .string(installation.uuidString)]), readOnly: false)
             let connectionID = connection["connection_id"].stringValue
             guard !connectionID.isEmpty else { throw APIError.invalidResponse }
-            totalRecords = try HealthSyncProgress.totalRecords(in: await client.post("health/coverage", body: .object([:])))
+            totalRecords = try HealthSyncProgress.totalRecords(in: await client.post("health/coverage", body: .object([:]), readOnly: true))
             var readFailures: [String: String] = [:]
             let selectedDefinitions = definitions.filter {
                 requestSelectedAccess || (!$0.type.requiresPerObjectAuthorization() && $0.kind != "medication_dose_event")
@@ -178,7 +178,7 @@ final class HealthBridge {
             })
             activity = nil
             status = "Loading sync coverage"
-            let summary = try await client.post("health/coverage", body: .object([:]))
+            let summary = try await client.post("health/coverage", body: .object([:]), readOnly: true)
             coverage = summary["coverage"].arrayValue
             totalRecords = try HealthSyncProgress.totalRecords(in: summary)
             try await archive.saveAsync(readFailures, name: "health-read-failures.json")
@@ -192,7 +192,7 @@ final class HealthBridge {
     private func send(_ request: JSONValue, client: APIClient) async throws {
         activity?.beginSending(records: request["records"].arrayValue.count, at: Date())
         defer { activity?.endSending() }
-        totalRecords = try HealthSyncProgress.totalRecords(in: await client.post("health/sync", body: request))
+        totalRecords = try HealthSyncProgress.totalRecords(in: await client.post("health/sync", body: request, readOnly: false))
         activity?.confirmSending()
     }
 

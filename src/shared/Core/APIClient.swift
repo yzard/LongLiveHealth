@@ -57,14 +57,14 @@ public nonisolated final class APIClient: Sendable {
         return url
     }
 
-    public func post(_ path: String, body: JSONValue) async throws -> JSONValue {
-        do { return try await postOnce(path, body: body, forceRefresh: false) }
+    public func post(_ path: String, body: JSONValue, readOnly: Bool) async throws -> JSONValue {
+        do { return try await postOnce(path, body: body, readOnly: readOnly, forceRefresh: false) }
         catch APIError.status(401, _) where authorization != nil {
-            return try await postOnce(path, body: body, forceRefresh: true)
+            return try await postOnce(path, body: body, readOnly: readOnly, forceRefresh: true)
         }
     }
 
-    private func postOnce(_ path: String, body: JSONValue, forceRefresh: Bool) async throws -> JSONValue {
+    private func postOnce(_ path: String, body: JSONValue, readOnly: Bool, forceRefresh: Bool) async throws -> JSONValue {
         var request = try await request(path, method: "POST", forceRefresh: forceRefresh)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let encoded = try await Self.encodeRequest(body)
@@ -74,7 +74,7 @@ public nonisolated final class APIClient: Sendable {
             (bytes, response) = try await uploadTransport(request, encoded, body["batch_id"].stringValue)
         } else {
             request.httpBody = encoded
-            (bytes, response) = try await readResponse(for: request, retryInterruptedRead: path == "browse/catalog")
+            (bytes, response) = try await readResponse(for: request, retryInterruptedRead: readOnly)
         }
         try check(response, bytes: bytes)
         return try await Self.decodeResponse(bytes)
