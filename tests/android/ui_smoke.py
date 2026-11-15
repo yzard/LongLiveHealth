@@ -221,6 +221,19 @@ def browse_switch():
 
 
 def report_date():
+    def control(path):
+        return json.loads(subprocess.check_output([
+            "docker", "exec", CONTAINER, "curl", "-fsS", "-X", "POST",
+            "http://127.0.0.1:18765/api/v1/" + path,
+        ], text=True))
+
+    control("test/reset")
+    control("test/seed-report")
+    control("test/report-test-code")
+    original = control("reports/get")["observations"][0]
+    recommendation = original["lab_test_name"]
+    adb("shell", "am", "force-stop", "dev.longlivehealth.android")
+    adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
     wait_for("Insights")
     tap("Data")
     wait_for("Blood Work")
@@ -241,13 +254,29 @@ def report_date():
     tap_node(source)
     wait_for("Thyroid-stimulating hormone")
     wait_for("LOINC 11580-8")
-    tap("Thyroid-stimulating hormone")
-    wait_for("Review result")
-    wait_for("TSH")
-    wait_for("11580-8")
-    assert "TSH (11580-8)" not in labels()
-    tap("Cancel")
-    print("PASS: standardized laboratory title and inline LOINC and editor field")
+    for save in (False, True):
+        tap("Thyroid-stimulating hormone")
+        wait_for("Review result")
+        wait_for("TSH")
+        wait_for("11580-8")
+        assert "TSH (11580-8)" not in labels()
+        current = list(tree().iter("node"))
+        name = next(node for node in current if node.get("text") == recommendation)
+        use = next(node for node in current if node.get("content-desc") == "Use recommended name"
+                   or node.get("text") == "Use")
+        assert bounds(use)[0] > bounds(name)[0], "Use belongs to the right of the recommendation"
+        tap_node(use)
+        assert any(node.get("class") == "android.widget.EditText" and node.get("text") == recommendation
+                   for node in tree().iter("node")), "Use did not fill the Name field"
+        assert control("reports/get")["observations"][0] == original
+        tap("Save" if save else "Cancel")
+        wait_for("Report Info")
+
+    saved = control("reports/get")["observations"][0]
+    assert saved["status"] == original["status"]
+    expected = dict(original["payload"], raw_name=f"{recommendation} (11580-8)")
+    assert saved["payload"] == expected
+    print("PASS: report dates, recommended name fills the draft, Cancel discards it, and Save preserves the LOINC code and source")
 
 
 def chart_scroll():
@@ -604,19 +633,17 @@ def report_mapping_layout():
     size = adb("shell", "wm", "size")
     width, height = map(int, re.findall(r"(\d+)x(\d+)", size)[-1])
     for _ in range(4):
-        if "Review decision status" in labels():
-            break
+        assert not {"REVIEW DECISION", "About Review decision", "Review decision status"}.intersection(labels())
         adb("shell", "input", "swipe", str(width // 2), str(height * 3 // 4),
             str(width // 2), str(height // 3), "400")
-    wait_for("Review decision status")
-    assert not {"REVIEW DECISION", "About Review decision"}.intersection(labels())
     wait_for("Save")
     tap("Save")
     wait_for("Clear")
     row = control("reports/get")["observations"][0]
     assert row["payload"]["metric_id"] == "glucose"
     assert row["payload"]["raw_name"] == "Appearance (5767-9)"
-    print("PASS: Mapping first, resolved metric selected, and picker can change the mapping")
+    assert row["status"] == "confirmed"
+    print("PASS: resolved mapping can be edited, and Save preserves status without a status picker")
 
 
 def report_status_actions(check_chart=False):
@@ -655,8 +682,13 @@ def report_status_actions(check_chart=False):
     wait_for("Example Laboratory")
     tap("Example Laboratory")
 
+    def confirm_result():
+        nodes = [node for node in tree().iter("node")
+                 if node.get("text") == "Confirm" or node.get("content-desc") == "Confirm"]
+        tap_node(nodes[-1])
+
     control("test/fail-review")
-    tap("Confirm")
+    confirm_result()
     for _ in range(15):
         if "Could not complete the action" in labels():
             break
@@ -666,18 +698,29 @@ def report_status_actions(check_chart=False):
     tap("OK")
     wait_for("Confirm")
     assert control("reports/get")["observations"][0]["status"] == "pending"
-    tap("Confirm")
-    wait_for("Confirmed Results")
-    assert not {"Pending", "Confirmed", "Hold", "Confirm"}.intersection(labels())
+    confirm_result()
+    wait_for("Hold")
     wait_for("View source · page 1")
     current = control("reports/get")["observations"][0]
     assert current["observation_id"] == original["observation_id"]
     assert current["payload"] == original["payload"]
     assert current["status"] == "confirmed"
+    tap("Hold")
+    wait_for("1 result ready to confirm")
+    held = control("reports/get")["observations"][0]
+    assert held["status"] == "pending"
+    assert held["payload"] == original["payload"]
+    tap("1 result ready to confirm")
+    wait_for("Ready to Confirm")
+    wait_for("Confirm")
+    confirm_result()
+    adb("shell", "input", "keyevent", "KEYCODE_BACK")
+    wait_for("Hold")
+    assert control("reports/get")["observations"][0]["status"] == "confirmed"
     if check_chart:
         tap("Browse")
         wait_for("mg/dL")
-    print("PASS: confirm retry, source action on confirmed rows, and no inline status labels")
+    print("PASS: failed Confirm preserves pending, successful Confirm exposes Hold, and re-confirm restores the row")
 
 
 def report_settings():

@@ -13,7 +13,6 @@ struct ObservationEditor: View {
     @State var usesDefaultMapping = true
     @State var newMetricName: String
     @State var newMetricUnit: String
-    @State var status: String
     @State var saving = false
     @State var error: String?
     @Environment(\.dismiss) var dismiss
@@ -26,7 +25,6 @@ struct ObservationEditor: View {
         _choosingMetric = State(initialValue: choosingMetric)
         _newMetricName = State(initialValue: observation["payload"]["ocr_new_metric"]["name"].stringValue.isEmpty ? laboratoryResultName(observation) : observation["payload"]["ocr_new_metric"]["name"].stringValue)
         _newMetricUnit = State(initialValue: observation["payload"]["ocr_new_metric"] == .null ? observation["payload"]["raw_unit"].stringValue : observation["payload"]["ocr_new_metric"]["standard_unit"].stringValue)
-        _status = State(initialValue: observation["status"].stringValue.isEmpty ? "pending" : observation["status"].stringValue)
     }
     var body: some View {
         NavigationStack {
@@ -47,6 +45,11 @@ struct ObservationEditor: View {
                 }.interactiveDismissDisabled()
         }
     }
+    private var status: String {
+        let saved = observation["status"].stringValue
+        return saved.isEmpty ? "pending" : saved
+    }
+
     private var saveDisabled: Bool {
         saving || printedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || payload["raw_result"].stringValue.isEmpty
             || (creatingMetric && (newMetricName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || status == "rejected"))
@@ -115,13 +118,6 @@ struct ObservationEditor: View {
             TextField("Exact source text", text: Binding(get: { payload["source"]["quote"].stringValue }, set: { payload["source"]["quote"] = .string($0) }), axis: .vertical)
             field("Your notes", "notes")
         }
-        Section {
-            Picker("Review decision status", selection: $status) {
-                Text("Pending").tag("pending")
-                Text("Confirmed").tag("confirmed")
-                Text("Rejected").tag("rejected")
-            }
-        }
         if let error { Section { Text(error).foregroundStyle(.red) } }
     }
 
@@ -177,9 +173,18 @@ struct ObservationEditor: View {
     @ViewBuilder private var recommendedName: some View {
         let name = observation["lab_test_name"].stringValue
         if !name.isEmpty && loincCode == observation["lab_test_code"].stringValue {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Recommended name (LOINC)").font(.caption).foregroundStyle(.secondary)
-                Text(name).accessibilityIdentifier("review-result-loinc-name")
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Recommended name (LOINC)").font(.caption).foregroundStyle(.secondary)
+                    Text(name).accessibilityIdentifier("review-result-loinc-name")
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                if !choosingMetric {
+                    Button("Use") { printedName = name }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel(Text("Use recommended name"))
+                        .accessibilityIdentifier("review-result-use-loinc-name")
+                        .disabled(saving || printedName == name)
+                }
             }
         }
     }

@@ -134,6 +134,7 @@ class Handler(BaseHTTPRequestHandler):
             row = observations[0]
             row['display_name'] = 'Thyroid-stimulating hormone'
             row['lab_test_code'] = '11580-8'
+            row['lab_test_name'] = 'Thyrotropin [Units/volume] in Serum or Plasma'
             row['payload']['raw_name'] = 'TSH (11580-8)'
         if route == 'test/report-urine-mapping':
             row = observations[0]

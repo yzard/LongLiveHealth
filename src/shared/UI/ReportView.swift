@@ -417,9 +417,13 @@ struct ReportView: View {
     }
     private func toggleStatus(_ observation: JSONValue) async {
         guard !confirmingAll, !savingReview, !rescanning else { return }
-        let status = observation["status"].stringValue
-        guard status == "pending" else { return }
-        let change = ReportReview.change(observation, to: "confirmed")
+        let nextStatus: String
+        switch observation["status"].stringValue {
+        case "pending": nextStatus = "confirmed"
+        case "confirmed": nextStatus = "pending"
+        default: return
+        }
+        let change = ReportReview.change(observation, to: nextStatus)
         await model.perform {
             try await save(observations: [change], context: .null, newMetric: .null)
         }
@@ -635,9 +639,10 @@ struct ReportObservationRow: View {
                 #if !os(Android)
                 .accessibilityHint("Opens the original report page")
                 #endif
-                if let changeStatus, observation["status"] == .string("pending") {
+                let status = observation["status"].stringValue
+                if let changeStatus, status == "pending" || status == "confirmed" {
                     Button(action: changeStatus) {
-                        Text("Confirm")
+                        Text(status == "confirmed" ? "Hold" : "Confirm")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(needsManualConfirmation ? Color.yellow : Color.accentColor)
                             .padding(.horizontal, 12)
