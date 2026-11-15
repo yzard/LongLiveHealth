@@ -218,6 +218,37 @@ fn page_preparation_is_bounded_inline_and_preserves_untrusted_text_evidence() {
 }
 
 #[test]
+fn malformed_optional_model_hints_do_not_discard_the_reported_results() {
+    let mut row = serde_json::to_value(crate::observation_payload()).unwrap();
+    row["metric_id"] = Value::Null;
+    row["ocr_normalization"] = json!({"value": 4.8, "unit": "mg/dL"});
+    row["ocr_new_metric"] = json!({"name": "New measurement"});
+    let raw = json!({"choices":[{
+        "message":{"content":json!({"report_title":null,"source_name":null,"observations":[row],"warnings":[]}).to_string()},
+        "finish_reason":"stop",
+    }]}).to_string();
+    let result = ocr::wrap_completion(
+        Completion {
+            response_body: raw.clone(),
+            status_code: 200,
+        },
+        "fixture",
+        1,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(result.status_code, 200);
+    let response: Value = serde_json::from_str(&result.response_body).unwrap();
+    assert_eq!(response["raw_response_body"], raw);
+    for field in ["raw_name", "raw_result", "raw_unit", "sampled_at", "source"] {
+        assert_eq!(response["observations"][0][field], row[field]);
+    }
+    assert!(response["observations"][0]["ocr_new_metric"].is_null());
+    assert!(response["observations"][0]["ocr_normalization"].is_null());
+    assert_eq!(response["warnings"].as_array().unwrap().len(), 1);
+}
+
+#[test]
 fn model_unit_proposals_are_checked_against_printed_quantities() {
     for (proposed, valid) in [("4.610", true), ("4610000", false)] {
         let mut observation = serde_json::to_value(crate::observation_payload()).unwrap();

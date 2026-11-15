@@ -1,8 +1,8 @@
 use crate::{
     error::AppError, laboratory::CustomMetric, provider::Completion, reports::ObservationPayload,
 };
-use serde::Deserialize;
-use serde_json::json;
+use serde::{Deserialize, de::DeserializeOwned};
+use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -25,6 +25,32 @@ enum ModelPage {
 }
 
 impl ModelPage {
+    fn parse(text: &str) -> Option<ExtractedPage> {
+        let mut page = crate::provider::parse_json::<Value>(text).ok()?;
+        let rows = match &mut page {
+            Value::Array(rows) => Some(rows),
+            Value::Object(object) => object.get_mut("observations")?.as_array_mut(),
+            _ => None,
+        }?;
+        let mut invalid_hints = 0;
+        for row in rows.iter_mut().filter_map(Value::as_object_mut) {
+            let new_metric =
+                discard_invalid_hint::<crate::reports::NewMetric>(row, "ocr_new_metric");
+            let normalization =
+                discard_invalid_hint::<crate::reports::OcrNormalization>(row, "ocr_normalization");
+            invalid_hints += usize::from(new_metric || normalization);
+        }
+        let mut parsed = serde_json::from_value::<Self>(page)
+            .ok()?
+            .into_extracted_page();
+        if invalid_hints > 0 {
+            parsed.warnings.push(format!(
+                "Ignored optional OCR suggestions with an invalid format on {invalid_hints} result rows."
+            ));
+        }
+        Some(parsed)
+    }
+
     fn into_extracted_page(self) -> ExtractedPage {
         match self {
             Self::Report(report) => report,
@@ -36,6 +62,20 @@ impl ModelPage {
             },
         }
     }
+}
+
+fn discard_invalid_hint<T: DeserializeOwned>(
+    row: &mut serde_json::Map<String, Value>,
+    key: &str,
+) -> bool {
+    if row
+        .get(key)
+        .is_some_and(|hint| !hint.is_null() && T::deserialize(hint).is_err())
+    {
+        row.remove(key);
+        return true;
+    }
+    false
 }
 
 #[derive(Deserialize)]
@@ -246,12 +286,10 @@ pub fn wrap_completion(
     let parsed = serde_json::from_str::<serde_json::Value>(&reply.response_body).ok();
     let choice = parsed.as_ref().and_then(|v| v["choices"].get(0));
     let content = choice.and_then(|v| v["message"]["content"].as_str());
-    let mut envelope = json!({"model":model,"engine":"strata","prompt_version":"laboratory-page-v16","content":content,"raw_response_body":reply.response_body});
+    let mut envelope = json!({"model":model,"engine":"strata","prompt_version":"laboratory-page-v17","content":content,"raw_response_body":reply.response_body});
     let mut status = reply.status_code;
     if (200..300).contains(&status) {
-        let rows = content
-            .and_then(|text| crate::provider::parse_json::<ModelPage>(text).ok())
-            .map(ModelPage::into_extracted_page);
+        let rows = content.and_then(ModelPage::parse);
         let valid = choice.is_some_and(|c| c["finish_reason"] == "stop")
             && rows.as_ref().is_some_and(|p| {
                 p.observations.len() <= 2000
