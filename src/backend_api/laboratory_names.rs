@@ -563,12 +563,6 @@ pub(crate) const EXTRA: &[(&str, &str, &str, &[&str])] = &[
     ),
     ("urine_nitrite", "Nitrite - urine", "1", &[]),
     ("urine_occult_blood", "Occult blood - urine", "1", &[]),
-    (
-        "urine_ph",
-        "pH - urine",
-        "1",
-        &["Urine pH", "pH, Urine", "Urinary pH", "pH of Urine"],
-    ),
     ("urine_protein", "Protein - urine", "1", &[]),
     (
         "arachidonic_epa_ratio",
