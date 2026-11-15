@@ -33,99 +33,7 @@ struct ReportView: View {
         let choosingMetric: Bool
     }
     var body: some View {
-        let observations = document["observations"].arrayValue
-        let pending = observations.filter { $0["status"] == .string("pending") }
-        let ready = pending.filter { ReportReview.canBulkConfirm($0) }
-        let needsReview = pending.filter { !ReportReview.canBulkConfirm($0) }
-        let confirmed = observations.filter { $0["status"] == .string("confirmed") }
-        return List {
-            Section {
-                Button { contextVisible = true } label: {
-                    HStack {
-                        Text("Report Info")
-                        Spacer()
-                        Text(document["context"]["source_name"].stringValue.isEmpty ? "Set source name" : document["context"]["source_name"].stringValue)
-                            .foregroundStyle(.secondary)
-                        Image(systemName: MobileSymbol.name("chevron.right")).font(.caption).foregroundStyle(.secondary)
-                    }
-                }.accessibilityIdentifier("report-info")
-                LabeledContent("Total Markers", value: "\(document["observations"].arrayValue.count)")
-                    .accessibilityIdentifier("report-marker-count")
-                    .accessibilityValue("\(document["observations"].arrayValue.count)")
-                HStack(spacing: 12) {
-                    Button { showSource(page: 1) } label: { reportAction("View Original", icon: "doc.text.magnifyingglass") }
-                        .accessibilityLabel("View original report").accessibilityIdentifier("report-original")
-                    Button { editor = EditTarget(observation: .null, choosingMetric: false) } label: { reportAction("Add Result", icon: "plus") }
-                        .accessibilityLabel("Add result manually").accessibilityIdentifier("report-add-result")
-                    Button { rescanConfirmation = true } label: { reportAction("Rescan", icon: "arrow.clockwise") }
-                        .accessibilityLabel("Rescan report").accessibilityIdentifier("report-rescan")
-                        .disabled(extracting || rescanning)
-                    Button(role: .destructive) { deleting = true } label: { reportAction("Delete", icon: "trash") }
-                        .accessibilityLabel("Delete report").accessibilityIdentifier("report-delete")
-                }.buttonStyle(.borderless)
-                .disabled(document == .null || model.isBusy)
-                if let job = model.jobs.first(where: { $0["file_id"].stringValue == reportID }), job["status"] == .string("failed") {
-                    Button("Retry failed extraction") { Task { await model.perform { if let client = model.client { _ = try await model.request("jobs/retry", body: .object(["job_id": job["job_id"]])) } }; await model.refresh(automatic: false); await reload() } }
-                }
-                if !document["relation"]["preferred_report_id"].stringValue.isEmpty {
-                    Text("Excluded from trends: \(document["relation"]["kind"].stringValue). Original data is retained.").font(.caption)
-                    Button("Treat as independent report") { Task { await unlink() } }
-                }
-            }
-            Section("Review Results") {
-                HStack {
-                    NavigationLink {
-                        List {
-                            ForEach(ready, id: \.identifier) { observation in
-                                observationRow(observation)
-                            }
-                        }.mobileNavigationTitle("Ready to Confirm")
-                    } label: {
-                        Text(ready.count == 1 ? "1 result ready to confirm" : "\(ready.count) results ready to confirm")
-                            .foregroundStyle(.primary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(.borderless)
-                    .accessibilityIdentifier("ready-to-confirm-results")
-                    .disabled(ready.isEmpty)
-                    Spacer(minLength: 8)
-                    Button(confirmingAll ? "Confirming…" : "Confirm") { Task { await confirmAll() } }
-                        .buttonStyle(.borderless)
-                        .accessibilityIdentifier("confirm-all-results")
-                        .disabled(confirmingAll || extracting || ready.isEmpty)
-                }
-                if let confirmationError { Text(confirmationError).foregroundStyle(.red) }
-                if observations.isEmpty && document["validation_issues"].arrayValue.isEmpty {
-                    Text("No extracted results yet.").foregroundStyle(.secondary)
-                }
-            }
-            if !needsReview.isEmpty || !document["validation_issues"].arrayValue.isEmpty {
-                Section("Needs Review") {
-                    ForEach(indexedValues("validation_issues")) { entry in
-                        let issue = entry.value
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(issue["item_name"].stringValue.isEmpty ? "Item \(Int(issue["item_index"].numberValue ?? 0))" : issue["item_name"].stringValue).font(.headline)
-                            Text("Page \(Int(issue["page"].numberValue ?? 0)) · \(issue["reason"].stringValue == "invalid_date" ? "Invalid" : "Missing") \(issue["field"].stringValue.replacingOccurrences(of: "_", with: " "))")
-                                .foregroundStyle(.red)
-                        }
-                    }
-                    ForEach(needsReview, id: \.identifier) { observation in
-                        observationRow(observation)
-                    }
-                }
-            }
-            if !confirmed.isEmpty {
-                Section("Confirmed Results") {
-                    ForEach(confirmed, id: \.identifier) { observation in
-                        observationRow(observation)
-                    }
-                }
-            }
-            Section {
-                NavigationLink("Detail") { List { reportDetails }.mobileNavigationTitle("Detail") }
-                    .accessibilityIdentifier("report-detail")
-            }
-        }
+        reportList
         .disabled(confirmingAll || rescanning || savingReview)
         .mobileNavigationTitle(document["context"]["report_title"].stringValue.isEmpty ? "Blood Work" : document["context"]["report_title"].stringValue)
         .navigationBarTitleDisplayMode(.inline)
@@ -158,9 +66,271 @@ struct ReportView: View {
             } } }
         } message: { Text("This deletes the report, its confirmed and draft results, and related analysis from your archive. The server then removes stored files. Offline backups you made are separate.") }
     }
-    private func observationRow(_ observation: JSONValue) -> some View {
+    private enum ReportRow: Identifiable {
+        case info, markerCount, actions, retry, relationship, unlink, review, error, empty, detail
+        case validation(IndexedValue)
+        case observation(JSONValue)
+
+        var id: String {
+            switch self {
+            case .info: "report-info"
+            case .markerCount: "marker-count"
+            case .actions: "report-actions"
+            case .retry: "retry-extraction"
+            case .relationship: "relationship"
+            case .unlink: "unlink-report"
+            case .review: "review-actions"
+            case .error: "confirmation-error"
+            case .empty: "empty-results"
+            case .detail: "report-detail"
+            case .validation(let issue): issue.id
+            case .observation(let value): "observation-\(value.identifier)"
+            }
+        }
+    }
+
+    private struct ReportSection: Identifiable {
+        let id: String
+        let title: String?
+        let rows: [ReportRow]
+    }
+
+    private var sections: [ReportSection] {
+        let observations = document["observations"].arrayValue
+        let validation = indexedValues("validation_issues")
+        var information: [ReportRow] = [.info, .markerCount, .actions]
+        if failedJob != nil { information.append(.retry) }
+        if !document["relation"]["preferred_report_id"].stringValue.isEmpty {
+            information.append(.relationship)
+            information.append(.unlink)
+        }
+        var review: [ReportRow] = [.review]
+        if confirmationError != nil { review.append(.error) }
+        if observations.isEmpty && validation.isEmpty { review.append(.empty) }
+
+        let needsReview = validation.map { ReportRow.validation($0) } + observations.filter {
+            $0["status"] == .string("pending") && !ReportReview.canBulkConfirm($0)
+        }.map { ReportRow.observation($0) }
+        let confirmed = observations.filter { $0["status"] == .string("confirmed") }
+            .map { ReportRow.observation($0) }
+        var result = [
+            ReportSection(id: "info", title: nil, rows: information),
+            ReportSection(id: "review", title: "Review Results", rows: review)
+        ]
+        if !needsReview.isEmpty {
+            result.append(ReportSection(id: "manual", title: "Needs Review", rows: needsReview))
+        }
+        if !confirmed.isEmpty {
+            result.append(ReportSection(id: "confirmed", title: "Confirmed Results", rows: confirmed))
+        }
+        result.append(ReportSection(id: "detail", title: nil, rows: [.detail]))
+        return result
+    }
+
+    @ViewBuilder private var reportList: some View {
+        #if os(Android)
+        // Skip renders the lazy stack as the sole vertical scroll owner. Keep
+        // headings and rows there so the native list can't reorder or animate them.
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(scrollItems) { item in
+                    switch item {
+                    case .header(_, let title):
+                        reportSectionHeader(title)
+                    case .row(let row, let first, let last):
+                        reportListRow(row, first: first, last: last)
+                    }
+                }
+            }
+            .padding(16)
+        }
+        #else
+        List {
+            ForEach(sections) { section in
+                Section {
+                    ForEach(section.rows) { row in reportRow(row) }
+                } header: {
+                    if let title = section.title { Text(title) }
+                }
+            }
+        }
+        #endif
+    }
+
+    #if os(Android)
+    private enum ReportScrollItem: Identifiable {
+        case header(String, String?)
+        case row(ReportRow, first: Bool, last: Bool)
+
+        var id: String {
+            switch self {
+            case .header(let id, _): "section-\(id)"
+            case .row(let row, _, _): row.id
+            }
+        }
+    }
+
+    private var scrollItems: [ReportScrollItem] {
+        var items: [ReportScrollItem] = []
+        for section in sections {
+            if section.id != "info" {
+                items.append(.header(section.id, section.title))
+            }
+            for (index, row) in section.rows.enumerated() {
+                items.append(.row(row, first: index == 0, last: index == section.rows.count - 1))
+            }
+        }
+        return items
+    }
+
+    @ViewBuilder private func reportSectionHeader(_ title: String?) -> some View {
+        if let title {
+            Text(title.uppercased()).font(.footnote).foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 8)
+        } else {
+            Color.clear.frame(height: 24)
+        }
+    }
+
+    private func reportListRow(_ row: ReportRow, first: Bool, last: Bool) -> some View {
+        VStack(spacing: 0) {
+            reportRow(row)
+                .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                .padding(.horizontal, 16).padding(.vertical, 8)
+            if !last { Divider() }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(UnevenRoundedRectangle(topLeadingRadius: first ? 8 : 0,
+            bottomLeadingRadius: last ? 8 : 0, bottomTrailingRadius: last ? 8 : 0,
+            topTrailingRadius: first ? 8 : 0))
+    }
+    #endif
+
+    @ViewBuilder private func reportRow(_ row: ReportRow) -> some View {
+        switch row {
+        case .info:
+            Button { contextVisible = true } label: {
+                HStack {
+                    Text("Report Info")
+                    Spacer()
+                    let source = document["context"]["source_name"].stringValue
+                    Text(source.isEmpty ? "Set source name" : source).foregroundStyle(.secondary)
+                    Image(systemName: MobileSymbol.name("chevron.right")).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            #if os(Android)
+            .buttonStyle(.plain)
+            #endif
+            .accessibilityIdentifier("report-info")
+        case .markerCount:
+            let count = document["observations"].arrayValue.count
+            LabeledContent("Total Markers", value: "\(count)")
+                .accessibilityIdentifier("report-marker-count").accessibilityValue("\(count)")
+        case .actions:
+            reportActions
+        case .retry:
+            Button("Retry failed extraction") { Task { await retryExtraction() } }
+        case .relationship:
+            Text("Excluded from trends: \(document["relation"]["kind"].stringValue). Original data is retained.").font(.caption)
+        case .unlink:
+            Button("Treat as independent report") { Task { await unlink() } }
+        case .review:
+            reviewActions
+        case .error:
+            if let confirmationError { Text(confirmationError).foregroundStyle(.red) }
+        case .empty:
+            Text("No extracted results yet.").foregroundStyle(.secondary)
+        case .validation(let entry):
+            validationRow(entry.value)
+        case .observation(let observation):
+            observationRow(observation)
+        case .detail:
+            NavigationLink {
+                List { reportDetails }.mobileNavigationTitle("Detail")
+            } label: {
+                #if os(Android)
+                HStack {
+                    Text("Detail")
+                    Spacer()
+                    Image(systemName: MobileSymbol.name("chevron.right")).font(.caption).foregroundStyle(.secondary)
+                }
+                #else
+                Text("Detail")
+                #endif
+            }.accessibilityIdentifier("report-detail")
+        }
+    }
+
+    private var reportActions: some View {
+        HStack(spacing: 12) {
+            Button { showSource(page: 1) } label: { reportAction("View Original", icon: "doc.text.magnifyingglass") }
+                .accessibilityLabel("View original report").accessibilityIdentifier("report-original")
+            Button { editor = EditTarget(observation: .null, choosingMetric: false) } label: { reportAction("Add Result", icon: "plus") }
+                .accessibilityLabel("Add result manually").accessibilityIdentifier("report-add-result")
+            Button { rescanConfirmation = true } label: { reportAction("Rescan", icon: "arrow.clockwise") }
+                .accessibilityLabel("Rescan report").accessibilityIdentifier("report-rescan")
+                .disabled(extracting || rescanning)
+            Button(role: .destructive) { deleting = true } label: { reportAction("Delete", icon: "trash") }
+                .accessibilityLabel("Delete report").accessibilityIdentifier("report-delete")
+        }.buttonStyle(.borderless)
+        .disabled(document == .null || model.isBusy)
+    }
+
+    private var ready: [JSONValue] {
+        document["observations"].arrayValue.filter { ReportReview.canBulkConfirm($0) }
+    }
+
+    private var reviewActions: some View {
+        let observations = ready
+        return HStack {
+            NavigationLink {
+                List {
+                    ForEach(ready, id: \.identifier) { observation in observationRow(observation) }
+                }.mobileNavigationTitle("Ready to Confirm")
+            } label: {
+                Text(observations.count == 1 ? "1 result ready to confirm" : "\(observations.count) results ready to confirm")
+                    .foregroundStyle(.primary).frame(maxWidth: .infinity, alignment: .leading)
+            }.buttonStyle(.borderless)
+            .accessibilityIdentifier("ready-to-confirm-results")
+            .disabled(observations.isEmpty)
+            Spacer(minLength: 8)
+            Button(confirmingAll ? "Confirming…" : "Confirm") { Task { await confirmAll() } }
+                .buttonStyle(.borderless)
+                .accessibilityIdentifier("confirm-all-results")
+                .disabled(confirmingAll || extracting || observations.isEmpty)
+        }
+    }
+
+    private func validationRow(_ issue: JSONValue) -> some View {
+        let name = issue["item_name"].stringValue
+        let field = issue["field"].stringValue.replacingOccurrences(of: "_", with: " ")
+        let reason = issue["reason"] == .string("invalid_date") ? "Invalid" : "Missing"
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(name.isEmpty ? "Item \(Int(issue["item_index"].numberValue ?? 0))" : name).font(.headline)
+            Text("Page \(Int(issue["page"].numberValue ?? 0)) · \(reason) \(field)").foregroundStyle(.red)
+        }
+    }
+
+    private var failedJob: JSONValue? {
+        guard let job = model.jobs.first(where: { $0["file_id"].stringValue == reportID }),
+              job["status"] == .string("failed") else { return nil }
+        return job
+    }
+
+    private func retryExtraction() async {
+        guard let job = failedJob else { return }
+        await model.perform {
+            guard model.client != nil else { return }
+            _ = try await model.request("jobs/retry", body: .object(["job_id": job["job_id"]]))
+        }
+        await model.refresh(automatic: false)
+        await reload()
+    }
+
+    private func observationRow(_ observation: JSONValue, canConfirm: Bool = true) -> some View {
         ReportObservationRow(observation: observation, isBusy: model.isBusy,
-            changeStatus: { Task { await toggleStatus(observation) } },
+            changeStatus: canConfirm ? { _ = Task { await toggleStatus(observation) } } : nil,
             edit: { editor = EditTarget(observation: observation, choosingMetric: false) },
             chooseMetric: { editor = EditTarget(observation: observation, choosingMetric: true) },
             showSource: { showSource(page: $0) },
@@ -172,46 +342,41 @@ struct ReportView: View {
         if !rejected.isEmpty {
             Section("Rejected results") {
                 ForEach(rejected, id: \.identifier) { observation in
-                    ReportObservationRow(observation: observation, isBusy: model.isBusy,
-                        changeStatus: nil,
-                        edit: { editor = EditTarget(observation: observation, choosingMetric: false) },
-                        chooseMetric: { editor = EditTarget(observation: observation, choosingMetric: true) },
-                        showSource: { showSource(page: $0) },
-                        writeHealth: { healthWriter = EditTarget(observation: observation, choosingMetric: false) })
+                    observationRow(observation, canConfirm: false)
                 }
             }
         }
-            if !document["pages"].arrayValue.isEmpty {
-                Section("Page processing") {
-                    ForEach(indexedValues("pages")) { entry in
-                        let page = entry.value
-                        NavigationLink("Page \(Int(page["page"].numberValue ?? 0)) · \(page["status"].stringValue)") {
-                            ScrollView { CopyableText(page["content"].stringValue).font(.caption).padding() }
-                                .mobileNavigationTitle("Page processing")
-                        }
+        if !document["pages"].arrayValue.isEmpty {
+            Section("Page processing") {
+                ForEach(indexedValues("pages")) { entry in
+                    let page = entry.value
+                    NavigationLink("Page \(Int(page["page"].numberValue ?? 0)) · \(page["status"].stringValue)") {
+                        ScrollView { CopyableText(page["content"].stringValue).font(.caption).padding() }
+                            .mobileNavigationTitle("Page processing")
                     }
                 }
             }
-            if !document["extraction_inputs"].arrayValue.isEmpty {
-                Section("Document evidence") {
-                    ForEach(indexedValues("extraction_inputs")) { entry in
-                        let input = entry.value
-                        NavigationLink("Page \(Int(input["page"].numberValue ?? 0)) · text layer: \(input["text_status"].stringValue.isEmpty ? "image only" : input["text_status"].stringValue)") {
-                            DocumentEvidenceView(model: model, reportID: reportID, input: input)
-                        }
+        }
+        if !document["extraction_inputs"].arrayValue.isEmpty {
+            Section("Document evidence") {
+                ForEach(indexedValues("extraction_inputs")) { entry in
+                    let input = entry.value
+                    NavigationLink("Page \(Int(input["page"].numberValue ?? 0)) · text layer: \(input["text_status"].stringValue.isEmpty ? "image only" : input["text_status"].stringValue)") {
+                        DocumentEvidenceView(model: model, reportID: reportID, input: input)
                     }
                 }
             }
-            if !document["extraction_outputs"].arrayValue.isEmpty {
-                Section("Original OCR output") {
-                    ForEach(indexedValues("extraction_outputs")) { entry in
-                        let output = entry.value
-                        NavigationLink("Page \(Int(output["page"].numberValue ?? 0)) · \(output["stage"].stringValue)") {
-                            ExtractionOutputView(model: model, reportID: reportID, output: output)
-                        }
+        }
+        if !document["extraction_outputs"].arrayValue.isEmpty {
+            Section("Original OCR output") {
+                ForEach(indexedValues("extraction_outputs")) { entry in
+                    let output = entry.value
+                    NavigationLink("Page \(Int(output["page"].numberValue ?? 0)) · \(output["stage"].stringValue)") {
+                        ExtractionOutputView(model: model, reportID: reportID, output: output)
                     }
                 }
             }
+        }
     }
     private func reportAction(_ title: String, icon: String) -> some View {
         VStack(spacing: 5) {

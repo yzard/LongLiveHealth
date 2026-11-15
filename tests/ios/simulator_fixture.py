@@ -144,6 +144,10 @@ class Handler(BaseHTTPRequestHandler):
                      payload=dict(template['payload'], raw_name=f'Marker {index + 1}'))
                 for index in range(126)
             ]
+            if body.get('needs_review'):
+                for row in observations[1:]:
+                    row['browse_issues'] = [{'code': 'unsupported_unit', 'scope': 'review',
+                                             'message': 'Check the reported unit.'}]
         if route == 'test/mark-last-result-uncertain':
             row = observations[-1]
             row['status'] = 'pending'

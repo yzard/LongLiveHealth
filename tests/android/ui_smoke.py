@@ -327,6 +327,64 @@ def blood_work_categories():
     print("PASS: Heart keeps heart rate; Blood Work contains LDL and Calcium")
 
 
+def report_scroll():
+    """Reverse scroll through a long Needs Review section in both report layouts."""
+    def control(path, payload=None):
+        subprocess.check_call([
+            "docker", "exec", CONTAINER, "curl", "-fsS", "-X", "POST",
+            "-H", "Content-Type: application/json", "-d", json.dumps(payload or {}),
+            "http://127.0.0.1:18765/api/v1/" + path,
+        ], stdout=subprocess.DEVNULL)
+
+    def visible():
+        return {(label or "").casefold() for label in labels()}
+
+    headers = {"report info", "review results", "needs review"}
+
+    try:
+        for wide in (False, True):
+            control("test/reset")
+            control("test/seed-report")
+            control("test/expand-report", {"needs_review": True})
+            adb("shell", "am", "force-stop", "dev.longlivehealth.android")
+            width, height, density = (2208, 1840, 320) if wide else (1080, 2400, 420)
+            adb("shell", "wm", "size", f"{width}x{height}")
+            adb("shell", "wm", "density", str(density))
+            adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
+            wait_for("Insights")
+            tap("Data")
+            wait_for("Blood Work")
+            tap("Blood Work")
+            wait_for("Example Laboratory")
+            tap("Example Laboratory")
+            wait_for("Report Info")
+            assert headers <= visible(), "Report sections missing at the top"
+
+            x = str(width * 3 // 4 if wide else width // 2)
+            upper, lower = str(height * 27 // 100), str(height * 75 // 100)
+            for _ in range(3):
+                adb("shell", "input", "swipe", x, lower, x, upper, "400")
+            scrolled = visible()
+            assert headers.isdisjoint(scrolled), "Report headings did not scroll out of view"
+            assert any(re.fullmatch(r"marker \d+", label) for label in scrolled), "No review rows after scrolling"
+
+            returned = visible()
+            for _ in range(10):
+                if headers <= returned:
+                    break
+                adb("shell", "input", "swipe", x, upper, x, lower, "400")
+                returned = visible()
+            assert headers <= returned, f"Could not scroll back to sections: {headers - returned}"
+            tap("Report Info")
+            wait_for("Cancel")
+            tap("Cancel")
+            wait_for("Report Info")
+    finally:
+        adb("shell", "wm", "size", "reset")
+        adb("shell", "wm", "density", "reset")
+    print("PASS: report scrolls back to Report Info and review sections on narrow and wide screens")
+
+
 def report_metric_review():
     def control(path):
         return json.loads(subprocess.check_output([
@@ -367,6 +425,8 @@ def report_metric_review():
             tap("Blood glucose")
             wait_for("Save")
             tap("Save")
+            wait_for("1 result ready to confirm")
+            tap("1 result ready to confirm")
             wait_for("5.5 mmol/L")
             assert control("reports/get")["observations"][0]["payload"]["metric_id"] == "glucose"
         else:
@@ -383,6 +443,8 @@ def report_metric_review():
             tap("Create new metric")
             wait_for("Save")
             tap("Save")
+            wait_for("1 result ready to confirm")
+            tap("1 result ready to confirm")
             wait_for("Zyphorin activity")
             saved = control("reports/get")["observations"][0]
             assert saved["created_metric"] == {
@@ -660,7 +722,7 @@ def paired_charts():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("inspect", "login", "tap", "navigation", "browse-switch", "camera", "selectors", "chart-scroll", "original-preview", "rescan", "blood-work", "report-date", "report-metric-review", "report-mapping-layout", "report-status-actions", "report-status-chart", "report-settings", "edge-scroll", "paired-charts"))
+    parser.add_argument("action", choices=("inspect", "login", "tap", "navigation", "browse-switch", "camera", "selectors", "chart-scroll", "original-preview", "rescan", "blood-work", "report-date", "report-scroll", "report-metric-review", "report-mapping-layout", "report-status-actions", "report-status-chart", "report-settings", "edge-scroll", "paired-charts"))
     parser.add_argument("text", nargs="?")
     args = parser.parse_args()
     if args.action == "inspect":
@@ -679,6 +741,8 @@ if __name__ == "__main__":
         selectors()
     elif args.action == "report-date":
         report_date()
+    elif args.action == "report-scroll":
+        report_scroll()
     elif args.action == "report-metric-review":
         report_metric_review()
     elif args.action == "report-mapping-layout":
