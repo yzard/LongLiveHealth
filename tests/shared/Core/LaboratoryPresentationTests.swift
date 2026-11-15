@@ -20,3 +20,16 @@ import Testing
     #expect(LaboratoryPresentation.printedName("TSH (3rd Generation)", code: "11580-8") == "TSH (3rd Generation)")
     #expect(LaboratoryPresentation.printedName("TSH (11580-8)", code: "") == "TSH (11580-8)")
 }
+
+@Test func renamedMetricsMoveInAlphabeticalOrderWithStableTies() {
+    let entries = [
+        (id: "z", name: "Alpha"),
+        (id: "a", name: "Alpha"),
+        (id: "c", name: "beta"),
+        (id: "b", name: "Vitamin D"),
+    ]
+    let ordered = entries.sorted { left, right in
+        LaboratoryPresentation.nameSortsBefore(left.name, id: left.id, right.name, otherID: right.id)
+    }
+    #expect(ordered.map(\.id) == ["a", "z", "c", "b"])
+}

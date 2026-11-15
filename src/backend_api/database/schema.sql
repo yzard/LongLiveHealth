@@ -18,6 +18,19 @@ CREATE TABLE custom_lab_metrics (
     UNIQUE (user_id, name_key, standard_unit)
 );
 
+CREATE TABLE lab_metric_aliases (
+    user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    metric_id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    PRIMARY KEY (user_id, metric_id)
+);
+CREATE TABLE lab_metric_loinc_links (
+    user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    loinc_code TEXT NOT NULL,
+    metric_id TEXT NOT NULL,
+    PRIMARY KEY (user_id, loinc_code)
+);
+
 CREATE TABLE sessions (
     token_hash TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,

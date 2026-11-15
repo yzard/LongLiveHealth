@@ -468,7 +468,7 @@ async fn extract_page(
     page: i64,
     image_url: String,
     evidence: &crate::documents::PageEvidence,
-    database_metrics: std::sync::Arc<[crate::laboratory::CustomMetric]>,
+    database_metrics: std::sync::Arc<crate::ocr::MetricCatalog>,
 ) -> Result<(ExtractedPage, String, String), AppError> {
     let _permit = state
         .inference_slots

@@ -2,6 +2,11 @@ import Foundation
 
 /// Formats server-derived laboratory evidence without implementing conversion rules on the phone.
 public nonisolated enum LaboratoryPresentation {
+    public static func nameSortsBefore(_ name: String, id: String, _ otherName: String, otherID: String) -> Bool {
+        let order = name.localizedStandardCompare(otherName)
+        return order == .orderedSame ? id < otherID : order == .orderedAscending
+    }
+
     public static func printedName(_ rawName: String, code: String) -> String {
         guard !code.isEmpty else { return rawName }
         let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines)

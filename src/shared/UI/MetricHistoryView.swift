@@ -10,6 +10,13 @@ struct MetricHistoryView: View {
     @State var historyRevision: Int?
     @State var loading = false
     @State var failure: String?
+    @State var renaming = false
+
+    private var metricName: String {
+        model.renamedLabMetrics[metric["metric_id"].stringValue]
+            ?? (currentHistory["metric"]["name"] == .null ? nil : currentHistory["metric"]["name"].stringValue)
+            ?? metric["name"].stringValue
+    }
 
     private var currentHistory: JSONValue { historyRevision == model.reportDataRevision ? history : .null }
     private var points: [JSONValue] { currentHistory["points"].arrayValue }
@@ -19,7 +26,7 @@ struct MetricHistoryView: View {
     private var sourceNames: [String: String] { Dictionary(points.map { (SourceNames.key($0), $0["source_name"].stringValue) }, uniquingKeysWith: { first, _ in first }) }
 
     var body: some View {
-        MetricDetailScreen(title: metric["name"].stringValue) {
+        MetricDetailScreen(title: metricName) {
             MetricChartSection {
                 if loading { ProgressView("Loading measurements") }
                 if let failure { Text(failure).foregroundStyle(.secondary) }
@@ -46,12 +53,29 @@ struct MetricHistoryView: View {
                 }
             }
             Section("About this metric") {
-                MetricAboutView(id: metric["metric_id"].stringValue, name: metric["name"].stringValue)
+                MetricAboutView(id: metric["metric_id"].stringValue, name: metricName)
+                ForEach(Array(currentHistory["metric"]["loinc"].arrayValue.enumerated()), id: \.offset) { _, entry in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("LOINC \(entry["code"].stringValue)").font(.subheadline.weight(.semibold))
+                        Text(entry["official_name"] == .null ? "Official name unavailable" : entry["official_name"].stringValue)
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
             Section {
                 NavigationLink("Historical Values") {
                     MetricHistoricalValuesView(model: model, records: records, points: points)
                 }
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Rename") { renaming = true }
+            }
+        }
+        .sheet(isPresented: $renaming) {
+            NavigationStack {
+                RenameLabMetricView(model: model, metricID: metric["metric_id"].stringValue, initialName: metricName)
             }
         }
         .initialTask(id: model.reportDataRevision) { await reload() }
@@ -76,6 +100,57 @@ struct MetricHistoryView: View {
         }
     }
 
+}
+
+struct RenameLabMetricView: View {
+    var model: AppModel
+    let metricID: String
+    let initialName: String
+    @Environment(\.dismiss) var dismiss
+    @State var name = ""
+    @State var saving = false
+    @State var failure: String?
+    @State var discard = false
+
+    private var enteredName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        Form {
+            TextField("Metric name", text: $name)
+            if let failure { Text(failure).foregroundStyle(.red) }
+        }
+        .mobileNavigationTitle("Rename metric")
+        .onAppear { name = initialName }
+        .interactiveDismissDisabled(name != initialName || saving)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") {
+                    if name == initialName { dismiss() } else { discard = true }
+                }.disabled(saving)
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") { Task { await save() } }
+                    .disabled(saving || enteredName.isEmpty || enteredName == initialName || enteredName.utf8.count > 256)
+            }
+        }
+        .confirmationDialog("Discard changes?", isPresented: $discard) {
+            Button("Discard", role: .destructive) { dismiss() }
+        }
+    }
+
+    private func save() async {
+        saving = true
+        failure = nil
+        defer { saving = false }
+        do {
+            try await model.renameLabMetric(metricID, name: enteredName)
+            dismiss()
+        } catch is CancellationError {
+            return
+        } catch {
+            failure = error.localizedDescription
+        }
+    }
 }
 
 struct MetricHistoricalValuesView: View {

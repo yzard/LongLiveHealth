@@ -54,6 +54,7 @@ pub fn router(upload_limit: usize) -> Router<AppState> {
         )
         .route("/api/v1/reports/relate", post(relate_reports))
         .route("/api/v1/metrics/list", post(list_metrics))
+        .route("/api/v1/metrics/rename", post(rename_metric))
         .route("/api/v1/browse/catalog", post(browse_catalog))
         .route("/api/v1/metrics/history/get", post(get_metric_history))
         .route("/api/v1/health/connect", post(connect_health))
@@ -412,12 +413,42 @@ async fn list_metrics(
     State(state): State<AppState>,
     current: CurrentUser,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let mut metrics = serde_json::to_value(crate::laboratory::metrics())?;
-    let entries = metrics.as_array_mut().ok_or(AppError::Internal)?;
-    for metric in state.database.custom_metrics(&current.user.user_id).await? {
-        entries.push(serde_json::to_value(metric)?);
+    let user = &current.user.user_id;
+    let database = &state.database;
+    let mut definitions: Vec<serde_json::Value> = crate::laboratory::metrics()
+        .iter()
+        .map(serde_json::to_value)
+        .collect::<Result<_, _>>()?;
+    for metric in database.custom_metrics(user).await? {
+        definitions.push(serde_json::to_value(metric)?);
     }
-    Ok(Json(json!({"metrics":metrics})))
+    for (id, group) in crate::lab_metric_metadata::clinical_groups(database, user).await? {
+        if crate::lab_metric_metadata::is_clinical_id(&id) {
+            definitions.push(serde_json::to_value(
+                crate::lab_metric_metadata::clinical_metric(&group)?,
+            )?);
+        }
+    }
+    let metadata = database.lab_metric_metadata(user).await?;
+    for definition in &mut definitions {
+        metadata.apply_name(definition);
+    }
+    definitions.sort_by_cached_key(|metric| {
+        (
+            metric["name"].as_str().unwrap_or_default().to_lowercase(),
+            metric["metric_id"].as_str().unwrap_or_default().to_owned(),
+        )
+    });
+    Ok(Json(json!({"metrics":definitions})))
+}
+async fn rename_metric(
+    State(state): State<AppState>,
+    current: CurrentUser,
+    Json(request): Json<crate::lab_metric_metadata::RenameRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    Ok(Json(
+        crate::lab_metric_metadata::rename(&state.database, &current.user.user_id, request).await?,
+    ))
 }
 async fn browse_catalog(
     State(state): State<AppState>,

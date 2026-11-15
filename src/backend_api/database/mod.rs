@@ -85,6 +85,9 @@ impl Database {
                 .execute(&mut *transaction)
                 .await?;
         }
+        sqlx::raw_sql(include_str!("lab_metric_schema.sql"))
+            .execute(&mut *transaction)
+            .await?;
         sqlx::query(queries::CREATE_REPORT_ANALYSIS_REQUESTS)
             .execute(&mut *transaction)
             .await?;

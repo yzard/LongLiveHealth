@@ -51,7 +51,22 @@ CREATE TABLE IF NOT EXISTS custom_lab_metrics (
 "#;
 pub const CUSTOM_LAB_METRICS: &str = "SELECT metric_id, name, standard_unit FROM custom_lab_metrics WHERE user_id = ? ORDER BY name, metric_id";
 pub const INSERT_CUSTOM_LAB_METRIC: &str = "INSERT INTO custom_lab_metrics (metric_id,user_id,name,name_key,standard_unit) VALUES (?,?,?,?,?) ON CONFLICT (user_id,name_key,standard_unit) DO NOTHING";
+pub const LAB_METRIC_ALIASES: &str =
+    "SELECT metric_id, display_name FROM lab_metric_aliases WHERE user_id = ?";
+pub const SET_LAB_METRIC_ALIAS: &str = "INSERT INTO lab_metric_aliases (user_id, metric_id, display_name) VALUES (?,?,?) ON CONFLICT (user_id, metric_id) DO UPDATE SET display_name = excluded.display_name";
+pub const LAB_METRIC_LOINC_LINKS: &str =
+    "SELECT loinc_code, metric_id FROM lab_metric_loinc_links WHERE user_id = ?";
+pub const LINK_LAB_METRIC_LOINC: &str =
+    "INSERT INTO lab_metric_loinc_links (user_id, loinc_code, metric_id) VALUES (?,?,?)";
 pub const EXPORT_TABLES: &[(&str, &str)] = &[
+    (
+        "lab_metric_aliases",
+        "SELECT * FROM lab_metric_aliases WHERE user_id = ?",
+    ),
+    (
+        "lab_metric_loinc_links",
+        "SELECT * FROM lab_metric_loinc_links WHERE user_id = ?",
+    ),
     ("daily_views", "SELECT * FROM daily_views WHERE user_id = ?"),
     (
         "derived_results",
@@ -210,7 +225,7 @@ pub const REPORT: &str = report_summary_query!("r.report_id = ?");
 pub const REPORTS: &str =
     report_summary_query!("(? IS NULL OR r.report_id > ?) ORDER BY r.report_id LIMIT ?");
 pub const OBSERVATIONS: &str = "SELECT o.observation_id, o.report_id, o.current_revision AS revision, o.status, o.payload_json, r.context_json FROM review_observations o JOIN reports r ON r.user_id = o.user_id AND r.report_id = o.report_id WHERE o.user_id = ? AND o.report_id = ? ORDER BY o.observation_id";
-pub const OBSERVATION: &str = "SELECT o.current_revision FROM review_observations o WHERE o.user_id = ? AND o.report_id = ? AND o.observation_id = ?";
+pub const OBSERVATION: &str = "SELECT o.current_revision, o.status, o.payload_json FROM review_observations o WHERE o.user_id = ? AND o.report_id = ? AND o.observation_id = ?";
 pub const INSERT_OBSERVATION: &str = "INSERT INTO draft.observations (observation_id, user_id, report_id, current_revision, candidate_key) VALUES (?, ?, ?, 1, ?)";
 pub const SAVE_OBSERVATION: &str = "INSERT INTO draft.observations (user_id,observation_id,current_revision,status,payload_json,updated_at,report_id,candidate_key) SELECT ?1,?2,?3,?4,?5,?6,report_id,candidate_key FROM review_observations WHERE user_id=?1 AND observation_id=?2 ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision,status=excluded.status,payload_json=excluded.payload_json,updated_at=excluded.updated_at";
 pub const CONFIRM_OBSERVATION: &str = "INSERT INTO main.observations (user_id,observation_id,current_revision,status,payload_json,updated_at,report_id,candidate_key) SELECT ?1,?2,?3,?4,?5,?6,report_id,candidate_key FROM review_observations WHERE user_id=?1 AND observation_id=?2 ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision,status=excluded.status,payload_json=excluded.payload_json,updated_at=excluded.updated_at";

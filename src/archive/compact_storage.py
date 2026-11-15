@@ -37,7 +37,7 @@ def compact_locked(root, database):
     definitions = canonical.execute(queries.SCHEMA).fetchall()
     tables = sorted(name for kind, name, _ in definitions if kind == 'table')
     source_tables = {row[0] for row in source.execute(queries.TABLES)}
-    check_export.require(source_tables in (set(tables), set(tables) - {'custom_lab_metrics'}), 'Unknown source tables')
+    check_export.require(set(tables) - check_export.OPTIONAL_LAB_TABLES <= source_tables <= set(tables), 'Unknown source tables')
     for table in sorted(source_tables):
         check_export.require(
             sorted(map(tuple, restore_queries.columns(canonical, table))) == sorted(map(tuple, restore_queries.columns(source, table))),

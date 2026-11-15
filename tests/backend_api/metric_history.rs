@@ -1720,3 +1720,269 @@ async fn blood_count_aliases_join_pdf_and_clinical_history() {
         );
     }
 }
+
+#[tokio::test]
+async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() {
+    use axum::http::StatusCode;
+    let (_directory, state) = fixture().await;
+    let alice = add_user(&state, "alice").await;
+    let bob = add_user(&state, "bob").await;
+    let connection = state
+        .database
+        .create_connection(
+            &alice.user_id,
+            ConnectionRequest {
+                platform: "apple_health".into(),
+                installation_id: uuid::Uuid::new_v4().to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let clinical = json!({
+        "resourceType": "Observation", "status": "final", "effectiveDateTime": "2026-08-02T12:00:00Z",
+        "code": {"text": "Direct bilirubin", "coding": [{"system": "http://loinc.org", "code": "1968-7"}]},
+        "valueQuantity": {"value": 0.2, "code": "mg/dL", "system": "http://unitsofmeasure.org"}
+    });
+    state.database.sync_health(&alice.user_id, SyncRequest {
+        connection_id: connection.connection_id,
+        batch_id: uuid::Uuid::new_v4().to_string(),
+        record_type: "HKClinicalTypeIdentifierLabResultRecord".into(),
+        coverage_status: "observed".into(),
+        records: vec![HealthRecordInput {
+            record_id: "direct-bilirubin".into(), source_id: "lab".into(),
+            record_type: "HKClinicalTypeIdentifierLabResultRecord".into(),
+            start_at: 1785672000, end_at: 1785672000,
+            version: 1, deleted: false,
+            payload: json!({"fhir":{"data_base64":STANDARD.encode(serde_json::to_vec(&clinical).unwrap())}}),
+        }],
+    }).await.unwrap();
+
+    let browse = longlivehealth::metric_history::browse(&state.database, &alice.user_id)
+        .await
+        .unwrap();
+    let id = browse["metrics"][0]["metric_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(id.starts_with("clinical:"));
+    let report_id = archive(&state, "alice").await;
+    let mut payload = observation_payload();
+    payload.metric_id = Some(id.clone());
+    payload.raw_name = "Bilirubin Direct (1968-7)".into();
+    payload.raw_result = "0.3".into();
+
+    state
+        .database
+        .review(
+            &alice.user_id,
+            ReviewRequest {
+                new_metric: None,
+                report_id: report_id.clone(),
+                expected_revision: 1,
+                context: None,
+                observations: vec![ReviewItem {
+                    observation_id: None,
+                    expected_revision: None,
+                    status: "confirmed".into(),
+                    payload: payload.clone(),
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+    let before = history(
+        &state.database,
+        &alice.user_id,
+        HistoryRequest {
+            metric_id: id.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(before["points"].as_array().unwrap().len(), 2);
+    assert_eq!(before["records"].as_array().unwrap().len(), 2);
+    let app = longlivehealth::app::create_application(state.clone());
+    let alice_token = crate::token(&state, "alice").await;
+    let bob_token = crate::token(&state, "bob").await;
+    let rename = json!({"metric_id": id, "name": "My direct bilirubin"});
+    assert_eq!(
+        crate::request(
+            &app,
+            "/api/v1/metrics/rename",
+            Some(&bob_token),
+            rename.clone()
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+    let (status, result) =
+        crate::request(&app, "/api/v1/metrics/rename", Some(&alice_token), rename).await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+    assert_eq!(result["metric_id"], id);
+    let after = history(
+        &state.database,
+        &alice.user_id,
+        HistoryRequest {
+            metric_id: id.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(after["metric"]["name"], "My direct bilirubin");
+    assert_eq!(after["metric"]["loinc"][0]["code"], "1968-7");
+    assert!(
+        after["metric"]["loinc"][0]["official_name"]
+            .as_str()
+            .unwrap()
+            .contains("Bilirubin")
+    );
+    assert_eq!(before["points"], after["points"]);
+    assert_eq!(before["records"], after["records"]);
+    let (_, available) =
+        crate::request(&app, "/api/v1/metrics/list", Some(&alice_token), json!({})).await;
+    assert!(
+        available["metrics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|metric| metric["metric_id"] == id && metric["name"] == "My direct bilirubin")
+    );
+    let names: Vec<_> = available["metrics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|metric| metric["name"].as_str().unwrap().to_lowercase())
+        .collect();
+    assert!(names.windows(2).all(|pair| pair[0] <= pair[1]));
+    let (_, catalog) = crate::request(
+        &app,
+        "/api/v1/browse/catalog",
+        Some(&alice_token),
+        json!({}),
+    )
+    .await;
+    assert!(
+        catalog["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["kind"] == id && entry["title"] == "My direct bilirubin")
+    );
+
+    payload.metric_id = None;
+    payload.raw_name = "Alternate printed name (1968-7)".into();
+    state
+        .database
+        .review(
+            &alice.user_id,
+            ReviewRequest {
+                new_metric: None,
+                report_id: report_id.clone(),
+                expected_revision: 2,
+                context: None,
+                observations: vec![ReviewItem {
+                    observation_id: None,
+                    expected_revision: None,
+                    status: "pending".into(),
+                    payload: payload.clone(),
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    let rows = state
+        .database
+        .observations(&alice.user_id, &report_id)
+        .await
+        .unwrap();
+    let pending = rows.iter().find(|row| row.status == "pending").unwrap();
+    assert_eq!(pending.resolved_metric_id.as_deref(), Some(id.as_str()));
+    assert_eq!(pending.display_name, "My direct bilirubin");
+
+    let update = |status: &str, revision, payload| ReviewRequest {
+        new_metric: None,
+        report_id: report_id.clone(),
+        expected_revision: revision,
+        context: None,
+        observations: vec![ReviewItem {
+            observation_id: Some(pending.observation_id.clone()),
+            expected_revision: Some(revision - 2),
+            status: status.into(),
+            payload,
+        }],
+    };
+    let mut conflict = payload.clone();
+    conflict.metric_id = Some("total_bilirubin".into());
+    state
+        .database
+        .review(&alice.user_id, update("pending", 3, conflict.clone()))
+        .await
+        .unwrap();
+    let rejected = state
+        .database
+        .review(&alice.user_id, update("confirmed", 4, conflict))
+        .await
+        .unwrap_err();
+    assert!(rejected.to_string().contains("already linked"));
+    let rows = state
+        .database
+        .observations(&alice.user_id, &report_id)
+        .await
+        .unwrap();
+    let pending = rows.iter().find(|row| row.status == "pending").unwrap();
+    assert!(
+        pending
+            .browse_issues
+            .iter()
+            .any(|issue| issue.code == "loinc_metric_conflict")
+    );
+    assert_eq!(
+        state
+            .database
+            .confirmed(&alice.user_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    state
+        .database
+        .review(&alice.user_id, update("confirmed", 4, payload.clone()))
+        .await
+        .unwrap();
+    let rows = state.database.confirmed(&alice.user_id).await.unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(
+        rows.iter()
+            .all(|row| row.payload.metric_id.as_deref() == Some(id.as_str()))
+    );
+
+    let bob_report = archive(&state, "bob").await;
+    state
+        .database
+        .review(
+            &bob.user_id,
+            ReviewRequest {
+                new_metric: None,
+                report_id: bob_report.clone(),
+                expected_revision: 1,
+                context: None,
+                observations: vec![ReviewItem {
+                    observation_id: None,
+                    expected_revision: None,
+                    status: "pending".into(),
+                    payload,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    let rows = state
+        .database
+        .observations(&bob.user_id, &bob_report)
+        .await
+        .unwrap();
+    assert!(rows[0].resolved_metric_id.is_none());
+}

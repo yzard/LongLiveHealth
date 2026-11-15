@@ -30,6 +30,7 @@ Android 安装包通过公开的 `GET /longlivehealth.apk` 下载（旧路径 `/
 | reports/relate | report_id、expected_revision、preferred_report_id 可空、kind | updated |
 | reports/delete | report_id、expected_revision | cleanup_queued |
 | metrics/list | {} | metrics：metric_id/name/standard_unit |
+| metrics/rename | metric_id、name（1–256 UTF-8 字节） | metric_id、name |
 | health/connect | platform、installation_id UUID | connection_id、platform、installation_id |
 | health/sync | 见下方 | batch_id、replayed、total_records |
 | health/coverage | {} | coverage、read_permission=unknown、total_records |
@@ -279,7 +280,11 @@ https://hl7.org/fhir/us/core/STU9/Observation-cbc-leukocytes.html .
 
 `POST /api/v1/browse/catalog` returns the authenticated user's available categories and entries, including laboratory
 items discovered from imported clinical Observations/components and confirmed
-report metrics. `metrics/list` remains the curated catalog for report review.
+report metrics. `metrics/list` includes the built-in and account-defined laboratory metrics and the account's Apple Health clinical metrics for report review.
+
+`metrics/rename` saves the display name for an existing Blood Work metric in the account's Browse catalog. Apple Health and confirmed report results continue to reference the same `metric_id`. `metric.loinc` in the history response lists the associated codes with `code` and `official_name` (null if the bundled LOINC dictionary lacks the name).
+
+Confirming an explicit report mapping records the printed LOINC for the selected metric when available. A code already assigned to a different metric produces a review error and preserves the original assignment. OCR jobs read the current names, units, IDs and LOINC associations from the account's catalog when they start.
 Clinical identity uses LOINC (across providers), otherwise provider-scoped coding;
 uncoded records retain individual identity rather than merging guessed labels.
 Dynamic `clinical:<digest>` IDs are accepted by `metrics/history/get` only when

@@ -213,7 +213,9 @@ struct ObservationEditor: View {
             let id = metric["metric_id"].stringValue
             guard !id.isEmpty, ids.insert(id).inserted else { return nil }
             return MenuChoice(id: id, title: metric["name"].stringValue)
-        }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        }.sorted { left, right in
+            LaboratoryPresentation.nameSortsBefore(left.title, id: left.id, right.title, otherID: right.id)
+        }
     }
 
     private var mapping: Binding<String> {

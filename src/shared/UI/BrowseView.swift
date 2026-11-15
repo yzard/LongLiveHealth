@@ -8,13 +8,18 @@ struct BrowseView: View {
     @State var search = ""
     private var categories: [BrowseCategory] { catalog["categories"].arrayValue.map { BrowseCategory($0) } }
     private var entries: [BrowseEntry] {
-        catalog["entries"].arrayValue.map { BrowseEntry(value: $0) }.filter { !$0.kind.hasPrefix("report-review:") }
+        catalog["entries"].arrayValue
+            .map { BrowseEntry(value: $0) }
+            .filter { !$0.kind.hasPrefix("report-review:") }
+            .sorted { left, right in
+                LaboratoryPresentation.nameSortsBefore(metricTitle(left), id: left.id, metricTitle(right), otherID: right.id)
+            }
     }
     private var searchedEntries: [BrowseEntry] {
         let words = search.split(whereSeparator: { $0.isWhitespace }).map(String.init)
         return entries.filter { entry in
             let category = categories.first { $0.id == entry.categoryID }?.title ?? ""
-            let terms = [entry.title, entry.kind, category] + entry.aliases
+            let terms = [metricTitle(entry), entry.title, entry.kind, category] + entry.aliases
             return words.allSatisfy { word in terms.contains { $0.localizedStandardContains(word) } }
         }
     }
@@ -115,8 +120,12 @@ struct BrowseView: View {
         NavigationLink { destination(entry.choice) } label: { metricLabel(entry) }.buttonStyle(.plain)
         #endif
     }
+    private func metricTitle(_ entry: BrowseEntry) -> String {
+        if case .lab = entry.choice, let name = model.renamedLabMetrics[entry.kind] { return name }
+        return entry.title
+    }
     private func metricLabel(_ entry: BrowseEntry) -> some View {
-        Text(entry.title).foregroundStyle(.primary)
+        Text(metricTitle(entry)).foregroundStyle(.primary)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
     }
     @ViewBuilder private func destination(_ choice: BrowseChoice) -> some View {

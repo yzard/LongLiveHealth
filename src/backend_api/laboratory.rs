@@ -103,6 +103,10 @@ static DEFINITIONS: std::sync::LazyLock<
         .collect()
 });
 
+pub(crate) fn metric_definition(id: &str) -> Option<&'static MetricDefinition> {
+    DEFINITIONS.get(id)
+}
+
 pub(crate) fn metric_aliases(id: &str) -> impl Iterator<Item = &'static str> {
     crate::laboratory_names::EXISTING_ALIASES
         .iter()
@@ -116,9 +120,10 @@ pub(crate) fn metric_aliases(id: &str) -> impl Iterator<Item = &'static str> {
         )
 }
 
-pub(crate) fn ocr_metric_catalog(
-    account_metrics: &[CustomMetric],
-) -> Vec<(&str, &str, &str, Vec<&str>)> {
+pub(crate) fn ocr_metric_catalog<'a>(
+    account_metrics: &'a [CustomMetric],
+    account_codes: &'a std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+) -> Vec<(&'a str, &'a str, &'a str, Vec<&'a str>, Vec<&'a str>)> {
     let mut catalog: std::collections::BTreeMap<_, _> = DEFINITIONS
         .values()
         .map(|metric| (metric.metric_id, (metric.name, metric.standard_unit)))
@@ -133,7 +138,20 @@ pub(crate) fn ocr_metric_catalog(
                 .collect::<std::collections::BTreeSet<_>>()
                 .into_iter()
                 .collect();
-            (id, name, unit, aliases)
+            let codes = account_codes
+                .get(id)
+                .into_iter()
+                .flatten()
+                .map(String::as_str)
+                .chain(
+                    LOINC_METRICS
+                        .iter()
+                        .filter_map(|&(code, metric)| (metric == id).then_some(code)),
+                )
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            (id, name, unit, aliases, codes)
         })
         .collect()
 }
@@ -154,6 +172,9 @@ pub(crate) fn verified_custom_candidate<'a>(
         return None;
     }
     let id = payload.ocr_metric_candidate.as_deref()?;
+    if !id.starts_with("custom:") {
+        return None;
+    }
     let (name, code) = split_test_code(&payload.raw_name);
     if code.and_then(loinc_metric).is_some() {
         return None;
@@ -197,92 +218,105 @@ pub fn display_name<'a>(raw_name: &'a str, metric_id: Option<&str>) -> &'a str {
 
 // Closed LOINC mapping, verified against https://loinc.org/<code>/.
 // Unknown codes remain in the raw archive; labels are never guessed from display text.
+pub(crate) const LOINC_METRICS: &[(&str, &str)] = &[
+    ("10834-0", "globulin"),
+    ("11054-4", "ldl_hdl_ratio"),
+    ("11580-8", "tsh"),
+    ("13457-7", "ldl_cholesterol"),
+    ("13458-5", "vldl_cholesterol"),
+    ("14804-9", "ldh"),
+    ("1742-6", "alt"),
+    ("1751-7", "albumin"),
+    ("17856-6", "hba1c"),
+    ("17861-6", "calcium"),
+    ("18262-6", "ldl_cholesterol"),
+    ("18309-5", "nrbc_per_100_wbc"),
+    ("1884-6", "apob"),
+    ("19123-9", "serum_magnesium"),
+    ("1920-8", "ast"),
+    ("1975-2", "total_bilirubin"),
+    ("1988-5", "crp"),
+    ("1989-3", "vitamin_d_25_oh_d3"),
+    ("2028-9", "carbon_dioxide"),
+    ("20454-5", "urine_protein"),
+    ("2075-0", "chloride"),
+    ("2085-9", "hdl_cholesterol"),
+    ("2089-1", "ldl_cholesterol"),
+    ("2093-3", "total_cholesterol"),
+    ("2095-8", "hdl_percent_total_cholesterol"),
+    ("2160-0", "creatinine"),
+    ("2276-4", "ferritin"),
+    ("2324-2", "ggt"),
+    ("2336-6", "globulin"),
+    ("2345-7", "glucose"),
+    ("2498-4", "iron"),
+    ("2514-8", "urine_ketones"),
+    ("25428-4", "urine_glucose"),
+    ("2571-8", "triglycerides"),
+    ("2731-8", "intact_pth"),
+    ("2777-1", "serum_phosphate"),
+    ("2823-3", "potassium"),
+    ("2885-2", "total_protein"),
+    ("2951-2", "sodium"),
+    ("3013-0", "thyroglobulin"),
+    ("3016-3", "tsh"),
+    ("3024-7", "free_t4"),
+    ("3026-2", "total_t4"),
+    ("30392-5", "nrbc_count"),
+    ("3040-3", "lipase"),
+    ("3084-1", "uric_acid"),
+    ("3094-0", "bun"),
+    ("3097-3", "bun_creatinine_ratio"),
+    ("32167-9", "urine_clarity"),
+    ("32623-1", "mpv"),
+    ("38518-7", "immature_granulocyte_percent"),
+    ("44733-4", "triglyceride_hdl_ratio"),
+    ("4544-3", "hematocrit"),
+    ("4548-4", "hba1c"),
+    ("49054-0", "vitamin_d_25_oh_d2"),
+    ("50231-0", "urine_hyaline_casts"),
+    ("51584-1", "immature_granulocyte_count"),
+    ("53115-2", "immature_granulocyte_count"),
+    ("5767-9", "urine_appearance"),
+    ("5778-6", "urine_color"),
+    ("5794-3", "urine_occult_blood"),
+    ("5799-2", "urine_leukocyte_esterase"),
+    ("5802-4", "urine_nitrite"),
+    ("58413-6", "nrbc_per_100_wbc"),
+    ("5905-5", "monocyte_percent"),
+    ("62292-8", "vitamin_d_25_oh_total"),
+    ("6690-2", "wbc"),
+    ("6768-6", "alp"),
+    ("68438-1", "vitamin_d_25_oh_total"),
+    ("704-7", "basophil_count"),
+    ("706-2", "basophil_percent"),
+    ("711-2", "eosinophil_count"),
+    ("713-8", "eosinophil_percent"),
+    ("71695-1", "immature_granulocyte_percent"),
+    ("718-7", "hemoglobin"),
+    ("731-0", "lymphocyte_count"),
+    ("736-9", "lymphocyte_percent"),
+    ("742-7", "monocyte_count"),
+    ("751-8", "neutrophil_count"),
+    ("770-8", "neutrophil_percent"),
+    ("771-6", "nrbc_count"),
+    ("777-3", "platelets"),
+    ("785-6", "mch"),
+    ("786-4", "mchc"),
+    ("787-2", "mcv"),
+    ("788-0", "rdw"),
+    ("789-8", "rbc"),
+    ("8098-6", "thyroglobulin_antibodies"),
+    ("8099-4", "tpo_antibodies"),
+    ("83119-8", "total_t4"),
+    ("9830-1", "cholesterol_hdl_ratio"),
+];
+
 pub(crate) fn loinc_metric(code: &str) -> Option<&'static str> {
-    Some(match code {
-        "2089-1" | "13457-7" | "18262-6" => "ldl_cholesterol",
-        "2093-3" => "total_cholesterol",
-        "2085-9" => "hdl_cholesterol",
-        "2571-8" => "triglycerides",
-        "1884-6" => "apob",
-        "4548-4" => "hba1c",
-        "2345-7" => "glucose",
-        "718-7" => "hemoglobin",
-        "2160-0" => "creatinine",
-        "2276-4" => "ferritin",
-        "1751-7" => "albumin",
-        "1988-5" => "crp",
-        "736-9" => "lymphocyte_percent",
-        "787-2" => "mcv",
-        "788-0" => "rdw",
-        "6768-6" => "alp",
-        "6690-2" => "wbc",
-        "1742-6" => "alt",
-        "1920-8" => "ast",
-        "2951-2" => "sodium",
-        "2823-3" => "potassium",
-        "2075-0" => "chloride",
-        "2028-9" => "carbon_dioxide",
-        "17861-6" => "calcium",
-        "3094-0" => "bun",
-        "2336-6" | "10834-0" => "globulin",
-        "3097-3" => "bun_creatinine_ratio",
-        "2777-1" => "serum_phosphate",
-        "3013-0" => "thyroglobulin",
-        "19123-9" => "serum_magnesium",
-        "2731-8" => "intact_pth",
-        "62292-8" | "68438-1" => "vitamin_d_25_oh_total",
-        "49054-0" => "vitamin_d_25_oh_d2",
-        "1989-3" => "vitamin_d_25_oh_d3",
-        "2885-2" => "total_protein",
-        "1975-2" => "total_bilirubin",
-        "4544-3" => "hematocrit",
-        "785-6" => "mch",
-        "786-4" => "mchc",
-        "32623-1" => "mpv",
-        "777-3" => "platelets",
-        "789-8" => "rbc",
-        "5767-9" => "urine_appearance",
-        "32167-9" => "urine_clarity",
-        "704-7" => "basophil_count",
-        "706-2" => "basophil_percent",
-        "711-2" => "eosinophil_count",
-        "713-8" => "eosinophil_percent",
-        "731-0" => "lymphocyte_count",
-        "742-7" => "monocyte_count",
-        "5905-5" => "monocyte_percent",
-        "751-8" => "neutrophil_count",
-        "770-8" => "neutrophil_percent",
-        "3040-3" => "lipase",
-        "3024-7" => "free_t4",
-        "3016-3" => "tsh",
-        "11580-8" => "tsh",
-        "8098-6" => "thyroglobulin_antibodies",
-        "38518-7" | "71695-1" => "immature_granulocyte_percent",
-        "51584-1" | "53115-2" => "immature_granulocyte_count",
-        "771-6" | "30392-5" => "nrbc_count",
-        "58413-6" | "18309-5" => "nrbc_per_100_wbc",
-        "3026-2" | "83119-8" => "total_t4",
-        "14804-9" => "ldh",
-        "13458-5" => "vldl_cholesterol",
-        "11054-4" => "ldl_hdl_ratio",
-        "44733-4" => "triglyceride_hdl_ratio",
-        "2095-8" => "hdl_percent_total_cholesterol",
-        "9830-1" => "cholesterol_hdl_ratio",
-        "3084-1" => "uric_acid",
-        "2324-2" => "ggt",
-        "2498-4" => "iron",
-        "8099-4" => "tpo_antibodies",
-        "17856-6" => "hba1c",
-        "2514-8" => "urine_ketones",
-        "5794-3" => "urine_occult_blood",
-        "5802-4" => "urine_nitrite",
-        "5799-2" => "urine_leukocyte_esterase",
-        "5778-6" => "urine_color",
-        "20454-5" => "urine_protein",
-        "25428-4" => "urine_glucose",
-        "50231-0" => "urine_hyaline_casts",
-        _ => return None,
-    })
+    let index = LOINC_METRICS
+        .binary_search_by_key(&code, |&(code, _)| code)
+        .ok()?;
+    Some(LOINC_METRICS[index].1)
 }
 
 /// Explicit user mappings take precedence. Inference never modifies printed payloads.

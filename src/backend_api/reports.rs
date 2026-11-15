@@ -2,6 +2,7 @@ use crate::{
     authentication::now,
     database::{Database, queries},
     error::AppError,
+    lab_metric_metadata::{self, Metadata, test_code},
     laboratory::CustomMetric,
     models::ListRequest,
 };
@@ -121,9 +122,8 @@ impl ObservationPayload {
             && !metric
                 .strip_prefix("custom:")
                 .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok())
-            && !crate::laboratory::metrics()
-                .iter()
-                .any(|definition| definition.metric_id == metric)
+            && !lab_metric_metadata::is_clinical_id(metric)
+            && crate::laboratory::metric_definition(metric).is_none()
         {
             return Err(AppError::Invalid(
                 "Unknown metric_id; leave unmapped instead",
@@ -227,11 +227,9 @@ fn browse_issues(
 ) -> Vec<BrowseIssue> {
     let mut issues = Vec::new();
     if custom.is_none()
-        && metric.is_none_or(|id| {
-            !crate::laboratory::metrics()
-                .iter()
-                .any(|definition| definition.metric_id == id)
-        })
+        && metric
+            .and_then(crate::laboratory::metric_definition)
+            .is_none()
     {
         let named = crate::laboratory::infer_metric(&payload.raw_name, None);
         let coded = crate::laboratory::split_test_code(&payload.raw_name)
@@ -350,59 +348,113 @@ impl StoredObservation {
     fn decode(
         self,
         custom_metrics: &[CustomMetric],
+        metadata: &Metadata,
+        native_links: &std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
         include_suggestions: bool,
     ) -> Result<Observation, AppError> {
         let payload: ObservationPayload = serde_json::from_str(&self.payload_json)?;
         let context: Value = serde_json::from_str(&self.context_json)?;
-        let source_name = context["source_name"].as_str();
-        let resolved_metric_id = crate::laboratory::resolved_report_metric(&payload, source_name)
+        let code = test_code(&payload);
+        let learned = code
+            .and_then(|code| metadata.links.get(code))
+            .map(String::as_str);
+        let linked = code.and_then(crate::laboratory::loinc_metric).or(learned);
+        let native = code.and_then(|code| native_links.get(code));
+        let linked_candidate = linked.or_else(|| {
+            native
+                .filter(|ids| ids.len() == 1)
+                .and_then(|ids| ids.first())
+                .map(String::as_str)
+        });
+        let conflict = payload.metric_id.as_deref().is_some_and(|id| {
+            linked.map_or_else(
+                || native.is_some_and(|ids| ids.len() != 1 || !ids.contains(id)),
+                |linked| linked != id,
+            )
+        });
+        let resolved = if self.status == "pending"
+            && learned.is_some()
+            && payload.metric_id.is_none()
+        {
+            learned_for_pending(&payload, metadata)
+        } else {
+            crate::laboratory::resolved_report_metric(&payload, context["source_name"].as_str())
+                .or_else(|| crate::laboratory::verified_custom_candidate(&payload, custom_metrics))
+        };
+        let resolved_metric_id = resolved
             .filter(|id| {
                 !id.starts_with("custom:")
                     || custom_metrics.iter().any(|metric| metric.metric_id == *id)
             })
-            .or_else(|| crate::laboratory::verified_custom_candidate(&payload, custom_metrics))
             .map(str::to_owned);
         let custom = custom_metrics
             .iter()
             .find(|metric| Some(metric.metric_id.as_str()) == resolved_metric_id.as_deref());
         let interpretation =
             crate::laboratory::interpret_metric(&payload, resolved_metric_id.as_deref(), custom);
-        let candidates = if resolved_metric_id.is_none() {
+        let candidates = if resolved_metric_id.is_none() || conflict {
             crate::laboratory::metric_suggestions(
                 &payload.raw_name,
                 payload.raw_unit.as_deref(),
-                payload.ocr_metric_candidate.as_deref(),
+                linked_candidate.or(payload.ocr_metric_candidate.as_deref()),
                 custom_metrics,
             )
         } else {
             Vec::new()
         };
-        let browse_issues = browse_issues(
+        let mut browse_issues = browse_issues(
             &payload,
             &interpretation,
             resolved_metric_id.as_deref(),
             custom,
             &candidates,
         );
+        if conflict {
+            let message = linked_candidate
+                .map(|id| metadata.aliases.get(id).map(String::as_str)
+                    .or_else(|| custom_metrics.iter().find(|metric| metric.metric_id == id).map(|metric| metric.name.as_str()))
+                    .unwrap_or_else(|| crate::laboratory::display_name(id, Some(id))))
+                .map_or_else(
+                    || "This LOINC is used by multiple Apple Health metrics. Check the printed code and metric mapping.".into(),
+                    |name| format!("This LOINC is already linked to {name}. Check the printed code and metric mapping."),
+                );
+            browse_issues.push(BrowseIssue {
+                code: "loinc_metric_conflict",
+                scope: "browse",
+                message,
+            });
+        }
         let metric_suggestions =
             if include_suggestions && browse_issues.iter().any(|issue| issue.scope == "browse") {
-                Some(serde_json::to_value(candidates)?)
+                let mut suggestions = serde_json::to_value(candidates)?;
+                if let Some(entries) = suggestions.as_array_mut() {
+                    for entry in entries {
+                        metadata.apply_name(entry);
+                    }
+                }
+                Some(suggestions)
             } else {
                 None
             };
         let lab_test_code = crate::laboratory::split_test_code(&payload.raw_name).1;
         Ok(Observation {
-            display_name: custom
-                .map_or_else(
-                    || {
-                        crate::laboratory::display_name(
-                            &payload.raw_name,
-                            resolved_metric_id.as_deref(),
+            display_name: resolved_metric_id
+                .as_deref()
+                .and_then(|id| metadata.aliases.get(id))
+                .cloned()
+                .unwrap_or_else(|| {
+                    custom
+                        .map_or_else(
+                            || {
+                                crate::laboratory::display_name(
+                                    &payload.raw_name,
+                                    resolved_metric_id.as_deref(),
+                                )
+                            },
+                            |metric| metric.name.as_str(),
                         )
-                    },
-                    |metric| metric.name.as_str(),
-                )
-                .to_owned(),
+                        .to_owned()
+                }),
             lab_test_code: lab_test_code.map(str::to_owned),
             lab_test_name: lab_test_code.and_then(crate::loinc::long_common_name),
             reported_negative_bound: negative_bound(&payload),
@@ -575,7 +627,14 @@ impl Database {
             .bind(report_id)
             .fetch_all(&self.pool)
             .await?;
-        decode_observations(&self.cpu, rows, self.custom_metrics(user_id).await?, false).await
+        self.decode_report_rows(
+            user_id,
+            rows,
+            self.custom_metrics(user_id).await?,
+            self.lab_metric_metadata(user_id).await?,
+            false,
+        )
+        .await
     }
     pub async fn report(&self, user_id: &str, report_id: &str) -> Result<Value, AppError> {
         let mut transaction = self.pool.begin().await?;
@@ -595,8 +654,7 @@ impl Database {
             .bind(user_id)
             .fetch_all(&mut *transaction)
             .await?;
-        let observations =
-            decode_observations(&self.cpu, observations, custom_metrics, true).await?;
+        let metadata = Metadata::load(&mut transaction, user_id).await?;
         let relation=sqlx::query(queries::REPORT_RELATION).bind(user_id).bind(report_id).fetch_optional(&mut *transaction).await?
             .map(|row| json!({"preferred_report_id":row.get::<String,_>("preferred_report_id"),"kind":row.get::<String,_>("kind")}));
         let pages=sqlx::query(queries::EXTRACTION_PAGES).bind(user_id).bind(report_id).fetch_all(&mut *transaction).await?.into_iter()
@@ -612,6 +670,9 @@ impl Database {
             .into_iter().map(|row| json!({"run_id":row.get::<String,_>("run_id"),"page":row.get::<i64,_>("page_number"),"created_at":row.get::<i64,_>("created_at"),"text_status":row.get::<Option<String>,_>("text_status"),"error_code":row.get::<Option<String>,_>("error_code")})).collect::<Vec<_>>();
         let duplicates = sqlx::query(queries::DUPLICATE_FILES).bind(user_id).bind(user_id).bind(report_id).bind(report_id).fetch_all(&mut *transaction).await?.into_iter().map(|row|json!({"report_id":row.get::<String,_>("file_id"),"original_name":row.get::<String,_>("original_name"),"reason":"identical_file_bytes"})).collect::<Vec<_>>();
         transaction.commit().await?;
+        let observations = self
+            .decode_report_rows(user_id, observations, custom_metrics, metadata, true)
+            .await?;
         let evidence = sqlx::query(queries::EXTRACTION_VALIDATION_CONTENT)
             .bind(user_id)
             .bind(report_id)
@@ -803,6 +864,22 @@ impl Database {
         if context.as_ref().is_some_and(|text| text.len() > 16384) {
             return Err(AppError::TooLarge);
         }
+        let needs_clinical_catalog = request.observations.iter().any(|item| {
+            item.payload
+                .metric_id
+                .as_deref()
+                .is_some_and(lab_metric_metadata::is_clinical_id)
+                || (item.status == "confirmed"
+                    && item.payload.metric_id.is_some()
+                    && test_code(&item.payload)
+                        .is_some_and(|code| crate::laboratory::loinc_metric(code).is_none()))
+        });
+        let clinical = if needs_clinical_catalog {
+            lab_metric_metadata::clinical_groups(self, user_id).await?
+        } else {
+            Default::default()
+        };
+        let native_links = lab_metric_metadata::clinical_links(&clinical);
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let updated = sqlx::query(queries::UPDATE_REPORT)
             .bind(context)
@@ -912,6 +989,7 @@ impl Database {
             .bind(user_id)
             .fetch_all(&mut *transaction)
             .await?;
+        let mut metadata = Metadata::load(&mut transaction, user_id).await?;
         for mut observation in request.observations {
             if let Some(metric) = &created_metric {
                 observation.payload.metric_id = Some(metric.metric_id.clone());
@@ -927,18 +1005,27 @@ impl Database {
                     "Custom metric is not available for this account",
                 ));
             }
-            let (id, revision) = if let Some(id) = observation.observation_id {
-                let current: Option<i64> = sqlx::query_scalar(queries::OBSERVATION)
+            if let Some(id) = observation.payload.metric_id.as_deref()
+                && lab_metric_metadata::is_clinical_id(id)
+                && !clinical.contains_key(id)
+            {
+                return Err(AppError::Invalid(
+                    "Apple Health metric is not available for this account",
+                ));
+            }
+            let (id, revision, previous) = if let Some(id) = observation.observation_id {
+                let current: Option<(i64, String, String)> = sqlx::query_as(queries::OBSERVATION)
                     .bind(user_id)
                     .bind(&request.report_id)
                     .bind(&id)
                     .fetch_optional(&mut *transaction)
                     .await?;
-                let current = current.ok_or(AppError::NotFound)?;
-                if Some(current) != observation.expected_revision {
+                let (revision, status, payload) = current.ok_or(AppError::NotFound)?;
+                if Some(revision) != observation.expected_revision {
                     return Err(AppError::Conflict("Observation changed"));
                 }
-                (id, current + 1)
+                let payload: ObservationPayload = serde_json::from_str(&payload)?;
+                (id, revision + 1, Some((status, payload)))
             } else {
                 let id = uuid::Uuid::new_v4().to_string();
                 sqlx::query(queries::INSERT_OBSERVATION)
@@ -948,8 +1035,36 @@ impl Database {
                     .bind(Option::<String>::None)
                     .execute(&mut *transaction)
                     .await?;
-                (id, 1)
+                (id, 1, None)
             };
+            if observation.status == "confirmed"
+                && previous.as_ref().is_none_or(|(status, payload)| {
+                    status != "confirmed"
+                        || payload.metric_id != observation.payload.metric_id
+                        || test_code(payload) != test_code(&observation.payload)
+                })
+            {
+                if observation.payload.metric_id.is_some() {
+                    // Explicit mappings come from the reviewer. OCR cannot supply this field.
+                    lab_metric_metadata::link_confirmed(
+                        &mut transaction,
+                        user_id,
+                        &mut metadata,
+                        &native_links,
+                        &observation.payload,
+                    )
+                    .await?;
+                } else if let Some(id) = learned_for_pending(&observation.payload, &metadata) {
+                    // Freeze the association when the result becomes part of the history.
+                    observation.payload.metric_id = Some(id.to_owned());
+                } else if test_code(&observation.payload)
+                    .is_some_and(|code| metadata.links.contains_key(code))
+                {
+                    return Err(AppError::Invalid(
+                        "This result needs review before confirming. Check the source and select the linked Browse metric.",
+                    ));
+                }
+            }
             let statement = if observation.status == "confirmed" {
                 queries::CONFIRM_OBSERVATION
             } else {
@@ -1022,7 +1137,14 @@ impl Database {
         if rows.len() > 10000 {
             return Err(AppError::TooLarge);
         }
-        decode_observations(&self.cpu, rows, self.custom_metrics(user_id).await?, false).await
+        self.decode_report_rows(
+            user_id,
+            rows,
+            self.custom_metrics(user_id).await?,
+            self.lab_metric_metadata(user_id).await?,
+            false,
+        )
+        .await
     }
     pub async fn relate_reports(
         &self,
@@ -1192,20 +1314,92 @@ pub struct ExtractionInputRequest {
     pub page: i64,
 }
 
-async fn decode_observations(
-    cpu: &crate::execution::CpuExecutor,
-    rows: Vec<StoredObservation>,
-    custom_metrics: Vec<CustomMetric>,
-    include_suggestions: bool,
-) -> Result<Vec<Observation>, AppError> {
-    cpu.run(move || {
-        rows.into_iter()
-            .map(|row| row.decode(&custom_metrics, include_suggestions))
-            .filter(|row| {
-                !row.as_ref()
-                    .is_ok_and(|o| crate::laboratory::is_administrative_name(&o.payload.raw_name))
+fn learned_for_pending<'a>(
+    payload: &ObservationPayload,
+    metadata: &'a Metadata,
+) -> Option<&'a str> {
+    if payload.metric_id.is_some()
+        || payload
+            .ocr_mapping_note
+            .as_ref()
+            .is_some_and(|note| !note.trim().is_empty())
+    {
+        return None;
+    }
+    let code = test_code(payload)?;
+    let id = metadata.links.get(code)?;
+    if crate::laboratory::loinc_metric(code).is_some_and(|builtin| builtin != id)
+        || payload
+            .ocr_metric_candidate
+            .as_ref()
+            .is_some_and(|candidate| candidate != id)
+    {
+        return None;
+    }
+    Some(id)
+}
+
+impl Database {
+    async fn decode_report_rows(
+        &self,
+        user: &str,
+        rows: Vec<StoredObservation>,
+        mut custom_metrics: Vec<CustomMetric>,
+        metadata: Metadata,
+        include_suggestions: bool,
+    ) -> Result<Vec<Observation>, AppError> {
+        let needs_review_catalog = |payload: &ObservationPayload| {
+            payload
+                .metric_id
+                .as_deref()
+                .is_some_and(lab_metric_metadata::is_clinical_id)
+                || (include_suggestions
+                    && (payload
+                        .ocr_metric_candidate
+                        .as_deref()
+                        .is_some_and(lab_metric_metadata::is_clinical_id)
+                        || (payload.metric_id.is_some()
+                            && test_code(payload).is_some_and(|code| {
+                                crate::laboratory::loinc_metric(code).is_none()
+                            }))))
+        };
+        let clinical = if rows.iter().any(|row| {
+            serde_json::from_str(&row.payload_json).is_ok_and(|payload| {
+                needs_review_catalog(&payload)
+                    || (row.status == "pending"
+                        && test_code(&payload)
+                            .and_then(|code| metadata.links.get(code))
+                            .is_some_and(|id| lab_metric_metadata::is_clinical_id(id)))
             })
-            .collect()
-    })
-    .await
+        }) {
+            lab_metric_metadata::clinical_groups(self, user).await?
+        } else {
+            Default::default()
+        };
+        let native_links = lab_metric_metadata::clinical_links(&clinical);
+        for (id, group) in clinical {
+            if lab_metric_metadata::is_clinical_id(&id) {
+                custom_metrics.push(lab_metric_metadata::clinical_metric(&group)?);
+            }
+        }
+        self.cpu
+            .run(move || {
+                rows.into_iter()
+                    .map(|row| {
+                        row.decode(
+                            &custom_metrics,
+                            &metadata,
+                            &native_links,
+                            include_suggestions,
+                        )
+                    })
+                    .filter(|row| {
+                        !row.as_ref().is_ok_and(|o| {
+                            crate::laboratory::is_administrative_name(&o.payload.raw_name)
+                        })
+                    })
+                    .collect()
+            })
+            .await
+    }
 }

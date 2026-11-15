@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 
 pub(crate) struct Group {
+    pub(crate) loinc_codes: BTreeSet<String>,
     pub definition: Value,
     pub records: Vec<Value>,
     pub points: Vec<Value>,
@@ -50,15 +51,17 @@ pub(crate) fn groups(records: &[Value]) -> BTreeMap<String, Group> {
                 continue;
             }
             let (metric, name) = identity(candidate, record, &suffix);
-            let known = crate::laboratory::metrics()
-                .into_iter()
-                .find(|m| m.metric_id == metric);
+            let known = crate::laboratory::metric_definition(&metric);
             let definition = known.map(|m| json!(m)).unwrap_or_else(|| json!({"metric_id":metric,"name":name.clone(),"standard_unit":"","accepted_units":[],"clinical":true}));
             let group = groups.entry(metric.clone()).or_insert_with(|| Group {
                 definition,
+                loinc_codes: BTreeSet::new(),
                 records: vec![],
                 points: vec![],
             });
+            group
+                .loinc_codes
+                .extend(loinc_codes(candidate).map(str::to_owned));
             let quantity = &candidate["valueQuantity"];
             let unit = quantity["code"]
                 .as_str()
@@ -274,9 +277,9 @@ fn has_value(value: &Value) -> bool {
         .is_some_and(|o| o.keys().any(|key| key.starts_with("value")))
 }
 
-fn identity(candidate: &Value, record: &Value, suffix: &str) -> (String, String) {
-    let coding = candidate["code"]["coding"].as_array();
-    let loinc: BTreeSet<&str> = coding
+fn loinc_codes(candidate: &Value) -> impl Iterator<Item = &str> {
+    candidate["code"]["coding"]
+        .as_array()
         .into_iter()
         .flatten()
         .filter(|c| {
@@ -286,7 +289,11 @@ fn identity(candidate: &Value, record: &Value, suffix: &str) -> (String, String)
             )
         })
         .filter_map(|c| c["code"].as_str())
-        .collect();
+}
+
+fn identity(candidate: &Value, record: &Value, suffix: &str) -> (String, String) {
+    let coding = candidate["code"]["coding"].as_array();
+    let loinc: BTreeSet<_> = loinc_codes(candidate).collect();
     let name = candidate["code"]["text"]
         .as_str()
         .filter(|s| !s.trim().is_empty())

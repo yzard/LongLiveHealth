@@ -100,8 +100,25 @@ fn page_preparation_is_bounded_inline_and_preserves_untrusted_text_evidence() {
         name: "Test activity".into(),
         standard_unit: "U/L".into(),
     };
-    let messages =
-        ocr::prepare_messages(3, &url, Some(evidence), None, 65536, 40000000, &[owned]).unwrap();
+    let input_catalog = ocr::MetricCatalog {
+        metrics: vec![owned],
+        loinc_codes: [(
+            "custom:owned".into(),
+            ["1234-5".into()].into_iter().collect(),
+        )]
+        .into_iter()
+        .collect(),
+    };
+    let messages = ocr::prepare_messages(
+        3,
+        &url,
+        Some(evidence),
+        None,
+        65536,
+        40000000,
+        &input_catalog,
+    )
+    .unwrap();
     let prompt = messages[0]["content"].as_str().unwrap();
     assert!(prompt.contains("Keep printed fields unconverted"));
     assert!(prompt.contains("ocr_normalization"));
@@ -129,6 +146,22 @@ fn page_preparation_is_bounded_inline_and_preserves_untrusted_text_evidence() {
     assert!(aliases("vitamin_d_25_oh_total").contains(&json!("25(OH)D")));
     assert!(aliases("immature_granulocyte_count").contains(&json!("IG, ABS. COUNT")));
     assert!(aliases("custom:owned").is_empty());
+    assert_eq!(
+        catalog
+            .iter()
+            .find(|entry| entry[0] == "custom:owned")
+            .unwrap()[4],
+        json!(["1234-5"])
+    );
+    assert!(
+        catalog
+            .iter()
+            .find(|entry| entry[0] == "total_cholesterol")
+            .unwrap()[4]
+            .as_array()
+            .unwrap()
+            .contains(&json!("2093-3"))
+    );
     assert!(prompt.contains("Only after checking all catalog names and aliases"));
     assert_eq!(data["page"], 3);
     assert_eq!(data["text_layer"]["status"], "empty");
@@ -153,11 +186,22 @@ fn page_preparation_is_bounded_inline_and_preserves_untrusted_text_evidence() {
             None,
             65536,
             40000000,
-            &[],
+            &ocr::MetricCatalog::default(),
         )
         .is_err()
     );
-    assert!(ocr::prepare_messages(1, &url, None, None, 65536, 1, &[]).is_err());
+    assert!(
+        ocr::prepare_messages(
+            1,
+            &url,
+            None,
+            None,
+            65536,
+            1,
+            &ocr::MetricCatalog::default()
+        )
+        .is_err()
+    );
 }
 
 #[test]

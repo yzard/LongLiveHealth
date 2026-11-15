@@ -4,6 +4,22 @@
   "missing_contract": "Null means unknown or not applicable. It is never an implicit zero.",
   "source_contract": "Health payloads retain provider fields. Unsupported fields are archival evidence, not validated measurements.",
   "tables": {
+    "lab_metric_aliases": {
+      "meaning": "Current owner-defined display names for stable laboratory metric IDs.",
+      "fields": {
+        "user_id": "Owner account identifier.",
+        "metric_id": "Stable internal laboratory metric identifier.",
+        "display_name": "Current display name selected by the owner."
+      }
+    },
+    "lab_metric_loinc_links": {
+      "meaning": "Owner-confirmed LOINC links used to match future report observations.",
+      "fields": {
+        "user_id": "Owner account identifier.",
+        "loinc_code": "Reported LOINC test code.",
+        "metric_id": "Stable internal laboratory metric identifier linked to the code."
+      }
+    },
     "custom_lab_metrics": {
       "meaning": "Owner-defined laboratory metrics created while reviewing a report result.",
       "fields": {

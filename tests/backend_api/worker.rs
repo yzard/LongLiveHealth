@@ -184,6 +184,7 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
     use serde_json::json;
     let mut alice_metric = None;
     let bob = add_user(&state, "bob").await;
+    let token = crate::token(&state, "alice").await;
     for (account, label) in [
         (&user, "Synthetic clinical marker"),
         (&bob, "Other account marker"),
@@ -203,7 +204,11 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
         let fhir = json!({
             "resourceType":"Observation", "status":"final",
             "effectiveDateTime":"2026-08-03T00:00:00Z",
-            "code":{"text":label,"coding":[{"system":"https://example.org/lab","code":"synthetic"}]},
+            "code":{"text":label,"coding":[if account.user_id == user.user_id {
+                json!({"system":"http://loinc.org","code":"1968-7"})
+            } else {
+                json!({"system":"https://example.org/lab","code":"synthetic"})
+            }]},
             "valueQuantity":{"value":2,"code":"mg/L","system":"http://unitsofmeasure.org"}
         });
         state
@@ -237,21 +242,25 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
         }
     }
     let alice_metric = alice_metric.unwrap();
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let captured_id = alice_metric.clone();
     let router = axum::Router::new().route(
         "/v1/chat/completions",
         axum::routing::post(move |axum::Json(request): axum::Json<serde_json::Value>| {
-            let alice_metric = alice_metric.clone();
+            let alice_metric = captured_id.clone();
+            let first = calls.fetch_add(1, Ordering::SeqCst) == 0;
+            let (name, codes) = if first {
+                ("Direct bilirubin", vec!["1968-7"])
+            } else {
+                ("Renamed direct bilirubin", vec!["1968-7", "35191-6"])
+            };
             async move {
                 let input = &request["messages"][1]["content"];
                 let evidence: serde_json::Value =
                     serde_json::from_str(input[0]["text"].as_str().unwrap()).unwrap();
                 let catalog = evidence["laboratory_metric_catalog"].as_array().unwrap();
-                assert!(catalog.contains(&json!([
-                    alice_metric,
-                    "Synthetic clinical marker",
-                    "mg/L",
-                    []
-                ])));
+                assert!(catalog.contains(&json!([alice_metric, name, "mg/L", [], codes])));
                 assert!(
                     !catalog
                         .iter()
@@ -294,7 +303,6 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
     config.llm.base_url = address.clone();
     state.config = std::sync::Arc::new(config);
     let app = longlivehealth::app::create_application(state.clone());
-    let token = crate::token(&state, "alice").await;
     let (status, result) = crate::upload(
         &app,
         &token,
@@ -322,6 +330,73 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
     assert_eq!(rows[0].payload.raw_result, "Clear");
     let archived = state.database.report(&user.user_id, report).await.unwrap();
     assert_eq!(archived["extraction_outputs"].as_array().unwrap().len(), 1);
+    let mut manual = crate::observation_payload();
+    manual.raw_name = "Direct bilirubin (35191-6)".into();
+    manual.raw_unit = Some("mg/L".into());
+    manual.metric_id = alice_metric.as_str().map(str::to_owned);
+    let revision = state
+        .database
+        .report_summary(&user.user_id, report)
+        .await
+        .unwrap()
+        .revision;
+    state
+        .database
+        .review(
+            &user.user_id,
+            longlivehealth::reports::ReviewRequest {
+                report_id: report.into(),
+                expected_revision: revision,
+                new_metric: None,
+                context: None,
+                observations: vec![longlivehealth::reports::ReviewItem {
+                    observation_id: None,
+                    expected_revision: None,
+                    status: "confirmed".into(),
+                    payload: manual,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    let (status, details) = crate::request(
+        &app,
+        "/api/v1/metrics/rename",
+        Some(&token),
+        json!({
+            "metric_id": alice_metric, "name": "Renamed direct bilirubin"
+        }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{details}");
+    let revision = state
+        .database
+        .report_summary(&user.user_id, report)
+        .await
+        .unwrap()
+        .revision;
+    state
+        .database
+        .rescan_report(&user.user_id, report, revision)
+        .await
+        .unwrap();
+    assert!(longlivehealth::worker::extract_next(&state).await.unwrap());
+    let rows = state
+        .database
+        .observations(&user.user_id, report)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].status, "pending");
+    assert_eq!(
+        state
+            .database
+            .job_by_file(&user.user_id, report)
+            .await
+            .unwrap()
+            .status,
+        "succeeded"
+    );
     server.abort();
 }
 

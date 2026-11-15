@@ -23,18 +23,25 @@ pub async fn history(
     mut request: HistoryRequest,
 ) -> Result<Value, AppError> {
     request.metric_id = crate::laboratory::canonical_history_id(&request.metric_id).to_owned();
-    if request.metric_id.starts_with("report-review:") {
+    if request.metric_id.starts_with("report-review:")
+        || (request.metric_id.starts_with("clinical:")
+            && !crate::lab_metric_metadata::is_clinical_id(&request.metric_id))
+    {
         return Err(AppError::NotFound);
     }
-    if request.metric_id.starts_with("clinical:") {
-        let records = load_health(database, user_id, "").await?;
-        return database.cpu.run(move || {
-            let mut groups = crate::clinical_labs::groups(&records);
-            let group = groups.remove(&request.metric_id).ok_or(AppError::NotFound)?;
-            Ok(json!({"chart_ranges":point_ranges(&group.points),"metric":group.definition,"points":group.points,"records":group.records,"excluded":[],"excluded_count":0,"algorithm_version":"clinical-history-v1"}))
-        }).await;
-    }
-    let definition = if request.metric_id.starts_with("custom:") {
+    let clinical = if crate::lab_metric_metadata::is_clinical_id(&request.metric_id) {
+        Some(
+            crate::lab_metric_metadata::clinical_groups(database, user_id)
+                .await?
+                .remove(&request.metric_id)
+                .ok_or(AppError::NotFound)?,
+        )
+    } else {
+        None
+    };
+    let mut definition = if let Some(group) = &clinical {
+        group.definition.clone()
+    } else if request.metric_id.starts_with("custom:") {
         let metric = database
             .custom_metrics(user_id)
             .await?
@@ -49,6 +56,8 @@ pub async fn history(
             .ok_or(AppError::Invalid("Unknown metric_id"))?;
         serde_json::to_value(metric)?
     };
+    let metadata = database.lab_metric_metadata(user_id).await?;
+    metadata.apply_name(&mut definition);
     let report_history = crate::reports::trends(
         database,
         user_id,
@@ -97,7 +106,19 @@ pub async fn history(
         point["source_name"] = json!(source_name);
         point["filename"] = json!(filename);
     }
-    if request.metric_id.starts_with("custom:") {
+    if request.metric_id.starts_with("custom:") || clinical.is_some() {
+        metadata.apply_loinc(
+            &mut definition,
+            clinical.as_ref().map(|group| &group.loinc_codes),
+        );
+    }
+    if let Some(group) = clinical {
+        points.extend(group.points);
+        report_records.extend(group.records);
+    }
+    if request.metric_id.starts_with("custom:")
+        || crate::lab_metric_metadata::is_clinical_id(&request.metric_id)
+    {
         points.sort_by_key(|point| point["timestamp"].as_i64());
         return Ok(
             json!({"chart_ranges":point_ranges(&points),"metric":definition,"records":report_records,"points":points,
@@ -121,6 +142,7 @@ pub async fn history(
         .ok_or(AppError::Internal)?;
     database.cpu.run(move || {
         let groups = crate::clinical_labs::groups(&health);
+        metadata.apply_loinc(&mut definition, groups.get(&request.metric_id).map(|group| &group.loinc_codes));
         let mut records = groups.get(&request.metric_id).map(|g| g.records.clone()).unwrap_or_default();
         records.extend(report_records);
         let mut unassigned = Vec::new();
@@ -365,6 +387,7 @@ pub(crate) async fn load_health(
 
 pub async fn browse(database: &Database, user_id: &str) -> Result<Value, AppError> {
     let records = load_health(database, user_id, "").await?;
+    let metadata = database.lab_metric_metadata(user_id).await?;
     let reports = database.confirmed(user_id).await?;
     let custom_metrics = database.custom_metrics(user_id).await?;
     database
@@ -372,7 +395,11 @@ pub async fn browse(database: &Database, user_id: &str) -> Result<Value, AppErro
         .run(move || {
             let mut entries: BTreeMap<String, Value> = crate::clinical_labs::groups(&records)
                 .into_iter()
-                .map(|(key, group)| (key, group.definition))
+                .map(|(key, group)| {
+                    let mut definition = group.definition;
+                    definition["loinc_codes"] = json!(group.loinc_codes);
+                    (key, definition)
+                })
                 .collect();
             let definitions: BTreeMap<_, _> = crate::laboratory::metrics()
                 .into_iter()
@@ -394,6 +421,9 @@ pub async fn browse(database: &Database, user_id: &str) -> Result<Value, AppErro
                 }
             }
             let mut metrics: Vec<Value> = entries.into_values().collect();
+            for definition in &mut metrics {
+                metadata.apply_name(definition);
+            }
             metrics.sort_by_key(|metric| metric["name"].as_str().unwrap_or("").to_lowercase());
             Ok(json!({"metrics":metrics}))
         })

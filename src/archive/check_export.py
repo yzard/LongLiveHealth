@@ -15,10 +15,12 @@ import zipfile
 import zlib
 from pathlib import Path
 
-TABLES = frozenset(
+OPTIONAL_LAB_TABLES = frozenset({"custom_lab_metrics", "lab_metric_aliases", "lab_metric_loinc_links"})
+
+TABLES = OPTIONAL_LAB_TABLES | frozenset(
     'daily_views derived_results deleted_uploads sync_batches reports raw_files extraction_inputs extraction_outputs '
     'observations report_relations extraction_pages health_connections '
-    'health_records health_originals sync_coverage analysis_runs analysis_feedback custom_lab_metrics'.split()
+    'health_records health_originals sync_coverage analysis_runs analysis_feedback'.split()
 )
 MAX_JSON_BYTES = 96 * 1024 * 1024
 
@@ -156,7 +158,7 @@ def audit(path, max_bytes):
         table_counts = manifest.get('table_counts')
         tables_present = set(table_counts) if isinstance(table_counts, dict) else set()
         require(
-            tables_present in (TABLES, TABLES - {'custom_lab_metrics'}),
+            TABLES - OPTIONAL_LAB_TABLES <= tables_present <= TABLES,
             'Invalid table counts',
         )
         require(

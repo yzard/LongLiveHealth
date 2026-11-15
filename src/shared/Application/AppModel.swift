@@ -24,6 +24,7 @@ final class AppModel {
     var jobs: [JSONValue] = []
     var drafts: [UploadDraft] = []
     var metrics: [JSONValue] = []
+    private(set) var renamedLabMetrics: [String: String] = [:]
     private(set) var reportDataRevision = 0
     private(set) var sourcePreferences: JSONValue = .null
     private(set) var sourceCatalog: [JSONValue] = []
@@ -165,6 +166,17 @@ final class AppModel {
             UserDefaults.standard.set(address.absoluteString, forKey: "lastServer")
         }
         if session != nil && !mustChangePassword { await refresh(automatic: false) }
+    }
+
+    func renameLabMetric(_ id: String, name: String) async throws {
+        let result = try await request("metrics/rename", body: .object(["metric_id": .string(id), "name": .string(name)]))
+        let updatedName = result["name"].stringValue
+        renamedLabMetrics[id] = updatedName
+        if let index = metrics.firstIndex(where: { $0["metric_id"].stringValue == id }),
+           case .object(var definition) = metrics[index] {
+            definition["name"] = .string(updatedName)
+            metrics[index] = .object(definition)
+        }
     }
 
     func refresh(automatic: Bool) async {
@@ -475,7 +487,7 @@ final class AppModel {
             credentials.retire(); self.credentials = nil
             try MobilePlatform.cancelUploads()
             try SessionVault.clear()
-            sourcePreferences = .null; sourceCatalog = []; session = nil; archive = nil; responseCache = nil; reports = []; jobs = []; drafts = []; metrics = []
+            sourcePreferences = .null; sourceCatalog = []; session = nil; archive = nil; responseCache = nil; reports = []; jobs = []; drafts = []; metrics = []; renamedLabMetrics = [:]
             lastRefresh = nil; offlineNotice = nil
             MobilePlatform.clearNotifications()
         }
@@ -513,7 +525,7 @@ final class AppModel {
         try MobilePlatform.cancelUploads()
         try SessionVault.clear(); try archive?.clear()
         MobilePlatform.clearNotifications()
-        entryMutation = nil; offlineNotice = nil; sourcePreferences = .null; sourceCatalog = []; session = nil; archive = nil; responseCache = nil; reports = []; drafts = []; jobs = []; metrics = []; lastRefresh = nil; health.status = "Not connected"
+        entryMutation = nil; offlineNotice = nil; sourcePreferences = .null; sourceCatalog = []; session = nil; archive = nil; responseCache = nil; reports = []; drafts = []; jobs = []; metrics = []; renamedLabMetrics = [:]; lastRefresh = nil; health.status = "Not connected"
     }
 
     private func expireLocalSession() throws {
@@ -524,7 +536,7 @@ final class AppModel {
         try MobilePlatform.cancelUploads()
         try SessionVault.clear()
         // Preserve pending reports and Health checkpoints for this account's next login.
-        sourcePreferences = .null; sourceCatalog = []; session = nil; archive = nil; responseCache = nil; reports = []; drafts = []; jobs = []; metrics = []
+        sourcePreferences = .null; sourceCatalog = []; session = nil; archive = nil; responseCache = nil; reports = []; drafts = []; jobs = []; metrics = []; renamedLabMetrics = [:]
         lastRefresh = nil; isLocked = false; biometricUnlock = false
         MobilePlatform.clearNotifications()
     }
