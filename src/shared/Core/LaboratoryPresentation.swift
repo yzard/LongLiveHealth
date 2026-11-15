@@ -7,6 +7,17 @@ public nonisolated enum LaboratoryPresentation {
         return order == .orderedSame ? id < otherID : order == .orderedAscending
     }
 
+    public static func resultTitle(_ observation: JSONValue, renamedMetrics: [String: String]) -> String {
+        let metricID = ReportReview.savedMetricID(observation)
+        if let metricID, let name = renamedMetrics[metricID] {
+            return name
+        }
+        let printed = observation["payload"]["raw_name"].stringValue
+        let display = observation["display_name"].stringValue
+        let name = metricID == nil ? (printed.isEmpty ? display : printed) : (display.isEmpty ? printed : display)
+        return printedName(name, code: observation["lab_test_code"].stringValue)
+    }
+
     public static func printedName(_ rawName: String, code: String) -> String {
         guard !code.isEmpty else { return rawName }
         let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines)

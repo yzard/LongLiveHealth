@@ -26,24 +26,33 @@ The APK is packaged in the API image by the combined Docker build.
 
 ## Deploy images
 
-Build on Desk through `./build_docker.sh`, which runs the image checks. Tag the
-tested API image with an immutable release name, transfer it with `docker save`
-and `docker load`, and set that exact tag in NAS's Home Service YAML. Both
-deployment files use `pull_policy: never`; loading the image is required before
-starting the service. Compare `docker image inspect --format '{{.Id}}'` on both
-hosts to verify the transferred image. The current NAS release uses
-`longlivehealth-backend-api:recovery-hrv-20261029`.
+Run `./build_docker.sh` on Desk. After the build checks pass, the script tags the
+same API image as `longlivehealth-backend-api:YYYYMMDD` using the build host's
+local date and as `longlivehealth-backend-api:latest`. A second release build on
+the same day advances both tags to that build. Use `./build_docker.sh test-name`
+to build an isolated test image.
+
+The NAS Home Service Compose file uses `longlivehealth-backend-api:latest` with
+`pull_policy: never`. To update it, transfer both release tags from Desk, then
+run Compose on NAS. The image IDs reported on both hosts should match.
 
 On Desk, from the repository root:
 
 ```sh
-docker compose -p longlivehealth -f docker/docker-compose.ocr-desk.yaml up -d --no-build backend_ocr
+release_date="$(date +%Y%m%d)"
+./build_docker.sh
+docker image inspect longlivehealth-backend-api:latest --format '{{.Id}}'
+docker save "longlivehealth-backend-api:$release_date" longlivehealth-backend-api:latest | \
+  ssh nas 'docker load'
 ```
+
+Use the date captured when the build starts if the build crosses midnight.
 
 On NAS:
 
 ```sh
 cd /data/docker
+docker image inspect longlivehealth-backend-api:latest --format '{{.Id}}'
 docker compose -f 2_home_service.yaml config --quiet
 docker compose -f 2_home_service.yaml up -d --no-build --no-deps longlivehealth
 docker exec --user 1002:1003 longlivehealth /app/longlivehealth --data-dir /data check-config

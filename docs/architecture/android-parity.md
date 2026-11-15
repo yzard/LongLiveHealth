@@ -22,7 +22,7 @@ Historical and background permissions are requested when supported. A scheduled 
 
 `./build_android.sh` builds inside Docker and exports `dist/android/longlivehealth.apk`. `prepare` only stages generated sources. The persistent `longlivehealth-android-signing` volume preserves development signing identity. Swift dependencies are recorded in `src/android/Package.resolved`. The current APK includes only ARM64, compresses bundled native libraries, and is development-signed, not a Play Store release.
 
-`./build_docker.sh TAG` builds Android before the backend images. The API image contains the APK under `/app/downloads`; `GET /longlivehealth.apk` streams this fixed public artifact without exposing user files. `./build_ios.sh` remains the separate macOS/Xcode entrypoint.
+`./build_docker.sh` builds Android before the API image and tags that image with `YYYYMMDD` and `latest`. Pass a test tag to build an isolated image. The API image contains the APK under `/app/downloads`; `GET /longlivehealth.apk` streams this fixed public artifact without exposing user files. `./build_ios.sh` remains the separate macOS/Xcode entrypoint.
 
 ## Verified
 

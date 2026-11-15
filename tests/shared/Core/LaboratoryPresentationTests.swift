@@ -33,3 +33,26 @@ import Testing
     }
     #expect(ordered.map(\.id) == ["a", "z", "c", "b"])
 }
+
+@Test func onlySavedMappingsUseRenamedMetricTitles() {
+    var draft: JSONValue = .object([
+        "status": .string("pending"),
+        "display_name": .string("Ketones - urine"),
+        "lab_test_code": .string("2514-8"),
+        "resolved_metric_id": .string("urine_ketones"),
+        "payload": .object(["raw_name": .string("Ketone, Urine (2514-8)")]),
+    ])
+    let renamed = ["urine_ketones": "Urine - Ketones"]
+    #expect(LaboratoryPresentation.resultTitle(draft, renamedMetrics: renamed) == "Ketone, Urine")
+    #expect(ReportReview.savedMetricID(draft) == nil)
+    #expect(ReportReview.defaultMetricID(draft) == "urine_ketones")
+    draft["resolved_metric_id"] = .null
+    draft["metric_suggestions"] = .array([.object(["metric_id": .string("urine_ketones")])])
+    #expect(LaboratoryPresentation.resultTitle(draft, renamedMetrics: renamed) == "Ketone, Urine")
+    #expect(ReportReview.defaultMetricID(draft) == "urine_ketones")
+
+    draft["payload"]["metric_id"] = .string("urine_ketones")
+    #expect(LaboratoryPresentation.resultTitle(draft, renamedMetrics: renamed) == "Urine - Ketones")
+    #expect(draft["status"] == .string("pending"))
+    #expect(draft["payload"]["raw_name"] == .string("Ketone, Urine (2514-8)"))
+}

@@ -400,8 +400,9 @@ restart. The browser Data page also provides an alias editor.
 
 ## Long Live Health deployment naming (2026-10-20)
 
-Use images `longlivehealth-backend-api:local` and `longlivehealth-backend-ocr:local`,
-Compose project `longlivehealth`, executable `/app/longlivehealth`, and the
+The playground uses `longlivehealth-backend-api:local`. NAS uses
+`longlivehealth-backend-api:latest`. The original naming release used
+`longlivehealth-backend-ocr:local`, Compose project `longlivehealth`, executable `/app/longlivehealth`, and the
 `LONGLIVEHEALTH_` deployment variable prefix. Desk uses
 `/home/zyin/dev/longlivehealth` and runs only the GPU OCR service. The API and
 its data run on NAS, accessed through `https://health.zhuoyin.info`; see [NAS deployment](nas.md).

@@ -436,25 +436,20 @@ impl StoredObservation {
             } else {
                 None
             };
-        let lab_test_code = crate::laboratory::split_test_code(&payload.raw_name).1;
+        let (printed_name, lab_test_code) = crate::laboratory::split_test_code(&payload.raw_name);
+        let saved_metric = resolved_metric_id
+            .as_deref()
+            .filter(|_| payload.metric_id.is_some() || self.status == "confirmed");
+        let display_name = saved_metric.map_or(printed_name, |id| {
+            metadata
+                .aliases
+                .get(id)
+                .map(String::as_str)
+                .or_else(|| custom.map(|metric| metric.name.as_str()))
+                .unwrap_or_else(|| crate::laboratory::display_name(printed_name, Some(id)))
+        });
         Ok(Observation {
-            display_name: resolved_metric_id
-                .as_deref()
-                .and_then(|id| metadata.aliases.get(id))
-                .cloned()
-                .unwrap_or_else(|| {
-                    custom
-                        .map_or_else(
-                            || {
-                                crate::laboratory::display_name(
-                                    &payload.raw_name,
-                                    resolved_metric_id.as_deref(),
-                                )
-                            },
-                            |metric| metric.name.as_str(),
-                        )
-                        .to_owned()
-                }),
+            display_name: display_name.to_owned(),
             lab_test_code: lab_test_code.map(str::to_owned),
             lab_test_name: lab_test_code.and_then(crate::loinc::long_common_name),
             reported_negative_bound: negative_bound(&payload),

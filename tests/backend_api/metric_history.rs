@@ -1899,7 +1899,7 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
         .unwrap();
     let pending = rows.iter().find(|row| row.status == "pending").unwrap();
     assert_eq!(pending.resolved_metric_id.as_deref(), Some(id.as_str()));
-    assert_eq!(pending.display_name, "My direct bilirubin");
+    assert_eq!(pending.display_name, "Alternate printed name");
 
     let update = |status: &str, revision, payload| ReviewRequest {
         new_metric: None,
@@ -1985,4 +1985,86 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
         .await
         .unwrap();
     assert!(rows[0].resolved_metric_id.is_none());
+}
+
+#[tokio::test]
+async fn rename_updates_saved_pending_title_and_preserves_unsaved_pdf_title() {
+    let (_directory, state) = fixture().await;
+    let alice = add_user(&state, "alice").await;
+    let report_id = archive(&state, "alice").await;
+    let mut parsed = observation_payload();
+    parsed.raw_name = "Ketone, Urine (2514-8)".into();
+    parsed.raw_result = "Negative".into();
+    parsed.raw_unit = None;
+    parsed.metric_id = None;
+    parsed.ocr_metric_candidate = Some("urine_ketones".into());
+    parsed.source.quote = "Ketone, Urine (2514-8) Negative".into();
+    let mut mapped = parsed.clone();
+    mapped.metric_id = Some("urine_ketones".into());
+
+    let before = state
+        .database
+        .review(
+            &alice.user_id,
+            ReviewRequest {
+                report_id: report_id.clone(),
+                expected_revision: 1,
+                context: None,
+                new_metric: None,
+                observations: [
+                    ("confirmed", mapped.clone()),
+                    ("pending", mapped),
+                    ("pending", parsed),
+                ]
+                .into_iter()
+                .map(|(status, payload)| ReviewItem {
+                    observation_id: None,
+                    expected_revision: None,
+                    status: status.into(),
+                    payload,
+                })
+                .collect(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let app = longlivehealth::app::create_application(state.clone());
+    let token = crate::token(&state, "alice").await;
+    let (status, _) = crate::request(
+        &app,
+        "/api/v1/metrics/rename",
+        Some(&token),
+        json!({"metric_id":"urine_ketones","name":"Urine - Ketones"}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let (_, after) = crate::request(
+        &app,
+        "/api/v1/reports/get",
+        Some(&token),
+        json!({"report_id":report_id}),
+    )
+    .await;
+    let before_rows = before["observations"].as_array().unwrap();
+    let after_rows = after["observations"].as_array().unwrap();
+    assert_eq!(before_rows.len(), 3);
+    assert_eq!(after_rows.len(), 3);
+    for old in before_rows {
+        let new = after_rows
+            .iter()
+            .find(|row| row["observation_id"] == old["observation_id"])
+            .unwrap();
+        assert_eq!(new["payload"], old["payload"]);
+        assert_eq!(new["revision"], old["revision"]);
+        assert_eq!(new["status"], old["status"]);
+        assert_eq!(new["resolved_metric_id"], "urine_ketones");
+        assert_eq!(new["lab_test_code"], "2514-8");
+        let expected = if new["payload"]["metric_id"].is_null() {
+            "Ketone, Urine"
+        } else {
+            "Urine - Ketones"
+        };
+        assert_eq!(new["display_name"], expected);
+    }
 }

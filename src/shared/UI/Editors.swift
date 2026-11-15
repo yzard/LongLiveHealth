@@ -16,14 +16,14 @@ struct ObservationEditor: View {
     @State var saving = false
     @State var error: String?
     @Environment(\.dismiss) var dismiss
-    init(observation: JSONValue, metrics: [JSONValue], pageCount: Int, choosingMetric: Bool, save: @escaping (JSONValue, JSONValue) async throws -> Void) {
+    init(observation: JSONValue, metrics: [JSONValue], resultTitle: String, pageCount: Int, choosingMetric: Bool, save: @escaping (JSONValue, JSONValue) async throws -> Void) {
         self.observation = observation; self.metrics = metrics; self.pageCount = pageCount; self.save = save
         _payload = State(initialValue: observation == .null ? .object(["source": .object(["page": .number(1), "quote": .string("")])]) : observation["payload"])
         let code = observation["lab_test_code"].stringValue
         _printedName = State(initialValue: LaboratoryPresentation.printedName(observation["payload"]["raw_name"].stringValue, code: code))
         _loincCode = State(initialValue: code)
         _choosingMetric = State(initialValue: choosingMetric)
-        _newMetricName = State(initialValue: observation["payload"]["ocr_new_metric"]["name"].stringValue.isEmpty ? laboratoryResultName(observation) : observation["payload"]["ocr_new_metric"]["name"].stringValue)
+        _newMetricName = State(initialValue: observation["payload"]["ocr_new_metric"]["name"].stringValue.isEmpty ? resultTitle : observation["payload"]["ocr_new_metric"]["name"].stringValue)
         _newMetricUnit = State(initialValue: observation["payload"]["ocr_new_metric"] == .null ? observation["payload"]["raw_unit"].stringValue : observation["payload"]["ocr_new_metric"]["standard_unit"].stringValue)
     }
     var body: some View {
@@ -65,8 +65,9 @@ struct ObservationEditor: View {
             let originalCode = observation["lab_test_code"].stringValue
             let originalName = LaboratoryPresentation.printedName(payload["raw_name"].stringValue, code: originalCode)
             var reviewedPayload = payload
-            if let suggestedMetricID, usesDefaultMapping, !creatingMetric {
-                reviewedPayload["metric_id"] = .string(suggestedMetricID)
+            if usesDefaultMapping, !creatingMetric, reviewedPayload["metric_id"].stringValue.isEmpty,
+               let defaultMetricID = ReportReview.defaultMetricID(observation) {
+                reviewedPayload["metric_id"] = .string(defaultMetricID)
             }
             if printedName != originalName || loincCode != originalCode {
                 let code = loincCode.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -222,7 +223,7 @@ struct ObservationEditor: View {
         Binding(get: {
             let selected = payload["metric_id"].stringValue
             if !selected.isEmpty || !usesDefaultMapping { return selected }
-            return suggestedMetricID ?? observation["resolved_metric_id"].stringValue
+            return ReportReview.defaultMetricID(observation) ?? ""
         }, set: {
             usesDefaultMapping = false
             payload["metric_id"] = .optional($0)

@@ -20,7 +20,7 @@ OCR 与 Analytics 在 API 内共用一个推理槽位，避免同时向大模型
 
 ## 构建与验证
 
-`./build_docker.sh TAG` 构建 Android APK 和单个 backend_api 镜像，并执行相关检查。Desk 资源有限，构建前先 `systemctl --user stop local-llm.service`；构建完成后再启动服务并执行真实推理验证，不让编译与模型争用内存。
+`./build_docker.sh` 构建 Android APK 和 backend_api 镜像，检查通过后打上日期和 `latest` 标签。传入明确的测试标签只生成测试镜像。Desk 资源有限，构建前先 `systemctl --user stop local-llm.service`；构建完成后再启动服务并执行真实推理验证，不让编译与模型争用内存。
 
 Docker 构建执行 Rust fmt、Clippy、单元和集成测试。`probe-providers` 使用唯一的共享配置发送合成文字探针。`tests/docker/unified_inference.py` 只针对带 `.synthetic-check` 标记的隔离 API 数据根，验证合成图片上传、采集日期、pending/confirm、真实 Analytics 及完整模型归档，不触碰生产库。
 

@@ -43,6 +43,7 @@ struct ReportView: View {
         .originalReportPreview($preview)
         .sheet(item: $editor) { target in
             ObservationEditor(observation: target.observation, metrics: model.metrics,
+                resultTitle: LaboratoryPresentation.resultTitle(target.observation, renamedMetrics: model.renamedLabMetrics),
                 pageCount: Int(document["report"]["page_count"].numberValue ?? 1), choosingMetric: target.choosingMetric) { change, metric in
                 try await save(observations: [change], context: .null, newMetric: metric)
             }
@@ -332,7 +333,7 @@ struct ReportView: View {
         let id = observation["observation_id"]
         let renderedStatus = observation["status"].stringValue
         let revision = observation["revision"].numberValue ?? 0
-        return ReportObservationRow(observation: observation, isBusy: model.isBusy,
+        return ReportObservationRow(model: model, observation: observation,
             changeStatus: canConfirm ? { _ = Task { await toggleStatus(id, renderedStatus: renderedStatus) } } : nil,
             edit: { editor = EditTarget(observation: observation, choosingMetric: false) },
             chooseMetric: { editor = EditTarget(observation: observation, choosingMetric: true) },
@@ -597,8 +598,8 @@ struct DocumentEvidenceView: View {
 }
 
 struct ReportObservationRow: View {
+    let model: AppModel
     let observation: JSONValue
-    let isBusy: Bool
     let changeStatus: (() -> Void)?
     let edit: () -> Void
     let chooseMetric: () -> Void
@@ -625,7 +626,7 @@ struct ReportObservationRow: View {
             HStack(spacing: 8) {
                 Button { edit() } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(laboratoryResultName(observation))
+                        Text(LaboratoryPresentation.resultTitle(observation, renamedMetrics: model.renamedLabMetrics))
                             .font(.headline)
                             .fixedSize(horizontal: false, vertical: true)
                         let code = observation["lab_test_code"].stringValue
@@ -652,7 +653,7 @@ struct ReportObservationRow: View {
                             .frame(minHeight: 44)
                     }
                     .accessibilityIdentifier(hasSuggestion ? "report-result-suggested" : "report-result-new")
-                    .disabled(isBusy)
+                    .disabled(model.isBusy)
                 }
             }.frame(minHeight: 44)
             HStack(spacing: 8) {
@@ -684,7 +685,7 @@ struct ReportObservationRow: View {
                             .frame(minHeight: 44)
                     }
                     .accessibilityIdentifier("report-result-status-action")
-                    .disabled(isBusy)
+                    .disabled(model.isBusy)
                 }
             }
             let name = observation["lab_test_name"].stringValue
@@ -708,7 +709,7 @@ struct ReportObservationRow: View {
                 }
             }
             if observation["status"] == .string("confirmed"), observation["payload"]["metric_id"] == .string("glucose") {
-                Button("Save to \(MobilePlatform.healthProviderName)") { writeHealth() }.font(.caption).disabled(isBusy)
+                Button("Save to \(MobilePlatform.healthProviderName)") { writeHealth() }.font(.caption).disabled(model.isBusy)
             }
         }.buttonStyle(.borderless).padding(.vertical, 5)
     }
@@ -719,13 +720,4 @@ struct ReportObservationRow: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-}
-
-
-func laboratoryResultName(_ observation: JSONValue) -> String {
-    let name = observation["display_name"].stringValue
-    return LaboratoryPresentation.printedName(
-        name.isEmpty ? observation["payload"]["raw_name"].stringValue : name,
-        code: observation["lab_test_code"].stringValue
-    )
 }
