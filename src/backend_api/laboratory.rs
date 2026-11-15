@@ -277,6 +277,7 @@ pub(crate) const LOINC_METRICS: &[(&str, &str)] = &[
     ("4548-4", "hba1c"),
     ("49054-0", "vitamin_d_25_oh_d2"),
     ("50231-0", "urine_hyaline_casts"),
+    ("50560-2", "urine_ph"),
     ("51584-1", "immature_granulocyte_count"),
     ("53115-2", "immature_granulocyte_count"),
     ("5767-9", "urine_appearance"),
@@ -587,7 +588,10 @@ pub fn infer_metric(name: &str, raw_unit: Option<&str>) -> Option<&'static str> 
             )
             || (id == "vitamin_d_25_oh_total" && key == "vitamind")
             || (id == "serum_magnesium" && key == "magnesium")
-            || (matches!(id, "urine_protein" | "urine_glucose" | "urine_color")
+            || (matches!(
+                id,
+                "urine_protein" | "urine_glucose" | "urine_color" | "urine_ph"
+            )
                 && key == id.trim_start_matches("urine_"))
             || (matches!(id, "urine_appearance" | "urine_clarity") && key == "appearance")
             || (id == "urine_clarity" && key == "clarity")

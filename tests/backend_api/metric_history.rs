@@ -1123,6 +1123,62 @@ async fn pdf_lab_codes_and_names_share_history_without_rewriting_evidence() {
     assert_eq!(points[1]["unit"], "mIU/L");
 }
 
+#[tokio::test]
+async fn browse_shows_confirmed_urine_ph_from_its_printed_loinc_without_saved_mapping() {
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "alice").await;
+    let report = archive(&state, "alice").await;
+    let mut payload = observation_payload();
+    payload.raw_name = "pH (50560-2)".into();
+    payload.raw_result = "6.0".into();
+    payload.raw_unit = None;
+    payload.metric_id = None;
+    payload.sampled_at = Some("2018-10-20".into());
+    payload.source.quote = "pH (50560-2) 6.0".into();
+    let document = state
+        .database
+        .review(
+            &user.user_id,
+            ReviewRequest {
+                new_metric: None,
+                report_id: report,
+                expected_revision: 1,
+                context: None,
+                observations: vec![ReviewItem {
+                    observation_id: None,
+                    expected_revision: None,
+                    status: "confirmed".into(),
+                    payload,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    let row = &document["observations"][0];
+    assert_eq!(row["resolved_metric_id"], "urine_ph");
+    assert_eq!(row["payload"]["metric_id"], Value::Null);
+    assert_eq!(row["payload"]["raw_name"], "pH (50560-2)");
+    assert_eq!(row["payload"]["raw_unit"], Value::Null);
+    assert_eq!(longlivehealth::laboratory::infer_metric("pH", None), None);
+
+    let catalog = longlivehealth::browse_catalog::get(&state.database, &user.user_id)
+        .await
+        .unwrap();
+    assert_eq!(catalog["entries"][0]["kind"], "urine_ph");
+    assert_eq!(catalog["entries"][0]["title"], "pH - urine");
+    let result = history(
+        &state.database,
+        &user.user_id,
+        HistoryRequest {
+            metric_id: "urine_ph".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["points"].as_array().unwrap().len(), 1);
+    assert_eq!(result["points"][0]["unit"], "1");
+}
+
 #[test]
 fn numeric_suffixes_preserve_qualifiers_and_reject_code_conflicts() {
     use longlivehealth::laboratory::{infer_metric, split_test_code};
