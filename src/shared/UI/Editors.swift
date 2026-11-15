@@ -4,27 +4,33 @@ struct ObservationEditor: View {
     let observation: JSONValue
     let metrics: [JSONValue]
     let pageCount: Int
-    let save: (JSONValue, JSONValue) async throws -> Void
+    let save: (JSONValue) async throws -> Void
     @State var payload: JSONValue
     @State var printedName: String
     @State var loincCode: String
     @State var choosingMetric: Bool
-    @State var creatingMetric = false
-    @State var usesDefaultMapping = true
+    @State var creatingMetric: Bool
+    @State var metricSelection: String
     @State var newMetricName: String
     @State var newMetricUnit: String
     @State var saving = false
     @State var error: String?
     @Environment(\.dismiss) var dismiss
-    init(observation: JSONValue, metrics: [JSONValue], resultTitle: String, pageCount: Int, choosingMetric: Bool, save: @escaping (JSONValue, JSONValue) async throws -> Void) {
+    init(observation: JSONValue, metrics: [JSONValue], pageCount: Int, choosingMetric: Bool, save: @escaping (JSONValue) async throws -> Void) {
         self.observation = observation; self.metrics = metrics; self.pageCount = pageCount; self.save = save
         _payload = State(initialValue: observation == .null ? .object(["source": .object(["page": .number(1), "quote": .string("")])]) : observation["payload"])
         let code = observation["lab_test_code"].stringValue
         _printedName = State(initialValue: LaboratoryPresentation.printedName(observation["payload"]["raw_name"].stringValue, code: code))
         _loincCode = State(initialValue: code)
         _choosingMetric = State(initialValue: choosingMetric)
-        _newMetricName = State(initialValue: observation["payload"]["ocr_new_metric"]["name"].stringValue.isEmpty ? resultTitle : observation["payload"]["ocr_new_metric"]["name"].stringValue)
-        _newMetricUnit = State(initialValue: observation["payload"]["ocr_new_metric"] == .null ? observation["payload"]["raw_unit"].stringValue : observation["payload"]["ocr_new_metric"]["standard_unit"].stringValue)
+        let savedChoice = observation["payload"]["unmapped_choice"]
+        let proposal = savedChoice["kind"] == .string("new")
+            ? savedChoice["definition"] : observation["payload"]["ocr_new_metric"]
+        _creatingMetric = State(initialValue: savedChoice["kind"] == .string("new"))
+        _metricSelection = State(initialValue: ReportReview.defaultMetricID(observation) ?? "")
+        let originalName = LaboratoryPresentation.printedName(observation["payload"]["raw_name"].stringValue, code: code)
+        _newMetricName = State(initialValue: proposal["name"].stringValue.isEmpty ? originalName : proposal["name"].stringValue)
+        _newMetricUnit = State(initialValue: proposal == .null ? observation["payload"]["raw_unit"].stringValue : proposal["standard_unit"].stringValue)
     }
     var body: some View {
         NavigationStack {
@@ -51,23 +57,34 @@ struct ObservationEditor: View {
     }
 
     private var saveDisabled: Bool {
-        saving || printedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || payload["raw_result"].stringValue.isEmpty
+        saving || !validLOINC || printedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || payload["raw_result"].stringValue.isEmpty
             || (creatingMetric && (newMetricName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || status == "rejected"))
+    }
+
+    private var validLOINC: Bool {
+        let code = loincCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        if code.isEmpty { return true }
+        let parts = code.components(separatedBy: "-")
+        return parts.count == 2 && (1...7).contains(parts[0].count) && parts[1].count == 1
+            && parts.allSatisfy { part in part.allSatisfy { "0123456789".contains($0) } }
     }
 
     private func submit() async {
         saving = true
         defer { saving = false }
         do {
-            let metric: JSONValue = creatingMetric
-                ? .object(["name": .string(newMetricName), "standard_unit": .string(newMetricUnit)])
-                : .null
             let originalCode = observation["lab_test_code"].stringValue
             let originalName = LaboratoryPresentation.printedName(payload["raw_name"].stringValue, code: originalCode)
             var reviewedPayload = payload
-            if usesDefaultMapping, !creatingMetric, reviewedPayload["metric_id"].stringValue.isEmpty,
-               let defaultMetricID = ReportReview.defaultMetricID(observation) {
-                reviewedPayload["metric_id"] = .string(defaultMetricID)
+            reviewedPayload["metric_id"] = .optional(metricSelection)
+            if creatingMetric {
+                reviewedPayload["unmapped_choice"] = .object([
+                    "kind": .string("new"),
+                    "definition": .object(["name": .string(newMetricName), "standard_unit": .string(newMetricUnit)]),
+                ])
+            } else {
+                reviewedPayload["unmapped_choice"] = metricSelection.isEmpty && status == "pending"
+                    ? .object(["kind": .string("unmapped")]) : .null
             }
             if printedName != originalName || loincCode != originalCode {
                 let code = loincCode.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -79,7 +96,7 @@ struct ObservationEditor: View {
                 "status": .string(status),
                 "payload": reviewedPayload,
             ])
-            try await save(change, metric)
+            try await save(change)
             dismiss()
         } catch { self.error = error.localizedDescription }
     }
@@ -87,29 +104,31 @@ struct ObservationEditor: View {
     @ViewBuilder private var reviewSections: some View {
         Section("Mapping") {
             recommendedName
+            HStack {
+                SelectionPicker(title: "Metric mapping", selection: mapping, placeholder: "Unmapped",
+                    choices: mappingChoices)
+                Button("Mark as New", action: markAsNew)
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("mark-as-new-metric")
+                    .disabled(status != "pending" || creatingMetric || saving)
+            }
             if creatingMetric {
                 TextField("Metric name", text: $newMetricName)
                 TextField("Standard unit", text: $newMetricUnit)
-                Button("Choose an existing metric") {
-                    creatingMetric = false
-                    choosingMetric = true
-                }
-            } else {
-                SelectionPicker(title: "Metric mapping", selection: mapping, placeholder: "Unmapped",
-                    choices: mappingChoices)
-                if suggestedMetricID != nil {
-                    Button(usesDefaultMapping ? "Suggested match" : "Review suggested matches") {
-                        choosingMetric = true
-                    }.font(.caption)
-                }
+                Button("Keep unmapped") { creatingMetric = false }
+            } else if suggestedMetricID != nil {
+                Button("Suggested match") { choosingMetric = true }.font(.caption)
+            }
+            let suggestion = ReportReview.suggestionNote(observation)
+            if !suggestion.isEmpty {
+                Text("OCR suggestion: \(suggestion)").font(.caption).foregroundStyle(.secondary)
             }
             mappingIssues
         }
         Section("As printed on the report") {
             TextField("Name", text: $printedName, axis: .vertical).autocorrectionDisabled()
-            if !observation["lab_test_code"].stringValue.isEmpty {
-                TextField("LOINC code", text: $loincCode).autocorrectionDisabled()
-            }
+            TextField("LOINC code", text: $loincCode).autocorrectionDisabled()
+            if !validLOINC { Text("Enter a LOINC code such as 50560-2.").font(.caption).foregroundStyle(.red) }
             field("Result, including < or >", "raw_result"); field("Unit", "raw_unit")
             field("Reference range", "reference_range"); field("Report flag", "report_flag")
             field("Collection date: YYYY-MM-DD or ISO timestamp", "sampled_at")
@@ -134,12 +153,9 @@ struct ObservationEditor: View {
             mappingIssues
         }
         Section {
-            Button("Create new metric") {
-                payload["metric_id"] = .null
-                usesDefaultMapping = false
-                creatingMetric = true
-                choosingMetric = false
-            }.accessibilityIdentifier("create-browse-metric")
+            Button("Mark as New", action: markAsNew)
+                .accessibilityIdentifier("create-browse-metric")
+                .disabled(status != "pending")
             let proposal = observation["payload"]["ocr_new_metric"]
             if proposal != .null {
                 let proposed = [proposal["name"].stringValue, proposal["standard_unit"].stringValue]
@@ -220,14 +236,19 @@ struct ObservationEditor: View {
     }
 
     private var mapping: Binding<String> {
-        Binding(get: {
-            let selected = payload["metric_id"].stringValue
-            if !selected.isEmpty || !usesDefaultMapping { return selected }
-            return ReportReview.defaultMetricID(observation) ?? ""
-        }, set: {
-            usesDefaultMapping = false
-            payload["metric_id"] = .optional($0)
+        Binding(get: { metricSelection }, set: { value in
+            metricSelection = value
+            creatingMetric = false
         })
+    }
+
+    private func markAsNew() {
+        metricSelection = ""
+        if newMetricName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            newMetricName = printedName
+        }
+        creatingMetric = true
+        choosingMetric = false
     }
 
     private func matchLabel(_ match: String) -> String {

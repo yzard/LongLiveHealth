@@ -354,6 +354,7 @@ fn append_value(
         ocr_mapping_note: None,
         ocr_metric_candidate: None,
         ocr_section_heading: None,
+        unmapped_choice: None,
         ocr_new_metric: None,
         ocr_normalization: None,
     };

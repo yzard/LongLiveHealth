@@ -1231,6 +1231,216 @@ async fn review_creates_an_owned_metric_and_links_its_confirmed_browse_history()
     );
 }
 
+#[tokio::test]
+async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
+    use longlivehealth::reports::{NewMetric, UnmappedChoice};
+    use serde_json::Value;
+
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "alice").await;
+    let report = archive(&state, "alice").await;
+    let request = |revision, row: Option<&Value>, status: &str, payload| ReviewRequest {
+        report_id: report.clone(),
+        expected_revision: revision,
+        context: None,
+        new_metric: None,
+        observations: vec![ReviewItem {
+            observation_id: row.map(|row| row["observation_id"].as_str().unwrap().to_owned()),
+            expected_revision: row.and_then(|row| row["revision"].as_i64()),
+            status: status.into(),
+            payload,
+        }],
+    };
+    let mut payload = observation_payload();
+    payload.raw_name = "Zyphorin activity".into();
+    payload.raw_unit = Some("ZR".into());
+    payload.ocr_metric_candidate = Some("ldl_cholesterol".into());
+    payload.ocr_mapping_note = Some("The suggested identity is uncertain.".into());
+    payload.metric_id = None;
+    let initial = state
+        .database
+        .review(&user.user_id, request(1, None, "pending", payload.clone()))
+        .await
+        .unwrap();
+    let initial = &initial["observations"][0];
+    payload.unmapped_choice = Some(UnmappedChoice::New(NewMetric {
+        name: "Zyphorin activity".into(),
+        standard_unit: "ZR".into(),
+    }));
+    assert!(
+        state
+            .database
+            .review(
+                &user.user_id,
+                request(2, Some(initial), "confirmed", payload.clone())
+            )
+            .await
+            .is_err()
+    );
+
+    payload.raw_name = "Zyphorin activity (2093-3)".into();
+    payload.raw_unit = Some("wrong unit".into());
+    let saved = state
+        .database
+        .review(
+            &user.user_id,
+            request(2, Some(initial), "pending", payload.clone()),
+        )
+        .await
+        .unwrap();
+    let wrong = &saved["observations"][0];
+    assert_eq!(wrong["status"], "pending");
+    assert_eq!(wrong["payload"]["unmapped_choice"]["kind"], "new");
+    assert!(wrong["resolved_metric_id"].is_null());
+    assert_eq!(
+        wrong["payload"]["ocr_mapping_note"],
+        "The suggested identity is uncertain."
+    );
+    let issues = wrong["browse_issues"].as_array().unwrap();
+    for code in ["loinc_metric_conflict", "unsupported_unit"] {
+        assert!(issues.iter().any(|issue| issue["code"] == code));
+    }
+    assert!(
+        state
+            .database
+            .review(
+                &user.user_id,
+                request(3, Some(wrong), "confirmed", payload.clone())
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        state
+            .database
+            .custom_metrics(&user.user_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    payload.raw_name = "Zyphorin activity".into();
+    payload.raw_unit = Some("ZR".into());
+    let corrected = state
+        .database
+        .review(
+            &user.user_id,
+            request(3, Some(wrong), "pending", payload.clone()),
+        )
+        .await
+        .unwrap();
+    let corrected = &corrected["observations"][0];
+    assert!(corrected["browse_issues"].as_array().unwrap().is_empty());
+    assert!(
+        state
+            .database
+            .custom_metrics(&user.user_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let confirmed = state
+        .database
+        .review(
+            &user.user_id,
+            request(4, Some(corrected), "confirmed", payload),
+        )
+        .await
+        .unwrap();
+    let row = &confirmed["observations"][0];
+    assert_eq!(row["status"], "confirmed");
+    assert_eq!(
+        row["payload"]["metric_id"],
+        confirmed["created_metrics"][0]["metric_id"]
+    );
+    assert!(row["payload"]["unmapped_choice"].is_null());
+    assert_eq!(
+        state
+            .database
+            .custom_metrics(&user.user_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn confirming_multiple_new_results_creates_each_distinct_saved_definition_once() {
+    use longlivehealth::reports::{NewMetric, UnmappedChoice};
+
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "alice").await;
+    let report_id = archive(&state, "alice").await;
+    let observations = [
+        ("Zyphorin activity", "1.1"),
+        ("Zyphorin activity", "1.2"),
+        ("Vivorel fraction", "2.0"),
+    ]
+    .into_iter()
+    .map(|(name, result)| {
+        let mut payload = observation_payload();
+        payload.raw_name = name.into();
+        payload.raw_result = result.into();
+        payload.raw_unit = Some("ZR".into());
+        payload.metric_id = None;
+        payload.unmapped_choice = Some(UnmappedChoice::New(NewMetric {
+            name: name.into(),
+            standard_unit: "ZR".into(),
+        }));
+        ReviewItem {
+            observation_id: None,
+            expected_revision: None,
+            status: "pending".into(),
+            payload,
+        }
+    })
+    .collect();
+    let save = |expected_revision, observations| {
+        state.database.review(
+            &user.user_id,
+            ReviewRequest {
+                report_id: report_id.clone(),
+                expected_revision,
+                context: None,
+                new_metric: None,
+                observations,
+            },
+        )
+    };
+    let draft = save(1, observations).await.unwrap();
+    let changes = draft["observations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| ReviewItem {
+            observation_id: row["observation_id"].as_str().map(str::to_owned),
+            expected_revision: row["revision"].as_i64(),
+            status: "confirmed".into(),
+            payload: serde_json::from_value(row["payload"].clone()).unwrap(),
+        })
+        .collect();
+    let confirmed = save(2, changes).await.unwrap();
+    assert_eq!(confirmed["created_metrics"].as_array().unwrap().len(), 2);
+    let rows = confirmed["observations"].as_array().unwrap();
+    for (name, count) in [("Zyphorin activity", 2), ("Vivorel fraction", 1)] {
+        let created = confirmed["created_metrics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|metric| metric["name"] == name)
+            .unwrap();
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row["status"] == "confirmed"
+                    && row["payload"]["raw_name"] == name
+                    && row["payload"]["metric_id"] == created["metric_id"])
+                .count(),
+            count
+        );
+    }
+}
+
 #[test]
 fn count_exponent_units_use_a_verified_conversion_and_keep_the_printed_unit() {
     use longlivehealth::laboratory::interpret;

@@ -121,6 +121,7 @@ class Handler(BaseHTTPRequestHandler):
                     'report_id': report_id,
                     'revision': 1,
                     'status': 'confirmed',
+                    'resolved_metric_id': 'glucose',
                     'payload': {
                         'metric_id': 'glucose',
                         'raw_name': 'Glucose',
@@ -151,6 +152,7 @@ class Handler(BaseHTTPRequestHandler):
             row = observations[0]
             row['status'] = 'pending'
             row['payload']['metric_id'] = None
+            row['resolved_metric_id'] = None
             row['browse_issues'] = [{
                 'code': 'unmapped_metric', 'scope': 'browse',
                 'message': 'No matching Browse metric. Review this result.',
@@ -233,9 +235,17 @@ class Handler(BaseHTTPRequestHandler):
                     'status': change['status'],
                     'payload': change['payload'],
                 }
+                choice = revised['payload'].get('unmapped_choice') or {}
+                if change['status'] == 'confirmed' and choice.get('kind') == 'new':
+                    created_metric = dict(choice['definition'], metric_id='custom:fixture')
                 if created_metric:
                     revised['payload']['metric_id'] = created_metric['metric_id']
+                    revised['payload'].pop('unmapped_choice', None)
                     revised['created_metric'] = created_metric
+                revised['resolved_metric_id'] = revised['payload'].get('metric_id')
+                if revised['payload']['raw_result'].casefold() == 'negative' and revised['payload'].get('raw_unit'):
+                    revised['browse_issues'] = [{'code': 'negative_with_unit', 'scope': 'review',
+                                                 'message': 'Verify the assay threshold.'}]
                 if old:
                     observations.remove(old)
                 observations.append(revised)
@@ -362,6 +372,7 @@ class Handler(BaseHTTPRequestHandler):
             },
             'reports/review': {
                 'created_metric': created_metric,
+                'created_metrics': [created_metric] if created_metric else [],
                 'report': reports[0] if reports else {},
                 'observations': observations,
                 'context': context,

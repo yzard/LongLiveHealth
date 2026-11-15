@@ -3,14 +3,16 @@ import Testing
 
 @Test func bulkConfirmationIncludesOnlyPendingOCRResultsWithoutIssues() {
     let payload: JSONValue = .object([
+        "metric_id": .string("example"),
         "raw_name": .string("Example marker"), "raw_result": .string("Negative"),
         "sampled_at": .string("2026-11-01"), "source": .object(["quote": .string("Example marker: Negative")])
     ])
     let ready: JSONValue = .object([
         "observation_id": .string("ready"), "revision": .number(3),
-        "status": .string("pending"), "payload": payload
+        "status": .string("pending"), "payload": payload, "resolved_metric_id": .string("example")
     ])
     var uncertain = ready
+    uncertain["payload"]["metric_id"] = .null
     uncertain["payload"]["ocr_mapping_note"] = .string("Specimen could not be verified")
     var invalid = ready
     invalid["browse_issues"] = .array([.object(["scope": .string("chart"), "code": .string("invalid_date")])])
@@ -56,4 +58,18 @@ import Testing
         #expect(report.filter(ReportReview.canBulkConfirm).count == min(index + 1, 2))
     }
     #expect(report.allSatisfy { $0["status"] == .string("pending") })
+
+    var newMetric = observations[0]
+    newMetric["payload"]["unmapped_choice"] = .object(["kind": .string("new"),
+        "definition": .object(["name": .string("New test"), "standard_unit": .string("1")])])
+    #expect(ReportReview.defaultMetricID(newMetric) == nil)
+    #expect(ReportReview.suggestedMetricID(newMetric) == nil)
+    #expect(ReportReview.canBulkConfirm(newMetric))
+    #expect(ReportReview.suggestionNote(newMetric) == "Check the measurement identity")
+    newMetric["browse_issues"] = .array([.object(["code": .string("unsupported_unit")])])
+    #expect(!ReportReview.canConfirmIndividually(newMetric))
+    newMetric["browse_issues"] = .array([])
+    newMetric["payload"]["unmapped_choice"] = .object(["kind": .string("unmapped")])
+    #expect(!ReportReview.canBulkConfirm(newMetric))
+    #expect(!ReportReview.canConfirmIndividually(newMetric))
 }

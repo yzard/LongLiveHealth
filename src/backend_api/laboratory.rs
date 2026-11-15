@@ -235,6 +235,9 @@ pub(crate) fn verified_custom_candidate<'a>(
     payload: &ObservationPayload,
     custom: &'a [CustomMetric],
 ) -> Option<&'a str> {
+    if payload.unmapped_choice.is_some() {
+        return None;
+    }
     if payload
         .ocr_mapping_note
         .as_ref()
@@ -432,7 +435,7 @@ pub fn is_administrative_name(name: &str) -> bool {
 }
 
 pub fn resolved_metric(payload: &ObservationPayload) -> Option<&str> {
-    if is_administrative_name(&payload.raw_name) {
+    if payload.unmapped_choice.is_some() || is_administrative_name(&payload.raw_name) {
         return None;
     }
     payload.metric_id.as_deref().or_else(|| {
@@ -1185,7 +1188,7 @@ fn derive(
     };
     let Some(raw_unit) = raw_unit
         .filter(|unit| !unit.trim().is_empty())
-        .or((custom.is_none() && standard_unit == "1").then_some("1"))
+        .or((standard_unit == "1").then_some("1"))
     else {
         return Quantity::unavailable("missing_unit", raw_unit, origin);
     };

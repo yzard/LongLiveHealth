@@ -527,7 +527,7 @@ def report_metric_review():
             assert "No matching Browse metric. Review this result." not in labels()
             if not negative:
                 tap("Suggested match")
-                wait_for("Create new metric")
+                wait_for("Mark as New")
                 tap("Review with the full metric list")
                 wait_for("Glucose")
             if negative:
@@ -537,7 +537,7 @@ def report_metric_review():
                 tap("Appearance - urine")
                 wait_for("Glucose")
                 tap("Glucose")
-                assert "Suggested match" not in labels()
+                wait_for("Glucose")
                 tap("Cancel")
                 assert control("reports/get")["observations"][0]["payload"]["metric_id"] is None
                 tap("Suggested match")
@@ -560,7 +560,7 @@ def report_metric_review():
                 adb("shell", "input", "keyevent", "KEYCODE_BACK")
                 wait_for("mg/L")
             tap("Save")
-            wait_for("1 result ready to confirm")
+            wait_for("0 results ready to confirm" if negative else "1 result ready to confirm")
             saved = control("reports/get")["observations"][0]
             assert saved["payload"]["metric_id"] == ("urine_appearance" if negative else "glucose")
             assert saved["status"] == "pending"
@@ -574,24 +574,31 @@ def report_metric_review():
             issue = "New"
             wait_for("5.5 mmol/L")
             tap(issue)
-            wait_for("Create new metric")
+            wait_for("Mark as New")
             wait_for("No similar Browse metrics found.")
             wait_for("OCR suggestion: Zyphorin panel activity · mmol/L")
-            tap("Create new metric")
+            tap("Mark as New")
             wait_for("Save")
             assert any(n.get("class") == "android.widget.EditText" for n in tree().iter("node"))
             tap("Cancel")
             wait_for(issue)
             assert control("reports/get")["observations"][0]["payload"]["metric_id"] is None
             tap(issue)
-            wait_for("Create new metric")
-            tap("Create new metric")
+            wait_for("Mark as New")
+            tap("Mark as New")
             wait_for("Save")
             tap("Save")
             wait_for("1 result ready to confirm")
             tap("1 result ready to confirm")
             wait_for("Zyphorin activity")
             saved = control("reports/get")["observations"][0]
+            assert saved["status"] == "pending"
+            assert saved["payload"]["metric_id"] is None
+            assert saved["payload"]["unmapped_choice"]["kind"] == "new"
+            tap("Confirm")
+            wait_for("0 results ready to confirm")
+            saved = control("reports/get")["observations"][0]
+            assert saved["status"] == "confirmed"
             assert saved["created_metric"] == {
                 "name": "Zyphorin panel activity", "standard_unit": "mmol/L", "metric_id": "custom:fixture",
             }

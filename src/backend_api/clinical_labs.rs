@@ -135,6 +135,7 @@ pub(crate) fn groups(records: &[Value]) -> BTreeMap<String, Group> {
                         ocr_mapping_note: None,
                         ocr_metric_candidate: None,
                         ocr_section_heading: None,
+                        unmapped_choice: None,
                         ocr_new_metric: None,
                         ocr_normalization: None,
                     })

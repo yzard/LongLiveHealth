@@ -410,12 +410,21 @@ observation IDs, candidate keys and optimistic revision checks. Charts and analy
 consume confirmed observations only.
 
 `reports/review` with `status=confirmed` commits the reviewed payload to the main
-observation table. The iOS Confirm all action sends all pending items through this
-endpoint (up to 2,000 per request). After that commit, matching older drafts are
+observation table. Mobile Confirm all sends pending results with a saved mapping
+and no current review issues through this endpoint, up to 2,000 per request. After
+that commit, matching older drafts are
 removed. Reverting a result to pending/rejected first persists the draft, then removes
 the old official row. Cleanup is repeatable and runs at startup as well: a process
 interruption between copying and cleanup cannot delete the sole durable copy.
 Existing unconfirmed rows are moved into the draft store without re-running OCR.
+
+A pending result saves an existing metric in `payload.metric_id`. With that ID
+unset, `payload.unmapped_choice` can be `{"kind":"unmapped"}` or
+`{"kind":"new","definition":{"name":"Example assay","standard_unit":"U/L"}}`.
+Both choices suppress automatic mapping. Confirming a saved new definition
+creates its metric and confirms the result in the same transaction. The response
+includes `created_metrics` for any metrics created by the operation. OCR
+suggestions remain in the evidence fields during review.
 
 Account exports retain the same observations JSONL format and include both review
 states. Restore routes unconfirmed rows directly to `draft.sqlite`. Filesystem

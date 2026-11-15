@@ -293,9 +293,11 @@ pub fn wrap_completion(
         let valid = choice.is_some_and(|c| c["finish_reason"] == "stop")
             && rows.as_ref().is_some_and(|p| {
                 p.observations.len() <= 2000
-                    && p.observations
-                        .iter()
-                        .all(|o| o.metric_id.is_none() && o.source.page == page)
+                    && p.observations.iter().all(|o| {
+                        o.metric_id.is_none()
+                            && o.unmapped_choice.is_none()
+                            && o.source.page == page
+                    })
                     && p.report_title.as_ref().is_none_or(|s| s.len() <= 256)
                     && p.source_name.as_ref().is_none_or(|s| s.len() <= 160)
                     && p.warnings.iter().all(|s| s.len() <= 4096)

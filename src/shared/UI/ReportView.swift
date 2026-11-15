@@ -43,7 +43,7 @@ struct ReportView: View {
         .originalReportPreview($preview)
         .sheet(item: $editor) { target in reviewEditor(target) }
         .sheet(item: $healthWriter) { target in ReviewedGlucoseWriter(model: model, observation: target.observation) }
-        .sheet(isPresented: $contextVisible) { ContextEditor(context: document["context"]) { context in try await save(observations: [], context: context, newMetric: .null) } }
+        .sheet(isPresented: $contextVisible) { ContextEditor(context: document["context"]) { context in try await save(observations: [], context: context) } }
         .alert("Rescan report?", isPresented: $rescanConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Rescan", role: .destructive) { Task { await rescan() } }
@@ -324,9 +324,8 @@ struct ReportView: View {
 
     private func reviewEditor(_ target: EditTarget) -> ObservationEditor {
         ObservationEditor(observation: target.observation, metrics: model.metrics,
-            resultTitle: LaboratoryPresentation.resultTitle(target.observation, renamedMetrics: model.renamedLabMetrics),
-            pageCount: Int(document["report"]["page_count"].numberValue ?? 1), choosingMetric: target.choosingMetric) { change, metric in
-            try await save(observations: [change], context: .null, newMetric: metric)
+            pageCount: Int(document["report"]["page_count"].numberValue ?? 1), choosingMetric: target.choosingMetric) { change in
+            try await save(observations: [change], context: .null)
         }
     }
 
@@ -427,7 +426,9 @@ struct ReportView: View {
               current["status"].stringValue == renderedStatus else { return }
         let nextStatus: String
         switch renderedStatus {
-        case "pending": nextStatus = "confirmed"
+        case "pending":
+            guard ReportReview.canConfirmIndividually(current) else { return }
+            nextStatus = "confirmed"
         case "confirmed": nextStatus = "pending"
         default: return
         }
@@ -438,7 +439,7 @@ struct ReportView: View {
 
     private func saveStatusChanges(_ changes: [JSONValue]) async throws -> Bool {
         do {
-            try await save(observations: changes, context: .null, newMetric: .null)
+            try await save(observations: changes, context: .null)
             return true
         } catch APIError.status(409, _) {
             let latest = try await model.refreshReportAfterReviewConflict(reportID)
@@ -467,15 +468,15 @@ struct ReportView: View {
         do { _ = adoptReport(try await model.report(reportID)) }
         catch { model.errorMessage = error.localizedDescription }
     }
-    private func save(observations: [JSONValue], context: JSONValue, newMetric: JSONValue) async throws {
+    private func save(observations: [JSONValue], context: JSONValue) async throws {
         guard model.client != nil, !savingReview else { throw APIError.invalidResponse }
         savingReview = true
         defer { savingReview = false }
-        var request: JSONValue = .object(["report_id": .string(reportID), "expected_revision": document["report"]["revision"], "context": context, "observations": .array(observations)])
-        if newMetric != .null { request["new_metric"] = newMetric }
+        let request: JSONValue = .object(["report_id": .string(reportID), "expected_revision": document["report"]["revision"], "context": context, "observations": .array(observations)])
         let response = try await model.request("reports/review", body: request)
-        if response["created_metric"] != .null {
-            model.metrics.append(response["created_metric"])
+        for metric in response["created_metrics"].arrayValue
+            where !model.metrics.contains(where: { $0["metric_id"] == metric["metric_id"] }) {
+            model.metrics.append(metric)
         }
         try await applySavedReport(response)
     }
@@ -719,8 +720,12 @@ struct ReportObservationRow: View {
                             .frame(minHeight: 44)
                     }
                     .accessibilityIdentifier("report-result-status-action")
-                    .disabled(model.isBusy)
+                    .disabled(model.isBusy || (status == "pending" && !ReportReview.canConfirmIndividually(observation)))
                 }
+            }
+            let suggestion = ReportReview.suggestionNote(observation)
+            if !suggestion.isEmpty {
+                Text("OCR suggestion: \(suggestion)").font(.caption).foregroundStyle(.secondary)
             }
             let name = observation["lab_test_name"].stringValue
             if !name.isEmpty {

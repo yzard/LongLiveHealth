@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use std::collections::HashSet;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Source {
     pub page: i64,
@@ -21,7 +21,7 @@ pub struct Source {
     pub bounding_box: Option<[f64; 4]>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ObservationPayload {
     pub raw_name: String,
@@ -31,6 +31,8 @@ pub struct ObservationPayload {
     pub report_flag: Option<String>,
     pub sampled_at: Option<String>,
     pub metric_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unmapped_choice: Option<UnmappedChoice>,
     pub source: Source,
     pub notes: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -45,7 +47,19 @@ pub struct ObservationPayload {
     pub ocr_normalization: Option<OcrNormalization>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
+#[serde(
+    tag = "kind",
+    content = "definition",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum UnmappedChoice {
+    Unmapped,
+    New(NewMetric),
+}
+
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OcrNormalization {
     pub result: String,
@@ -130,6 +144,18 @@ impl ObservationPayload {
                 "Unknown metric_id; leave unmapped instead",
             ));
         }
+        if self.unmapped_choice.is_some() && self.metric_id.is_some() {
+            return Err(AppError::Invalid(
+                "Choose either an existing metric or an unmapped choice",
+            ));
+        }
+        if let Some(UnmappedChoice::New(metric)) = &self.unmapped_choice
+            && !metric.is_valid()
+        {
+            return Err(AppError::Invalid(
+                "Enter a valid name and standard unit for the new metric",
+            ));
+        }
         if let Some(bounds) = self.source.bounding_box
             && (bounds
                 .iter()
@@ -182,6 +208,8 @@ pub struct Observation {
     reported_metric_id: Option<String>,
     pub display_name: String,
     pub lab_test_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ocr_suggestion_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lab_test_name: Option<&'static str>,
     pub browse_issues: Vec<BrowseIssue>,
@@ -306,13 +334,46 @@ fn browse_issues(
     } else if ["missing_unit", "unsupported_unit", "overflow"]
         .contains(&interpretation.result.status)
     {
+        let standard = custom
+            .map(|metric| metric.standard_unit.as_str())
+            .or_else(|| {
+                metric
+                    .and_then(crate::laboratory::metric_definition)
+                    .map(|metric| metric.standard_unit)
+            })
+            .unwrap_or("");
+        let reported = payload.raw_unit.as_deref().unwrap_or("not reported");
         issues.push(BrowseIssue {
             code: interpretation.result.status,
             scope: "chart",
-            message: format!(
-                "Historical values only; cannot plot: {}",
-                interpretation.result.reason
-            ),
+            message: if interpretation.result.status == "unsupported_unit" {
+                let standard = if standard == "1" {
+                    "unitless"
+                } else {
+                    standard
+                };
+                format!("Unit mismatch: report unit {reported}; metric standard unit {standard}.")
+            } else {
+                format!(
+                    "Historical values only; cannot plot: {}",
+                    interpretation.result.reason
+                )
+            },
+        });
+    }
+    if (payload.metric_id.is_some()
+        || matches!(payload.unmapped_choice, Some(UnmappedChoice::New(_))))
+        && crate::laboratory::split_test_code(&payload.raw_name)
+            .1
+            .is_some()
+        && test_code(payload).is_none()
+    {
+        issues.push(BrowseIssue {
+            code: "unrecognized_loinc",
+            scope: "review",
+            message:
+                "The entered LOINC code is not recognized. Check it against the original report."
+                    .into(),
         });
     }
     if payload
@@ -401,12 +462,12 @@ impl StoredObservation {
                 .and_then(|ids| ids.first())
                 .map(String::as_str)
         });
-        let conflict = payload.metric_id.as_deref().is_some_and(|id| {
-            linked.map_or_else(
-                || native.is_some_and(|ids| ids.len() != 1 || !ids.contains(id)),
-                |linked| linked != id,
-            )
-        });
+        let new_metric = match &payload.unmapped_choice {
+            Some(UnmappedChoice::New(metric)) => Some(metric),
+            _ => None,
+        };
+        let conflict = (payload.metric_id.is_some() || new_metric.is_some())
+            && conflicting_loinc(payload.metric_id.as_deref(), linked, native);
         let resolved = if self.status == "pending"
             && learned.is_some()
             && payload.metric_id.is_none()
@@ -425,9 +486,13 @@ impl StoredObservation {
         let custom = custom_metrics
             .iter()
             .find(|metric| Some(metric.metric_id.as_str()) == resolved_metric_id.as_deref());
-        let interpretation =
-            crate::laboratory::interpret_metric(&payload, resolved_metric_id.as_deref(), custom);
-        let candidates = if resolved_metric_id.is_none() || conflict {
+        let preview = new_metric.map(|metric| metric.definition(String::new()));
+        let interpretation = crate::laboratory::interpret_metric(
+            &payload,
+            resolved_metric_id.as_deref(),
+            custom.or(preview.as_ref()),
+        );
+        let candidates = if (resolved_metric_id.is_none() && new_metric.is_none()) || conflict {
             crate::laboratory::metric_suggestions(
                 &payload.raw_name,
                 payload.raw_unit.as_deref(),
@@ -441,9 +506,17 @@ impl StoredObservation {
             &payload,
             &interpretation,
             resolved_metric_id.as_deref(),
-            custom,
+            custom.or(preview.as_ref()),
             &candidates,
         );
+        if let Some(metric) = new_metric
+            && metric.matches_existing(custom_metrics, metadata)
+        {
+            browse_issues.push(BrowseIssue {
+                code: "matching_metric_exists", scope: "browse",
+                message: "A metric with this name and unit already exists. Select it or change the new definition.".into(),
+            });
+        }
         if conflict {
             let message = linked_candidate
                 .map(|id| metadata.aliases.get(id).map(String::as_str)
@@ -472,6 +545,20 @@ impl StoredObservation {
                 None
             };
         let (printed_name, lab_test_code) = crate::laboratory::split_test_code(&payload.raw_name);
+        let ocr_suggestion_name = payload.ocr_metric_candidate.as_deref().and_then(|id| {
+            metadata
+                .aliases
+                .get(id)
+                .map(String::as_str)
+                .or_else(|| {
+                    custom_metrics
+                        .iter()
+                        .find(|metric| metric.metric_id == id)
+                        .map(|metric| metric.name.as_str())
+                })
+                .or_else(|| crate::laboratory::metric_definition(id).map(|metric| metric.name))
+                .map(str::to_owned)
+        });
         let saved_metric = resolved_metric_id
             .as_deref()
             .filter(|_| payload.metric_id.is_some() || self.status == "confirmed");
@@ -512,6 +599,7 @@ impl StoredObservation {
             display_name: display_name.to_owned(),
             lab_test_code: lab_test_code.map(str::to_owned),
             lab_test_name: lab_test_code.and_then(crate::loinc::long_common_name),
+            ocr_suggestion_name,
             reported_negative_bound: negative_bound(&payload),
             browse_issues,
             metric_suggestions,
@@ -545,7 +633,7 @@ pub struct ReviewRequest {
     pub new_metric: Option<NewMetric>,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct NewMetric {
     pub name: String,
@@ -553,6 +641,41 @@ pub struct NewMetric {
 }
 
 impl NewMetric {
+    fn definition(&self, metric_id: String) -> CustomMetric {
+        let unit = crate::laboratory::custom_unit(&self.standard_unit);
+        CustomMetric {
+            metric_id,
+            name: self.name.trim().to_owned(),
+            standard_unit: if unit.is_empty() {
+                "1".into()
+            } else {
+                unit.into()
+            },
+        }
+    }
+
+    fn matches_existing(&self, available: &[CustomMetric], metadata: &Metadata) -> bool {
+        let definition = self.definition(String::new());
+        let name = crate::laboratory_names::key(&definition.name);
+        let matches_name = |id: &str, original: &str| {
+            crate::laboratory_names::key(original) == name
+                || metadata
+                    .aliases
+                    .get(id)
+                    .is_some_and(|alias| crate::laboratory_names::key(alias) == name)
+        };
+        crate::laboratory::infer_metric(&definition.name, Some(&definition.standard_unit)).is_some()
+            || crate::laboratory::metrics().iter().any(|metric| {
+                metric.standard_unit == definition.standard_unit
+                    && matches_name(metric.metric_id, metric.name)
+            })
+            || available.iter().any(|metric| {
+                (metric.standard_unit == definition.standard_unit
+                    || (metric.standard_unit.is_empty() && definition.standard_unit == "1"))
+                    && matches_name(&metric.metric_id, &metric.name)
+            })
+    }
+
     pub(crate) fn is_valid(&self) -> bool {
         let name = self.name.trim();
         !crate::laboratory_names::key(name).is_empty()
@@ -563,6 +686,39 @@ impl NewMetric {
             && !crate::laboratory::is_administrative_name(name)
             && crate::laboratory::split_test_code(name).1.is_none()
     }
+}
+
+fn conflicting_loinc(
+    selected: Option<&str>,
+    linked: Option<&str>,
+    native: Option<&std::collections::BTreeSet<String>>,
+) -> bool {
+    linked.map_or_else(
+        || native.is_some_and(|ids| ids.len() != 1 || ids.first().map(String::as_str) != selected),
+        |linked| Some(linked) != selected,
+    )
+}
+
+async fn insert_custom_metric(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    user_id: &str,
+    metric: &NewMetric,
+) -> Result<CustomMetric, AppError> {
+    let custom = metric.definition(format!("custom:{}", uuid::Uuid::new_v4()));
+    let inserted = sqlx::query(queries::INSERT_CUSTOM_LAB_METRIC)
+        .bind(&custom.metric_id)
+        .bind(user_id)
+        .bind(&custom.name)
+        .bind(crate::laboratory_names::key(&custom.name))
+        .bind(&custom.standard_unit)
+        .execute(&mut **transaction)
+        .await?;
+    if inserted.rows_affected() != 1 {
+        return Err(AppError::Conflict(
+            "You already have a metric with this name and unit",
+        ));
+    }
+    Ok(custom)
 }
 
 pub fn parse_time(input: &str) -> Result<i64, AppError> {
@@ -852,7 +1008,8 @@ impl Database {
             && (request.observations.len() != 1
                 || request.observations[0].observation_id.is_none()
                 || request.observations[0].status == "rejected"
-                || request.observations[0].payload.metric_id.is_some())
+                || request.observations[0].payload.metric_id.is_some()
+                || request.observations[0].payload.unmapped_choice.is_some())
         {
             return Err(AppError::Invalid(
                 "Create a metric while reviewing one existing result",
@@ -917,7 +1074,9 @@ impl Database {
                 .as_deref()
                 .is_some_and(lab_metric_metadata::is_clinical_id)
                 || (item.status == "confirmed"
-                    && item.payload.metric_id.is_some()
+                    && (request.new_metric.is_some()
+                        || item.payload.metric_id.is_some()
+                        || matches!(item.payload.unmapped_choice, Some(UnmappedChoice::New(_))))
                     && test_code(&item.payload)
                         .is_some_and(|code| crate::laboratory::loinc_metric(code).is_none()))
         });
@@ -991,55 +1150,63 @@ impl Database {
                     .await?;
             }
         }
-        let created_metric = if let Some(metric) = request.new_metric {
-            let name = metric.name.trim();
-            let name_key = crate::laboratory_names::key(name);
-            let standard_unit = crate::laboratory::custom_unit(&metric.standard_unit);
-            if !metric.is_valid() {
-                return Err(AppError::Invalid(
-                    "Use a metric name without the printed test code and a unit of up to 64 bytes",
-                ));
-            }
-            if crate::laboratory::infer_metric(
-                name,
-                (!standard_unit.is_empty()).then_some(standard_unit),
-            )
-            .is_some()
-            {
-                return Err(AppError::Conflict(
-                    "A matching Browse metric already exists. Select it instead.",
-                ));
-            }
-            let custom = CustomMetric {
-                metric_id: format!("custom:{}", uuid::Uuid::new_v4()),
-                name: name.to_owned(),
-                standard_unit: standard_unit.to_owned(),
-            };
-            let inserted = sqlx::query(queries::INSERT_CUSTOM_LAB_METRIC)
-                .bind(&custom.metric_id)
-                .bind(user_id)
-                .bind(&custom.name)
-                .bind(name_key)
-                .bind(&custom.standard_unit)
-                .execute(&mut *transaction)
-                .await?;
-            if inserted.rows_affected() != 1 {
-                return Err(AppError::Conflict(
-                    "You already have a metric with this name and unit",
-                ));
-            }
-            Some(custom)
-        } else {
-            None
-        };
-        let custom_metrics: Vec<CustomMetric> = sqlx::query_as(queries::CUSTOM_LAB_METRICS)
+        let mut custom_metrics: Vec<CustomMetric> = sqlx::query_as(queries::CUSTOM_LAB_METRICS)
             .bind(user_id)
             .fetch_all(&mut *transaction)
             .await?;
         let mut metadata = Metadata::load(&mut transaction, user_id).await?;
+        let mut created_metrics = Vec::new();
+        let mut created_definitions = std::collections::BTreeMap::<_, String>::new();
+        let inconsistent = if request.observations.iter().any(|row| {
+            row.status == "confirmed"
+                && matches!(row.payload.unmapped_choice, Some(UnmappedChoice::New(_)))
+        }) {
+            let stored = sqlx::query_as::<_, StoredObservation>(queries::OBSERVATIONS)
+                .bind(user_id)
+                .bind(&request.report_id)
+                .fetch_all(&mut *transaction)
+                .await?;
+            let active = stored
+                .into_iter()
+                .filter(|row| row.status != "rejected")
+                .map(|row| {
+                    Ok((
+                        row.observation_id,
+                        serde_json::from_str::<ObservationPayload>(&row.payload_json)?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, AppError>>()?;
+            let flags = crate::laboratory::inconsistent_subcounts(
+                active.iter().map(|(_, payload)| payload),
+            );
+            active
+                .into_iter()
+                .zip(flags)
+                .filter_map(|((id, _), flag)| flag.then_some(id))
+                .collect::<HashSet<_>>()
+        } else {
+            HashSet::new()
+        };
         for mut observation in request.observations {
-            if let Some(metric) = &created_metric {
-                observation.payload.metric_id = Some(metric.metric_id.clone());
+            if let Some(metric) = request.new_metric.as_ref() {
+                if !metric.is_valid() {
+                    return Err(AppError::Invalid(
+                        "Enter a valid name and standard unit for the new metric",
+                    ));
+                }
+                if observation.status == "pending" {
+                    observation.payload.unmapped_choice = Some(UnmappedChoice::New(metric.clone()));
+                } else {
+                    if metric.matches_existing(&custom_metrics, &metadata) {
+                        return Err(AppError::Conflict(
+                            "A matching Browse metric already exists. Select it instead.",
+                        ));
+                    }
+                    let created = insert_custom_metric(&mut transaction, user_id, metric).await?;
+                    observation.payload.metric_id = Some(created.metric_id.clone());
+                    custom_metrics.push(created.clone());
+                    created_metrics.push(created);
+                }
             }
             if let Some(id) = observation
                 .payload
@@ -1084,6 +1251,87 @@ impl Database {
                     .await?;
                 (id, 1, None)
             };
+            if observation.status == "confirmed" {
+                if previous.as_ref().is_some_and(|(_, prior)| {
+                    prior.unmapped_choice.is_some()
+                        && prior.unmapped_choice != observation.payload.unmapped_choice
+                }) {
+                    return Err(AppError::Conflict(
+                        "Save the updated mapping before confirming",
+                    ));
+                }
+                match observation.payload.unmapped_choice.as_ref() {
+                    Some(UnmappedChoice::Unmapped) => {
+                        return Err(AppError::Invalid(
+                            "Save a metric mapping or mark the result as new before confirming",
+                        ));
+                    }
+                    Some(UnmappedChoice::New(metric)) => {
+                        if !previous.as_ref().is_some_and(|(status, payload)| {
+                            status == "pending" && payload == &observation.payload
+                        }) {
+                            return Err(AppError::Conflict(
+                                "Save the new metric definition and result before confirming",
+                            ));
+                        }
+                        let code = test_code(&observation.payload);
+                        let printed_code =
+                            crate::laboratory::split_test_code(&observation.payload.raw_name).1;
+                        let definition = metric.definition(String::new());
+                        let key = (
+                            crate::laboratory_names::key(&definition.name),
+                            definition.standard_unit.clone(),
+                            printed_code.map(str::to_owned),
+                        );
+                        let existing = created_definitions.get(&key).map(String::as_str);
+                        let linked = code.and_then(crate::laboratory::loinc_metric).or_else(|| {
+                            code.and_then(|code| metadata.links.get(code).map(String::as_str))
+                        });
+                        let preview = crate::laboratory::interpret_metric(
+                            &observation.payload,
+                            None,
+                            Some(&definition),
+                        );
+                        if conflicting_loinc(
+                            existing,
+                            linked,
+                            code.and_then(|code| native_links.get(code)),
+                        ) || inconsistent.contains(&id)
+                            || observation.payload.source.quote.trim().is_empty()
+                            || !browse_issues(
+                                &observation.payload,
+                                &preview,
+                                None,
+                                Some(&definition),
+                                &[],
+                            )
+                            .is_empty()
+                        {
+                            return Err(AppError::Invalid(
+                                "Resolve the current report warnings before confirming a new metric",
+                            ));
+                        }
+                        observation.payload.metric_id = Some(if let Some(existing) = existing {
+                            existing.to_owned()
+                        } else {
+                            if metric.matches_existing(&custom_metrics, &metadata) {
+                                return Err(AppError::Conflict(
+                                    "A matching Browse metric already exists. Select it instead.",
+                                ));
+                            }
+                            let created =
+                                insert_custom_metric(&mut transaction, user_id, metric).await?;
+                            created_definitions.insert(key, created.metric_id.clone());
+                            custom_metrics.push(created.clone());
+                            let id = created.metric_id.clone();
+                            created_metrics.push(created);
+                            id
+                        });
+                        observation.payload.unmapped_choice = None;
+                    }
+                    None => {}
+                }
+            }
             if observation.status == "confirmed"
                 && previous.as_ref().is_none_or(|(status, payload)| {
                     status != "confirmed"
@@ -1150,8 +1398,9 @@ impl Database {
         transaction.commit().await?;
         self.reconcile_report_drafts().await?;
         let mut document = self.report(user_id, &request.report_id).await?;
-        if let Some(metric) = created_metric {
+        if let Some(metric) = created_metrics.first() {
             document["created_metric"] = serde_json::to_value(metric)?;
+            document["created_metrics"] = serde_json::to_value(&created_metrics)?;
         }
         if queue_analysis {
             document["analysis_trigger"] = json!({"status":"queued"});
@@ -1409,6 +1658,7 @@ pub(crate) fn learned_for_pending<'a>(
     metadata: &'a Metadata,
 ) -> Option<&'a str> {
     if payload.metric_id.is_some()
+        || payload.unmapped_choice.is_some()
         || payload
             .ocr_mapping_note
             .as_ref()
@@ -1448,7 +1698,8 @@ impl Database {
                         .ocr_metric_candidate
                         .as_deref()
                         .is_some_and(lab_metric_metadata::is_clinical_id)
-                        || (payload.metric_id.is_some()
+                        || ((payload.metric_id.is_some()
+                            || matches!(payload.unmapped_choice, Some(UnmappedChoice::New(_))))
                             && test_code(payload).is_some_and(|code| {
                                 crate::laboratory::loinc_metric(code).is_none()
                             }))))
