@@ -935,6 +935,114 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
 }
 
 #[tokio::test]
+async fn saving_mappings_keeps_ocr_evidence_and_rechecks_independent_report_issues() {
+    use serde_json::{Value, json};
+
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "mapping-review").await;
+    let report_id = archive(&state, "mapping-review").await;
+    let note = "Check the printed identity or scale.";
+    let mut snapshot = state
+        .database
+        .review(
+            &user.user_id,
+            ReviewRequest {
+                new_metric: None,
+                report_id: report_id.clone(),
+                expected_revision: 1,
+                context: None,
+                observations: [
+                    ("WBC", "4.5", "10^9/L"),
+                    ("Total cholesterol", "160", "mg/dL"),
+                    ("Absolute neutrophil count", "3660", "10E3/uL"),
+                    ("LDL Cholesterol", "TNP", "mg/dL"),
+                ]
+                .into_iter()
+                .map(|(name, result, unit)| {
+                    let mut payload = observation_payload();
+                    payload.metric_id = None;
+                    payload.raw_name = name.into();
+                    payload.raw_result = result.into();
+                    payload.raw_unit = Some(unit.into());
+                    payload.ocr_mapping_note = Some(note.into());
+                    ReviewItem {
+                        observation_id: None,
+                        expected_revision: None,
+                        status: "pending".into(),
+                        payload,
+                    }
+                })
+                .collect(),
+            },
+        )
+        .await
+        .unwrap();
+
+    for (name, id, issue) in [
+        ("WBC", "wbc", Value::Null),
+        ("Total cholesterol", "total_cholesterol", Value::Null),
+        (
+            "Absolute neutrophil count",
+            "neutrophil_count",
+            json!("inconsistent_subcount"),
+        ),
+        (
+            "LDL Cholesterol",
+            "ldl_cholesterol",
+            json!("test_not_performed"),
+        ),
+    ] {
+        let row = snapshot["observations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["payload"]["raw_name"] == name)
+            .unwrap();
+        let observation_id = row["observation_id"].as_str().unwrap().to_owned();
+        let mut payload: longlivehealth::reports::ObservationPayload =
+            serde_json::from_value(row["payload"].clone()).unwrap();
+        payload.metric_id = Some(id.into());
+        snapshot = state
+            .database
+            .review(
+                &user.user_id,
+                ReviewRequest {
+                    new_metric: None,
+                    report_id: report_id.clone(),
+                    expected_revision: snapshot["report"]["revision"].as_i64().unwrap(),
+                    context: None,
+                    observations: vec![ReviewItem {
+                        observation_id: Some(observation_id.clone()),
+                        expected_revision: row["revision"].as_i64(),
+                        status: "pending".into(),
+                        payload,
+                    }],
+                },
+            )
+            .await
+            .unwrap();
+        let saved = snapshot["observations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["observation_id"] == observation_id)
+            .unwrap();
+        assert_eq!(saved["status"], "pending");
+        assert_eq!(saved["resolved_metric_id"], id);
+        assert_eq!(saved["payload"]["ocr_mapping_note"], note);
+        assert_eq!(saved["browse_issues"][0]["code"], issue);
+    }
+    assert!(
+        state
+            .database
+            .confirmed(&user.user_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn report_summaries_use_collection_evidence_for_the_date_column() {
     let (_directory, state) = fixture().await;
     let alice = add_user(&state, "alice").await;

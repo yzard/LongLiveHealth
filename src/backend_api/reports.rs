@@ -357,6 +357,16 @@ fn browse_issues(
             message: "Historical values only; no result value was provided.".into(),
         });
     }
+    if matches!(
+        payload.raw_result.trim().to_ascii_lowercase().as_str(),
+        "tnp" | "test not performed" | "not performed"
+    ) {
+        issues.push(BrowseIssue {
+            code: "test_not_performed",
+            scope: "review",
+            message: "The report indicates that the test was not performed.".into(),
+        });
+    }
     issues
 }
 
@@ -1464,7 +1474,8 @@ impl Database {
         }
         self.cpu
             .run(move || {
-                rows.into_iter()
+                let mut observations = rows
+                    .into_iter()
                     .map(|row| {
                         row.decode(
                             &custom_metrics,
@@ -1478,7 +1489,26 @@ impl Database {
                             crate::laboratory::is_administrative_name(&o.payload.raw_name)
                         })
                     })
-                    .collect()
+                    .collect::<Result<Vec<_>, AppError>>()?;
+                if include_suggestions {
+                    let active: Vec<_> = observations
+                        .iter_mut()
+                        .filter(|row| row.status != "rejected")
+                        .collect();
+                    let inconsistent = crate::laboratory::inconsistent_subcounts(
+                        active.iter().map(|row| &row.payload),
+                    );
+                    for (row, inconsistent) in active.into_iter().zip(inconsistent) {
+                        if inconsistent {
+                            row.browse_issues.push(BrowseIssue {
+                                code: "inconsistent_subcount",
+                                scope: "review",
+                                message: crate::laboratory::INCONSISTENT_SUBCOUNT_MESSAGE.into(),
+                            });
+                        }
+                    }
+                }
+                Ok(observations)
             })
             .await
     }

@@ -367,7 +367,14 @@ pub fn wrap_completion(
                     observation.ocr_normalization = Some(proposal);
                 }
             }
-            crate::laboratory::flag_inconsistent_subcounts(&mut rows.observations);
+            let inconsistent = crate::laboratory::inconsistent_subcounts(rows.observations.iter());
+            for (observation, inconsistent) in rows.observations.iter_mut().zip(inconsistent) {
+                if inconsistent {
+                    observation.ocr_normalization = None;
+                    observation.ocr_mapping_note =
+                        Some(crate::laboratory::INCONSISTENT_SUBCOUNT_MESSAGE.into());
+                }
+            }
             envelope["report_title"] = json!(rows.report_title);
             envelope["source_name"] = json!(rows.source_name);
             envelope["observations"] = serde_json::to_value(rows.observations)?;

@@ -197,8 +197,8 @@ struct ObservationEditor: View {
                 if suggestedMetricID != nil && ["unmapped_metric", "metric_identity_uncertain"].contains(code) {
                     return false
                 }
-                return issue["scope"] == .string("browse")
-                    || ["negative_with_unit", "unsupported_unit", "missing_unit"].contains(code)
+                return issue["scope"] == .string("browse") || issue["scope"] == .string("review")
+                    || ["unsupported_unit", "missing_unit"].contains(code)
             }
             .map { $0["message"].stringValue }
         if !messages.isEmpty {
