@@ -162,6 +162,28 @@ pub(crate) fn known_ocr_metric(id: &str, account_metrics: &[CustomMetric]) -> bo
     DEFINITIONS.contains_key(id) || account_metrics.iter().any(|metric| metric.metric_id == id)
 }
 
+pub(crate) fn incompatible_unitless_candidate(
+    id: &str,
+    raw_unit: Option<&str>,
+    account_metrics: &[CustomMetric],
+) -> bool {
+    let standard_unit = DEFINITIONS
+        .get(id)
+        .map(|metric| metric.standard_unit)
+        .or_else(|| {
+            account_metrics
+                .iter()
+                .find(|metric| metric.metric_id == id)
+                .map(|metric| metric.standard_unit.as_str())
+        });
+    standard_unit == Some("1")
+        && raw_unit
+            .filter(|unit| !unit.trim().is_empty())
+            .is_some_and(|raw| {
+                canonical_unit(raw).is_none_or(|unit| conversion(id, "1", unit).is_none())
+            })
+}
+
 pub(crate) fn verified_custom_candidate<'a>(
     payload: &ObservationPayload,
     custom: &'a [CustomMetric],

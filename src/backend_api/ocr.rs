@@ -276,7 +276,25 @@ pub fn wrap_completion(
                     .take()
                     .filter(|id| crate::laboratory::known_ocr_metric(id, catalog_metrics));
                 let inferred = crate::laboratory::resolved_metric(observation);
-                if crate::laboratory::test_code_conflicts(&observation.raw_name) {
+                let conflict = if crate::laboratory::test_code_conflicts(&observation.raw_name) {
+                    Some("The printed test name and LOINC code identify different measurements.")
+                } else if inferred.is_none()
+                    && observation
+                        .ocr_metric_candidate
+                        .as_deref()
+                        .is_some_and(|id| {
+                            crate::laboratory::incompatible_unitless_candidate(
+                                id,
+                                observation.raw_unit.as_deref(),
+                                catalog_metrics,
+                            )
+                        })
+                {
+                    Some("The printed unit is incompatible with the unitless catalog metric.")
+                } else {
+                    None
+                };
+                if let Some(message) = conflict {
                     observation.ocr_metric_candidate = None;
                     observation.ocr_new_metric = None;
                     if observation
@@ -284,10 +302,7 @@ pub fn wrap_completion(
                         .as_deref()
                         .is_none_or(|note| note.trim().is_empty())
                     {
-                        observation.ocr_mapping_note = Some(
-                            "The printed test name and LOINC code identify different measurements."
-                                .into(),
-                        );
+                        observation.ocr_mapping_note = Some(message.into());
                     }
                 } else {
                     if let Some(id) = inferred {

@@ -254,6 +254,71 @@ fn model_unit_proposals_are_checked_against_printed_quantities() {
 }
 
 #[test]
+fn model_candidates_cannot_override_a_conflicting_printed_measurement_scale() {
+    let custom = longlivehealth::laboratory::CustomMetric {
+        metric_id: "custom:sample".into(),
+        name: "Sample presence".into(),
+        standard_unit: "1".into(),
+    };
+    let cases = [
+        ("Bacteria (25145-4)", "urine_bacteria", None, true),
+        (
+            "Hyaline casts (50231-0)",
+            "urine_hyaline_casts",
+            Some("/[LPF]"),
+            false,
+        ),
+        (
+            "Glucose, Urine (25428-4)",
+            "urine_glucose",
+            Some("mg/dL"),
+            false,
+        ),
+        ("Sample presence", "custom:sample", Some("U/mL"), false),
+        ("TSH", "tsh", Some("uIU/mL"), true),
+    ];
+    let rows: Vec<_> = cases
+        .iter()
+        .map(|(label, candidate, unit, _)| {
+            let mut payload = crate::observation_payload();
+            payload.raw_name = (*label).into();
+            payload.raw_unit = unit.map(str::to_owned);
+            payload.raw_result = "Negative".into();
+            payload.metric_id = None;
+            payload.ocr_metric_candidate = Some((*candidate).into());
+            payload
+        })
+        .collect();
+    let response = ocr::wrap_completion(
+        Completion {
+            response_body: json!({"choices":[{
+                "message":{"content":json!({"report_title":null,"source_name":null,"observations":rows,"warnings":[]}).to_string()},
+                "finish_reason":"stop",
+            }]}).to_string(),
+            status_code: 200,
+        },
+        "model",
+        1,
+        &[custom],
+    )
+    .unwrap();
+    assert_eq!(response.status_code, 200);
+    let data: Value = serde_json::from_str(&response.response_body).unwrap();
+    for (row, (label, candidate, unit, compatible)) in
+        data["observations"].as_array().unwrap().iter().zip(cases)
+    {
+        assert_eq!(row["raw_name"], label);
+        assert_eq!(row["raw_result"], "Negative");
+        assert_eq!(row["raw_unit"].as_str(), unit);
+        assert_eq!(
+            row["ocr_metric_candidate"].as_str(),
+            compatible.then_some(candidate)
+        );
+        assert_eq!(row["ocr_mapping_note"].is_null(), compatible);
+    }
+}
+
+#[test]
 fn coded_cbc_percentages_keep_the_printed_label_and_resolve_to_the_percentage() {
     use longlivehealth::laboratory::{infer_metric, test_code_conflicts};
 
