@@ -27,6 +27,7 @@ Android 安装包通过公开的 `GET /longlivehealth.apk` 下载（旧路径 `/
 | reports/input/get | report_id、run_id、page | 完整页面证据，text_layer、词坐标、raw_bbox_xml、error_code；按用户归属鉴权 |
 | reports/extraction/get | report_id、run_id、page、stage（当前为 ocr） | response_body、status_code、content 可空 |
 | reports/review | 见下方 | 新报告快照；可能附 analysis_trigger |
+| reports/rescan | report_id、expected_revision | job；保留已确认结果、人工修改和原始证据。提取只更新未经人工编辑的待审核结果，新结果为 pending。同来源、同测试和指标、同采样时间、同数值和单位的重复项合并，缺少采样时间时使用可验证的报告日期。 |
 | reports/relate | report_id、expected_revision、preferred_report_id 可空、kind | updated |
 | reports/delete | report_id、expected_revision | cleanup_queued |
 | metrics/list | {} | metrics：metric_id/name/standard_unit |

@@ -33,6 +33,7 @@ pub mod ocr;
 pub mod provider;
 pub mod raw;
 pub mod recovery_hrv;
+mod report_dedup;
 pub mod reports;
 pub mod routes;
 pub mod sources;

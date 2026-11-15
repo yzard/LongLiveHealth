@@ -82,6 +82,10 @@ CREATE TABLE jobs (
 CREATE INDEX jobs_user ON jobs (user_id, job_id);
 CREATE INDEX jobs_claim ON jobs (status, lease_until, created_at);
 
+CREATE TABLE report_rescan_jobs (
+    job_id TEXT PRIMARY KEY REFERENCES jobs(job_id) ON DELETE CASCADE
+);
+
 CREATE TABLE reports (
     report_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,

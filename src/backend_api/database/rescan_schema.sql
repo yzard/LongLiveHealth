@@ -1,0 +1,3 @@
+CREATE TABLE IF NOT EXISTS report_rescan_jobs (
+    job_id TEXT PRIMARY KEY REFERENCES jobs(job_id) ON DELETE CASCADE
+);

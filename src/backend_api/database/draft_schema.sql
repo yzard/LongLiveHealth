@@ -7,8 +7,9 @@ CREATE TABLE observations (
     payload_json TEXT NOT NULL DEFAULT '{}',
     updated_at INTEGER NOT NULL DEFAULT 0,
     candidate_key TEXT,
+    ocr_revision INTEGER NOT NULL DEFAULT 1,
     UNIQUE (user_id, observation_id),
     UNIQUE (user_id, report_id, candidate_key)
 );
 CREATE INDEX observations_report ON observations (user_id, report_id);
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;

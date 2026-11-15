@@ -25,7 +25,12 @@ pub(super) async fn initialize(path: &Path) -> Result<(), AppError> {
                 .execute(&mut *transaction)
                 .await?;
         }
-        1 => {}
+        1 => {
+            sqlx::raw_sql(include_str!("draft_ocr_revision.sql"))
+                .execute(&mut *transaction)
+                .await?;
+        }
+        2 => {}
         _ => {
             return Err(AppError::Conflict(
                 "Unsupported report draft database version",

@@ -555,13 +555,11 @@ impl Database {
                 "Report changed; reload before rescanning",
             ));
         }
-        for query in queries::RESCAN_CLEAR {
-            sqlx::query(query)
-                .bind(user_id)
-                .bind(report_id)
-                .execute(&mut *transaction)
-                .await?;
-        }
+        sqlx::query(queries::REPLACE_FINISHED_REPORT_JOB)
+            .bind(user_id)
+            .bind(report_id)
+            .execute(&mut *transaction)
+            .await?;
         let job_id = uuid::Uuid::new_v4().to_string();
         sqlx::query(queries::INSERT_JOB)
             .bind(&job_id)
@@ -570,17 +568,10 @@ impl Database {
             .bind(now()?)
             .execute(&mut *transaction)
             .await?;
-        for query in [
-            queries::TOUCH_USER_DATA,
-            queries::INVALIDATE_ANALYSES,
-            queries::PURGE_FEEDBACK,
-            queries::INVALIDATE_EXPORTS,
-        ] {
-            sqlx::query(query)
-                .bind(user_id)
-                .execute(&mut *transaction)
-                .await?;
-        }
+        sqlx::query(queries::MARK_RESCAN_JOB)
+            .bind(&job_id)
+            .execute(&mut *transaction)
+            .await?;
         transaction.commit().await?;
         self.job(user_id, &job_id).await
     }
@@ -1132,14 +1123,35 @@ impl Database {
         if rows.len() > 10000 {
             return Err(AppError::TooLarge);
         }
-        self.decode_report_rows(
-            user_id,
-            rows,
-            self.custom_metrics(user_id).await?,
-            self.lab_metric_metadata(user_id).await?,
-            false,
-        )
-        .await
+        let mut sources = std::collections::HashMap::new();
+        for row in &rows {
+            if !sources.contains_key(&row.report_id) {
+                let context: Value = serde_json::from_str(&row.context_json)?;
+                let source =
+                    crate::sources::report_key(context["source_name"].as_str(), &row.report_id);
+                sources.insert(row.report_id.clone(), source);
+            }
+        }
+        let mut observations = self
+            .decode_report_rows(
+                user_id,
+                rows,
+                self.custom_metrics(user_id).await?,
+                self.lab_metric_metadata(user_id).await?,
+                false,
+            )
+            .await?;
+        let mut first_report = std::collections::HashMap::new();
+        observations.retain(|row| {
+            crate::report_dedup::result_key(&row.payload, row.resolved_metric_id.as_deref(), None)
+                .is_none_or(|key| {
+                    first_report
+                        .entry((&sources[&row.report_id], key))
+                        .or_insert_with(|| row.report_id.clone())
+                        == &row.report_id
+                })
+        });
+        Ok(observations)
     }
     pub async fn relate_reports(
         &self,
@@ -1309,7 +1321,7 @@ pub struct ExtractionInputRequest {
     pub page: i64,
 }
 
-fn learned_for_pending<'a>(
+pub(crate) fn learned_for_pending<'a>(
     payload: &ObservationPayload,
     metadata: &'a Metadata,
 ) -> Option<&'a str> {

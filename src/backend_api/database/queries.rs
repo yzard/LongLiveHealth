@@ -245,7 +245,7 @@ SELECT o.observation_id
    AND NOT EXISTS (
        SELECT 1 FROM report_relations r WHERE r.user_id = o.user_id AND r.report_id = o.report_id
    )
- ORDER BY o.observation_id
+ ORDER BY report.created_at, report.report_id, o.observation_id
  LIMIT 10001
 "#;
 pub const REPORT_RELATION: &str =
@@ -258,16 +258,45 @@ pub const INVALIDATE_ANALYSES: &str = "UPDATE analysis_runs SET status = 'stale'
 pub const INVALIDATE_EXPORTS: &str =
     "UPDATE exports SET status = 'stale' WHERE user_id = ? AND status != 'stale'";
 pub const REPORT_CANDIDATES: &str = r#"
-SELECT observation_id, candidate_key, current_revision, status, payload_json
-  FROM review_observations
- WHERE user_id = ? AND report_id = ?
+SELECT o.observation_id, o.candidate_key, o.payload_json,
+       (o.status = 'pending' AND o.candidate_key IS NOT NULL
+        AND EXISTS (SELECT 1 FROM draft.observations d
+                     WHERE d.observation_id = o.observation_id AND d.ocr_revision = o.current_revision)) AS editable
+  FROM review_observations o
+ WHERE o.user_id = ? AND o.report_id = ?
+ ORDER BY editable, o.observation_id
 "#;
 pub const REFRESH_OCR_CANDIDATE: &str = r#"
 UPDATE draft.observations
-   SET payload_json = ?, updated_at = ?, current_revision = current_revision + 1
+   SET payload_json = ?, updated_at = ?, current_revision = current_revision + 1,
+       ocr_revision = current_revision + 1
  WHERE user_id = ? AND report_id = ? AND observation_id = ?
-   AND status = 'pending' AND current_revision = 1 AND candidate_key IS NOT NULL
+   AND status = 'pending' AND current_revision = ocr_revision AND candidate_key IS NOT NULL
 "#;
+pub const DELETE_REDUNDANT_OCR_CANDIDATE: &str = r#"
+DELETE FROM draft.observations
+ WHERE user_id = ? AND report_id = ? AND observation_id = ?
+   AND status = 'pending' AND current_revision = ocr_revision AND candidate_key IS NOT NULL
+"#;
+pub const RESCAN_SOURCE: &str = "SELECT json_extract(context_json, '$.source_name') FROM reports WHERE user_id = ? AND report_id = ?";
+pub const RESCAN_OVERLAPS: &str = r#"
+SELECT o.payload_json, json_extract(r.context_json, '$.source_name') AS source_name,
+       (SELECT json_extract(input_json, '$.report_collection_date.date')
+          FROM extraction_inputs i
+         WHERE i.user_id = r.user_id AND i.report_id = r.report_id AND i.page_number = 1
+         ORDER BY i.created_at DESC, i.run_id DESC LIMIT 1) AS document_date
+  FROM reports r
+  JOIN reports current ON current.user_id = r.user_id AND current.report_id = ?2
+  JOIN review_observations o ON o.user_id = r.user_id AND o.report_id = r.report_id
+ WHERE r.user_id = ?1 AND r.report_id != current.report_id AND o.status != 'rejected'
+   AND lower(trim(json_extract(r.context_json, '$.source_name'))) = lower(trim(?3))
+   AND (o.status = 'confirmed'
+        OR (r.created_at, r.report_id) < (current.created_at, current.report_id)
+        OR EXISTS (SELECT 1 FROM draft.observations d WHERE d.observation_id = o.observation_id
+                    AND d.current_revision = o.current_revision
+                    AND (d.candidate_key IS NULL OR d.ocr_revision != d.current_revision)))
+"#;
+pub const MARK_RESCAN_JOB: &str = "INSERT INTO report_rescan_jobs (job_id) VALUES (?)";
 pub const INSERT_PAGE: &str = "INSERT INTO extraction_pages (user_id, report_id, run_id, page_number, status, content, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
 pub const EXTRACTION_PAGES: &str = "SELECT run_id, page_number, status, content, model, created_at FROM extraction_pages WHERE user_id = ? AND report_id = ? ORDER BY created_at DESC, run_id, page_number";
 
@@ -555,6 +584,7 @@ RETURNING job_id
      , file_id
      , lease_token
      , lease_until
+     , EXISTS (SELECT 1 FROM report_rescan_jobs r WHERE r.job_id = jobs.job_id) AS is_rescan
 "#;
 
 pub const FINISH_JOB: &str = r#"
@@ -783,10 +813,10 @@ CREATE TEMP VIEW review_observations AS
 SELECT o.* FROM main.observations o WHERE NOT EXISTS (
  SELECT 1 FROM draft.observations d WHERE d.observation_id=o.observation_id AND d.current_revision>o.current_revision)
 UNION ALL
-SELECT d.* FROM draft.observations d WHERE EXISTS (SELECT 1 FROM main.reports r WHERE r.user_id=d.user_id AND r.report_id=d.report_id)
+SELECT d.observation_id, d.user_id, d.report_id, d.current_revision, d.status, d.payload_json, d.updated_at, d.candidate_key FROM draft.observations d WHERE EXISTS (SELECT 1 FROM main.reports r WHERE r.user_id=d.user_id AND r.report_id=d.report_id)
 AND NOT EXISTS (SELECT 1 FROM main.observations o WHERE o.observation_id=d.observation_id AND o.current_revision>=d.current_revision);
 "#;
-pub const MIGRATE_REPORT_DRAFTS: &str = "INSERT INTO draft.observations SELECT * FROM main.observations WHERE status!='confirmed' ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision,status=excluded.status,payload_json=excluded.payload_json,updated_at=excluded.updated_at WHERE excluded.current_revision>observations.current_revision";
+pub const MIGRATE_REPORT_DRAFTS: &str = "INSERT INTO draft.observations (observation_id,user_id,report_id,current_revision,status,payload_json,updated_at,candidate_key) SELECT * FROM main.observations WHERE status!='confirmed' ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision,status=excluded.status,payload_json=excluded.payload_json,updated_at=excluded.updated_at WHERE excluded.current_revision>observations.current_revision";
 pub const REMOVE_SUPERSEDED_OFFICIAL: &str = "DELETE FROM main.observations WHERE EXISTS (SELECT 1 FROM draft.observations d WHERE d.observation_id=observations.observation_id AND (d.current_revision>observations.current_revision OR (d.current_revision=observations.current_revision AND observations.status!='confirmed')))";
 pub const REMOVE_SUPERSEDED_DRAFTS: &str = "DELETE FROM draft.observations WHERE NOT EXISTS (SELECT 1 FROM main.reports r WHERE r.user_id=observations.user_id AND r.report_id=observations.report_id) OR EXISTS (SELECT 1 FROM main.observations o WHERE o.observation_id=observations.observation_id AND o.current_revision>=observations.current_revision)";
 
@@ -827,17 +857,9 @@ SELECT o.page_number, o.content,
 
 pub const APPLE_QUANTITY_REINDEX: &str = "SELECT h.rowid AS archive_row,h.user_id,h.platform,h.source_id,h.record_id,h.raw_id,h.record_type,h.payload_json,o.raw_path,o.raw_offset,o.raw_length FROM health_records h JOIN health_originals o ON o.user_id=h.user_id AND o.raw_id=h.raw_id WHERE h.rowid>? AND h.platform='apple_health' AND h.deleted=0 AND ((h.record_type GLOB 'HKQuantityTypeIdentifier*' AND json_type(h.payload_json,'$.payload.value') IS NULL) OR (json_extract(h.payload_json,'$.payload.quantity_count')>1 AND json_type(h.payload_json,'$.payload.quantity_samples') IS NULL)) ORDER BY h.rowid LIMIT 500";
 
-// A rescan replaces report results, never the original file or user-entered report info.
 pub const REPORT_ACTIVE_JOB: &str =
     "SELECT COUNT(*) FROM jobs WHERE user_id=? AND file_id=? AND status IN ('queued','running')";
-pub const RESCAN_CLEAR: &[&str] = &[
-    "DELETE FROM main.observations WHERE user_id=? AND report_id=?",
-    "DELETE FROM draft.observations WHERE user_id=? AND report_id=?",
-    "DELETE FROM extraction_pages WHERE user_id=? AND report_id=?",
-    "DELETE FROM extraction_inputs WHERE user_id=? AND report_id=?",
-    "DELETE FROM extraction_outputs WHERE user_id=? AND report_id=?",
-    "DELETE FROM jobs WHERE user_id=? AND file_id=?",
-];
+pub const REPLACE_FINISHED_REPORT_JOB: &str = "DELETE FROM jobs WHERE user_id=? AND file_id=?";
 
 /// Ordered complete scalar history used to resolve measurement-time reference context.
 pub fn reference_context_history_query() -> String {

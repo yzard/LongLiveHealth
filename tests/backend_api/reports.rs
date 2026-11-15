@@ -560,6 +560,12 @@ async fn startup_relocates_old_pending_rows_and_recovers_an_interrupted_draft_cl
         .execute(&mut connection)
         .await
         .unwrap();
+    sqlx::raw_sql(
+        "ALTER TABLE draft.observations DROP COLUMN ocr_revision; PRAGMA draft.user_version = 1",
+    )
+    .execute(&mut connection)
+    .await
+    .unwrap();
     sqlx::query("INSERT INTO draft.observations SELECT observation_id,user_id,report_id,current_revision,'pending',payload_json,updated_at,candidate_key FROM main.observations").execute(&mut connection).await.unwrap();
     sqlx::query("INSERT INTO main.observations SELECT 'old-pending',user_id,report_id,1,'pending',payload_json,updated_at,NULL FROM main.observations WHERE observation_id=?").bind(id).execute(&mut connection).await.unwrap();
     connection.close().await.unwrap();
@@ -580,7 +586,7 @@ async fn startup_relocates_old_pending_rows_and_recovers_an_interrupted_draft_cl
 }
 
 #[tokio::test]
-async fn rescan_replaces_results_preserves_original_and_rejects_stale_or_active_requests() {
+async fn rescan_keeps_results_and_original_and_rejects_stale_or_active_requests() {
     let (_directory, state) = fixture().await;
     let alice = add_user(&state, "alice").await;
     let bob = add_user(&state, "bob").await;
@@ -659,22 +665,17 @@ async fn rescan_replaces_results_preserves_original_and_rejects_stale_or_active_
         .await
         .unwrap();
     assert_eq!(queued.status, "queued");
-    assert!(
-        state
-            .database
-            .observations(&alice.user_id, &report)
-            .await
-            .unwrap()
-            .is_empty()
+    let rows = state
+        .database
+        .observations(&alice.user_id, &report)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows.iter().filter(|row| row.status == "confirmed").count(),
+        1
     );
-    assert!(
-        state
-            .database
-            .confirmed(&alice.user_id)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    assert_eq!(rows.iter().filter(|row| row.status == "pending").count(), 1);
     assert_eq!(
         state
             .database

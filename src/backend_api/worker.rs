@@ -8,7 +8,7 @@ use crate::{
     provider,
 };
 use base64::Engine;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
@@ -18,15 +18,17 @@ type ObservationPayload = crate::reports::ObservationPayload;
 struct StoredCandidate {
     observation_id: String,
     candidate_key: Option<String>,
-    current_revision: i64,
-    status: String,
+    editable: bool,
     payload_json: String,
 }
 
 fn same_printed_result(a: &ObservationPayload, b: &ObservationPayload) -> bool {
+    same_printed_identity(a, b) && a.raw_result.trim() == b.raw_result.trim()
+}
+
+fn same_printed_identity(a: &ObservationPayload, b: &ObservationPayload) -> bool {
     a.source.page == b.source.page
         && crate::laboratory_names::key(&a.raw_name) == crate::laboratory_names::key(&b.raw_name)
-        && a.raw_result.trim() == b.raw_result.trim()
         && a.raw_unit.as_deref().map(str::trim) == b.raw_unit.as_deref().map(str::trim)
         && a.sampled_at == b.sampled_at
 }
@@ -135,7 +137,7 @@ pub async fn extract_next(state: &AppState) -> Result<bool, AppError> {
 }
 
 async fn extract(state: &AppState, job: &ClaimedJob) -> Result<(), AppError> {
-    let _report = state
+    state
         .database
         .report_summary(&job.user_id, &job.file_id)
         .await?;
@@ -335,94 +337,17 @@ async fn extract(state: &AppState, job: &ClaimedJob) -> Result<(), AppError> {
         if active != 1 {
             return Err(AppError::Conflict("Task was canceled or lease expired"));
         }
-        // OCR may revise its suggestions, while user-reviewed payloads stay intact.
-        let stored: Vec<StoredCandidate> = sqlx::query_as(queries::REPORT_CANDIDATES)
-            .bind(&job.user_id)
-            .bind(&job.file_id)
-            .fetch_all(&mut *transaction)
-            .await?;
-        let stored: Vec<_> = stored
-            .into_iter()
-            .map(|row| {
-                let payload: ObservationPayload = serde_json::from_str(&row.payload_json)?;
-                Ok::<_, AppError>((row, payload))
-            })
-            .collect::<Result<_, _>>()?;
-        let mut occurrences = HashMap::new();
-        let mut used = std::collections::HashSet::new();
-        for observation in candidates {
-            let occurrence = occurrences
-                .entry((
-                    observation.raw_name.clone(),
-                    observation.source.quote.clone(),
-                ))
-                .or_insert(0);
-            *occurrence += 1;
-            let key = digest(
-                format!(
-                    "{}|{}|{}|{}",
-                    page, observation.raw_name, observation.source.quote, occurrence
-                )
-                .as_bytes(),
-            );
-            let exact = stored
-                .iter()
-                .find(|(row, _)| row.candidate_key.as_ref() == Some(&key));
-            let existing = exact.or_else(|| {
-                let mut matching = stored.iter().filter(|(row, previous)| {
-                    !used.contains(&row.observation_id)
-                        && same_printed_result(previous, &observation)
-                });
-                let first = matching.next()?;
-                matching.next().is_none().then_some(first)
-            });
-            if let Some((row, previous)) = existing {
-                if used.insert(row.observation_id.clone())
-                    && row.current_revision == 1
-                    && row.status == "pending"
-                    && row.candidate_key.is_some()
-                {
-                    let mut updated = previous.clone();
-                    // Normalization belongs to the printed value and unit from this row.
-                    if same_printed_result(previous, &observation) {
-                        updated.ocr_normalization = observation.ocr_normalization;
-                    }
-                    updated.ocr_mapping_note = observation.ocr_mapping_note;
-                    updated.ocr_metric_candidate = observation.ocr_metric_candidate;
-                    updated.ocr_section_heading = observation.ocr_section_heading;
-                    updated.ocr_new_metric = observation.ocr_new_metric;
-                    let payload = serde_json::to_string(&updated)?;
-                    if payload != row.payload_json {
-                        sqlx::query(queries::REFRESH_OCR_CANDIDATE)
-                            .bind(payload)
-                            .bind(now()?)
-                            .bind(&job.user_id)
-                            .bind(&job.file_id)
-                            .bind(&row.observation_id)
-                            .execute(&mut *transaction)
-                            .await?;
-                    }
-                }
-                continue;
-            }
-            let id = uuid::Uuid::new_v4().to_string();
-            sqlx::query(queries::INSERT_OBSERVATION)
-                .bind(&id)
-                .bind(&job.user_id)
-                .bind(&job.file_id)
-                .bind(key)
-                .execute(&mut *transaction)
-                .await?;
-            sqlx::query(queries::SAVE_OBSERVATION)
-                .bind(&job.user_id)
-                .bind(id)
-                .bind(1)
-                .bind("pending")
-                .bind(serde_json::to_string(&observation)?)
-                .bind(now()?)
-                .execute(&mut *transaction)
-                .await?;
-        }
+        reconcile_page(
+            &mut transaction,
+            job,
+            page,
+            identity.1.as_deref(),
+            report_collection_date
+                .as_ref()
+                .map(|collection| collection.date.as_str()),
+            candidates,
+        )
+        .await?;
         sqlx::query(queries::INSERT_PAGE)
             .bind(&job.user_id)
             .bind(&job.file_id)
@@ -457,6 +382,211 @@ async fn extract(state: &AppState, job: &ClaimedJob) -> Result<(), AppError> {
         return Err(AppError::Invalid(
             "Some pages or fields could not be extracted",
         ));
+    }
+    Ok(())
+}
+
+async fn reconcile_page(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    job: &ClaimedJob,
+    page: i64,
+    detected_source: Option<&str>,
+    document_date: Option<&str>,
+    candidates: Vec<ObservationPayload>,
+) -> Result<(), AppError> {
+    let source: Option<String> = if job.is_rescan {
+        sqlx::query_scalar(queries::RESCAN_SOURCE)
+            .bind(&job.user_id)
+            .bind(&job.file_id)
+            .fetch_one(&mut **transaction)
+            .await?
+    } else {
+        None
+    };
+    let source = source
+        .as_deref()
+        .filter(|name| !name.trim().is_empty())
+        .or(detected_source);
+    let metadata = if job.is_rescan {
+        crate::lab_metric_metadata::Metadata::load(transaction, &job.user_id).await?
+    } else {
+        Default::default()
+    };
+    let key_for = |payload: &ObservationPayload, source: Option<&str>, date: Option<&str>| {
+        let metric = crate::reports::learned_for_pending(payload, &metadata)
+            .or_else(|| crate::laboratory::resolved_report_metric(payload, source));
+        crate::report_dedup::result_key(payload, metric, date)
+    };
+    let mut overlaps = HashSet::new();
+    if job.is_rescan
+        && !candidates.is_empty()
+        && let Some(source) = source.filter(|name| !name.trim().is_empty())
+    {
+        type Overlap = (String, String, Option<String>);
+        let rows: Vec<Overlap> = sqlx::query_as(queries::RESCAN_OVERLAPS)
+            .bind(&job.user_id)
+            .bind(&job.file_id)
+            .bind(source)
+            .fetch_all(&mut **transaction)
+            .await?;
+        for (payload, source, date) in rows {
+            let payload = serde_json::from_str(&payload)?;
+            if let Some(key) = key_for(&payload, Some(&source), date.as_deref()) {
+                overlaps.insert(key);
+            }
+        }
+    }
+    let stored: Vec<StoredCandidate> = sqlx::query_as(queries::REPORT_CANDIDATES)
+        .bind(&job.user_id)
+        .bind(&job.file_id)
+        .fetch_all(&mut **transaction)
+        .await?;
+    let stored = stored
+        .into_iter()
+        .map(|row| {
+            let payload: ObservationPayload = serde_json::from_str(&row.payload_json)?;
+            let key = job
+                .is_rescan
+                .then(|| key_for(&payload, source, document_date))
+                .flatten();
+            Ok((row, payload, key))
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
+    let mut occurrences = HashMap::new();
+    let mut used = HashSet::new();
+    let mut scanned = HashSet::new();
+    for candidate in &candidates {
+        let occurrence = occurrences
+            .entry((candidate.raw_name.clone(), candidate.source.quote.clone()))
+            .or_insert(0);
+        *occurrence += 1;
+        let anchor = digest(
+            format!(
+                "{}|{}|{}|{}",
+                page, candidate.raw_name, candidate.source.quote, occurrence
+            )
+            .as_bytes(),
+        );
+        let key = job
+            .is_rescan
+            .then(|| key_for(candidate, source, document_date))
+            .flatten();
+        if let Some(key) = &key
+            && (!scanned.insert(key.clone()) || overlaps.contains(key))
+        {
+            continue;
+        }
+        let exact = stored
+            .iter()
+            .find(|(row, _, _)| row.candidate_key.as_ref() == Some(&anchor));
+        if exact.is_some_and(|(row, _, _)| used.contains(&row.observation_id)) {
+            continue;
+        }
+        let available = || {
+            stored
+                .iter()
+                .filter(|(row, _, _)| !used.contains(&row.observation_id))
+        };
+        let existing = if job.is_rescan {
+            // A protected row wins over an unedited copy of the same measurement.
+            available()
+                .find(|(row, _, stored_key)| !row.editable && key.is_some() && stored_key == &key)
+        } else {
+            None
+        }
+        .or(exact)
+        .or_else(|| {
+            let mut matches =
+                available().filter(|(_, previous, _)| same_printed_result(previous, candidate));
+            let first = matches.next()?;
+            matches.next().is_none().then_some(first)
+        })
+        .or_else(|| {
+            if !job.is_rescan {
+                return None;
+            }
+            if let Some(found) =
+                available().find(|(_, _, stored_key)| key.is_some() && stored_key == &key)
+            {
+                return Some(found);
+            }
+            // A changed value can still refer to the same printed row. Only replace it
+            // when name, unit, date and page identify a single previous result.
+            if candidates
+                .iter()
+                .filter(|other| same_printed_identity(other, candidate))
+                .take(2)
+                .count()
+                != 1
+            {
+                return None;
+            }
+            let mut matches = available().filter(|(row, previous, _)| {
+                row.editable && same_printed_identity(previous, candidate)
+            });
+            let first = matches.next()?;
+            matches.next().is_none().then_some(first)
+        });
+        if let Some((row, previous, _)) = existing {
+            used.insert(row.observation_id.clone());
+            if row.editable && previous.source.page == page {
+                let updated = if job.is_rescan {
+                    candidate.clone()
+                } else {
+                    let mut updated = previous.clone();
+                    if same_printed_result(previous, candidate) {
+                        updated.ocr_normalization = candidate.ocr_normalization.clone();
+                    }
+                    updated.ocr_mapping_note = candidate.ocr_mapping_note.clone();
+                    updated.ocr_metric_candidate = candidate.ocr_metric_candidate.clone();
+                    updated.ocr_section_heading = candidate.ocr_section_heading.clone();
+                    updated.ocr_new_metric = candidate.ocr_new_metric.clone();
+                    updated
+                };
+                let payload = serde_json::to_string(&updated)?;
+                if payload != row.payload_json {
+                    sqlx::query(queries::REFRESH_OCR_CANDIDATE)
+                        .bind(payload)
+                        .bind(now()?)
+                        .bind(&job.user_id)
+                        .bind(&job.file_id)
+                        .bind(&row.observation_id)
+                        .execute(&mut **transaction)
+                        .await?;
+                }
+            }
+            continue;
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(queries::INSERT_OBSERVATION)
+            .bind(&id)
+            .bind(&job.user_id)
+            .bind(&job.file_id)
+            .bind(&anchor)
+            .execute(&mut **transaction)
+            .await?;
+        sqlx::query(queries::SAVE_OBSERVATION)
+            .bind(&job.user_id)
+            .bind(id)
+            .bind(1)
+            .bind("pending")
+            .bind(serde_json::to_string(candidate)?)
+            .bind(now()?)
+            .execute(&mut **transaction)
+            .await?;
+    }
+    for (row, _, key) in &stored {
+        if row.editable
+            && !used.contains(&row.observation_id)
+            && key.as_ref().is_some_and(|key| scanned.contains(key))
+        {
+            sqlx::query(queries::DELETE_REDUNDANT_OCR_CANDIDATE)
+                .bind(&job.user_id)
+                .bind(&job.file_id)
+                .bind(&row.observation_id)
+                .execute(&mut **transaction)
+                .await?;
+        }
     }
     Ok(())
 }

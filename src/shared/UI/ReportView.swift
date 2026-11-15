@@ -47,7 +47,7 @@ struct ReportView: View {
         .alert("Rescan report?", isPresented: $rescanConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Rescan", role: .destructive) { Task { await rescan() } }
-        } message: { Text("This replaces all existing results, including confirmed results and manual edits. Your original report and Report Info are kept. Review the new results and confirm them to include them in charts.") }
+        } message: { Text("Rescan updates unedited drafts and keeps confirmed results and manual edits. New results stay pending for review.") }
         .alert("Delete report?", isPresented: $deleting) {
             Button("Cancel", role: .cancel) {}
             Button("Delete report", role: .destructive) { Task { await model.perform {

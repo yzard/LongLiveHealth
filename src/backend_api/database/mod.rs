@@ -91,6 +91,9 @@ impl Database {
         sqlx::query(queries::CREATE_REPORT_ANALYSIS_REQUESTS)
             .execute(&mut *transaction)
             .await?;
+        sqlx::raw_sql(include_str!("rescan_schema.sql"))
+            .execute(&mut *transaction)
+            .await?;
         sqlx::query(queries::SET_SCHEMA_VERSION)
             .execute(&mut *transaction)
             .await?;

@@ -12,6 +12,7 @@ pub struct ClaimedJob {
     pub file_id: String,
     pub lease_token: String,
     pub lease_until: i64,
+    pub is_rescan: bool,
 }
 
 impl Database {

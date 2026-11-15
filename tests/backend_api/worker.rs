@@ -131,6 +131,36 @@ async fn extraction_replay_refreshes_untouched_drafts_and_preserves_reviewed_row
     }
     assert_eq!(rows[3].status, "pending");
     assert!(rows[3].payload.metric_id.is_none());
+    let revision = state
+        .database
+        .report_summary(&user.user_id, &report)
+        .await
+        .unwrap()
+        .revision;
+    state
+        .database
+        .rescan_report(&user.user_id, &report, revision)
+        .await
+        .unwrap();
+    assert!(longlivehealth::worker::extract_next(&state).await.unwrap());
+    let rescanned = state
+        .database
+        .observations(&user.user_id, &report)
+        .await
+        .unwrap();
+    assert_eq!(rescanned.len(), rows.len());
+    for before in &rows[1..=2] {
+        let after = rescanned
+            .iter()
+            .find(|row| row.observation_id == before.observation_id)
+            .unwrap();
+        assert_eq!(after.status, before.status);
+        assert_eq!(after.revision, before.revision);
+        assert_eq!(
+            serde_json::to_value(&after.payload).unwrap(),
+            serde_json::to_value(&before.payload).unwrap()
+        );
+    }
     server.abort();
 }
 
@@ -386,8 +416,12 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
         .observations(&user.user_id, report)
         .await
         .unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].status, "pending");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows.iter().filter(|row| row.status == "confirmed").count(),
+        1
+    );
+    assert_eq!(rows.iter().filter(|row| row.status == "pending").count(), 1);
     assert_eq!(
         state
             .database
@@ -943,5 +977,150 @@ async fn missing_collection_date_fails_job_and_returns_item_reason() {
             .unwrap()
             .is_empty()
     );
+    server.abort();
+}
+
+#[tokio::test]
+async fn rescan_removes_only_numeric_overlaps_and_refreshes_ocr_again() {
+    use longlivehealth::reports::{ReviewItem, ReviewRequest};
+    use serde_json::json;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let (_directory, mut state) = fixture().await;
+    let owner = add_user(&state, "alice").await;
+    let owner = &owner.user_id;
+    let result = |name: &str, value: &str, date: &str, unit: &str| {
+        let mut row = crate::observation_payload();
+        row.raw_name = name.into();
+        row.raw_result = value.into();
+        row.sampled_at = Some(date.into());
+        row.raw_unit = Some(unit.into());
+        row.metric_id = None;
+        row.source.quote = format!("{name} {value} {unit}");
+        row
+    };
+    let ldl = "LDL Cholesterol (2089-1)";
+    let hdl = "HDL Cholesterol (2085-9)";
+    for (source, name) in [("Clinic A", ldl), ("clinic a", ldl), ("Clinic B", hdl)] {
+        let report = archive(&state, "alice").await;
+        state
+            .database
+            .review(
+                owner,
+                ReviewRequest {
+                    report_id: report,
+                    expected_revision: 1,
+                    context: Some(serde_json::from_value(json!({"source_name": source})).unwrap()),
+                    observations: vec![ReviewItem {
+                        observation_id: None,
+                        expected_revision: None,
+                        status: "confirmed".into(),
+                        payload: result(name, "120.0", "2026-08-01", "mg/dL"),
+                    }],
+                    new_metric: None,
+                },
+            )
+            .await
+            .unwrap();
+        let job = state
+            .database
+            .claim_job(2_000_000_000, 600, 3)
+            .await
+            .unwrap()
+            .unwrap();
+        state
+            .database
+            .finish_job(&job, 2_000_000_001, None)
+            .await
+            .unwrap();
+    }
+    let report = archive(&state, "alice").await;
+    state
+        .database
+        .review(
+            owner,
+            ReviewRequest {
+                report_id: report.clone(),
+                expected_revision: 1,
+                context: Some(serde_json::from_value(json!({"source_name":"clinic a"})).unwrap()),
+                observations: vec![],
+                new_metric: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let api = axum::Router::new().route(
+        "/v1/chat/completions",
+        axum::routing::post(move || {
+            let revision = calls.fetch_add(1, Ordering::SeqCst);
+            async move {
+                let mut refreshed = result("Glucose", "99", "2026-11-01", "mg/dL");
+                refreshed.notes = Some(format!("OCR run {revision}"));
+                axum::Json(super::provider::completion(json!({
+                    "observations":[
+                        result(ldl, "120", "2026-08-01", "mg/dL"),
+                        result(ldl, "120.00", "2026-08-01", "mg/dL"),
+                        result(ldl, "121", "2026-08-01", "mg/dL"),
+                        result(ldl, "120", "2026-11-01", "mg/dL"),
+                        result(ldl, "120", "2026-08-01", "mmol/L"),
+                        result(hdl, "120.00", "2026-08-01", "mg/dL"),
+                        refreshed
+                    ],
+                    "warnings":[]
+                })))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut config = (*state.config).clone();
+    config.llm.base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    state.config = std::sync::Arc::new(config);
+    let server = tokio::spawn(async move { axum::serve(listener, api).await.unwrap() });
+    assert!(longlivehealth::worker::extract_next(&state).await.unwrap());
+    let initial = state.database.observations(owner, &report).await.unwrap();
+    assert_eq!(initial.len(), 7);
+    let original = initial
+        .iter()
+        .find(|row| row.payload.raw_name == "Glucose")
+        .unwrap();
+
+    for iteration in 1..=2 {
+        let revision = state
+            .database
+            .report_summary(owner, &report)
+            .await
+            .unwrap()
+            .revision;
+        state
+            .database
+            .rescan_report(owner, &report, revision)
+            .await
+            .unwrap();
+        assert!(longlivehealth::worker::extract_next(&state).await.unwrap());
+        let rows = state.database.observations(owner, &report).await.unwrap();
+        assert_eq!(rows.len(), 5);
+        assert!(rows.iter().all(|row| row.status == "pending"));
+        assert!(rows.iter().any(|row| row.payload.raw_name == hdl));
+        assert!(
+            rows.iter()
+                .any(|row| row.payload.sampled_at.as_deref() == Some("2026-11-01"))
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.payload.raw_unit.as_deref() == Some("mmol/L"))
+        );
+        let refreshed = rows
+            .iter()
+            .find(|row| row.observation_id == original.observation_id)
+            .unwrap();
+        assert_eq!(
+            refreshed.payload.notes.as_deref(),
+            Some(format!("OCR run {iteration}").as_str())
+        );
+        assert_eq!(refreshed.revision, original.revision + iteration);
+    }
+    assert_eq!(state.database.confirmed(owner).await.unwrap().len(), 2);
     server.abort();
 }
