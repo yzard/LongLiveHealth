@@ -125,6 +125,35 @@ def navigation():
     print("PASS: session persistence, chart periods/source toggles, fold state, report scroll/tab state/Confirm All/editor")
 
 
+def insight_cards():
+    adb("shell", "am", "force-stop", "dev.longlivehealth.android")
+    adb("shell", "wm", "size", "reset")
+    adb("shell", "wm", "density", "reset")
+    adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
+    wait_for("Insights")
+    wait_for("Sleep")
+    last_card = "Cardiovascular Review"
+    size = adb("shell", "wm", "size")
+    width, height = map(int, re.findall(r"(\d+)x(\d+)", size)[-1])
+    for _ in range(10):
+        if last_card in labels():
+            break
+        adb("shell", "input", "swipe", str(width // 2), str(height * 3 // 4),
+            str(width // 2), str(height // 3), "420")
+    wait_for(last_card)
+    adb("shell", "input", "swipe", str(width // 2), str(height * 3 // 4),
+        str(width // 2), str(height // 3), "420")
+    current = labels()
+    assert last_card in current
+    assert not {"Ask about your data", "AI Reviews"}.intersection(current)
+    assert not any((label or "").startswith("Updated ") for label in current)
+    tap(last_card)
+    wait_for("Done")
+    tap("Done")
+    wait_for(last_card)
+    print("PASS: Insights ends at the last card and still opens and closes its details")
+
+
 def selectors():
     # Mixed static/dynamic Picker content previously crashed the native bridge
     # before the user could select anything, including with an empty catalog.
@@ -271,20 +300,73 @@ def camera_import():
 
 
 def original_preview():
-    adb("shell", "am", "force-stop", "dev.longlivehealth.android")
-    adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
-    wait_for("Insights")
-    tap("Data"); tap("Blood Work"); wait_for("Example Laboratory"); tap("Example Laboratory")
+    def control(action):
+        return json.loads(subprocess.check_output([
+            "docker", "exec", CONTAINER, "curl", "-fsS", "-X", "POST",
+            "http://127.0.0.1:18765/api/v1/test/" + action,
+        ], text=True))
+
+    def open_report():
+        adb("shell", "am", "force-stop", "dev.longlivehealth.android")
+        adb("shell", "am", "start", "-n", "dev.longlivehealth.android/health.app.MainActivity")
+        wait_for("Insights")
+        tap("Data")
+        wait_for("Blood Work")
+        tap("Blood Work")
+        wait_for("Example Laboratory")
+        tap("Example Laboratory")
+
+    def check_page(page):
+        wait_for(f"Page {page} of 4")
+        wait_for(f"Original page {page}")
+
+    def scroll_to(page, toward_beginning):
+        current = tree()
+        scroller = next(n for n in current.iter("node") if n.get("class") == "android.widget.ListView")
+        left, top, right, bottom = map(int, re.findall(r"\d+", scroller.get("bounds")))
+        x = str((left + right) // 2)
+        upper = str(top + (bottom - top) // 5)
+        lower = str(bottom - (bottom - top) // 5)
+        start, end = (upper, lower) if toward_beginning else (lower, upper)
+        for _ in range(9):
+            if f"Page {page} of 4" in labels():
+                break
+            adb("shell", "input", "swipe", x, start, x, end, "370")
+        check_page(page)
+
+    control("reset")
+    control("seed-multipage-report")
+    open_report()
+    wait_for("View source · page 2")
+    before = control("counts")
+    tap("View source · page 2")
+    check_page(2)
+    current = list(tree().iter("node"))
+    arrow = next(n for n in current if n.get("content-desc") == "Back")
+    x1, y1, x2, y2 = map(int, re.findall(r"\d+", arrow.get("bounds")))
+    assert x1 > 0 and y1 > 0 and x2 - x1 == y2 - y1 and arrow.get("clickable") == "true"
+    scroll_to(1, toward_beginning=True)
+    scroll_to(4, toward_beginning=False)
+    tap("Back")
+    wait_for("View source · page 2")
+    assert before.get("reports/get") == control("counts").get("reports/get")
+
     tap("View original report")
-    wait_for("Original report")
-    time.sleep(1)
-    assert not any("Could not" in label for label in labels()), "Original image did not render"
-    assert adb("shell", "pidof", "dev.longlivehealth.android").strip()
+    check_page(1)
+    scroll_to(4, toward_beginning=False)
     adb("shell", "input", "keyevent", "KEYCODE_BACK")
-    wait_for("Open original report")
-    tap("Done")
     wait_for("Report Info")
-    print("PASS: original document downloads, opens, and returns to report without crashing")
+    assert "Open original report" not in labels()
+
+    control("reset")
+    control("seed-report")
+    open_report()
+    wait_for("View original report")
+    tap("View original report")
+    wait_for("Original report image")
+    tap("Back")
+    wait_for("Report Info")
+    print("PASS: both PDF entry points, vertical page scrolling, inset Back, one-step return, and image preview")
 
 
 def rescan_confirmation():
@@ -756,7 +838,7 @@ def paired_charts():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("inspect", "login", "tap", "navigation", "browse-switch", "camera", "selectors", "chart-scroll", "original-preview", "rescan", "blood-work", "report-date", "report-scroll", "report-metric-review", "report-mapping-layout", "report-status-actions", "report-status-chart", "report-settings", "edge-scroll", "paired-charts"))
+    parser.add_argument("action", choices=("inspect", "login", "tap", "navigation", "insight-cards", "browse-switch", "camera", "selectors", "chart-scroll", "original-preview", "rescan", "blood-work", "report-date", "report-scroll", "report-metric-review", "report-mapping-layout", "report-status-actions", "report-status-chart", "report-settings", "edge-scroll", "paired-charts"))
     parser.add_argument("text", nargs="?")
     args = parser.parse_args()
     if args.action == "inspect":
@@ -767,6 +849,8 @@ if __name__ == "__main__":
         edge_scroll()
     elif args.action == "login":
         login()
+    elif args.action == "insight-cards":
+        insight_cards()
     elif args.action == "browse-switch":
         browse_switch()
     elif args.action == "chart-scroll":

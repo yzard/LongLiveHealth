@@ -33,7 +33,7 @@ class ReportCaptureActivity : AppCompatActivity() {
         savedInstanceState?.getStringArrayList("pages")?.mapTo(pages) { File(it) }
         index = savedInstanceState?.getInt("index") ?: 0
         pending = savedInstanceState?.getString("pending")?.let { File(it) }
-        val layout = ReportPageLayout(this, "Camera report")
+        val layout = ReportPageLayout(this, "Camera report", cameraControls = true)
         label = layout.label
         image = layout.image
         slider = layout.slider.apply { setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {

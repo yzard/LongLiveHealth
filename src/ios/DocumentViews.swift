@@ -8,13 +8,21 @@ struct DocumentLocation: Identifiable {
     let page: Int
 }
 
-struct DocumentPreview: View {
+extension View {
+    func originalReportPreview(_ location: Binding<DocumentLocation?>) -> some View {
+        sheet(item: location) { DocumentPreview(location: $0) }
+    }
+}
+
+private struct DocumentPreview: View {
     let location: DocumentLocation
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
             Group {
-                if PDFDocument(url: location.url) != nil { PDFPreview(url: location.url, page: location.page) }
+                if let document = PDFDocument(url: location.url), document.pageCount > 0 {
+                    PDFPreview(document: document, page: location.page)
+                }
                 else if let image = UIImage(contentsOfFile: location.url.path) {
                     ScrollView([.horizontal, .vertical]) { Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: 900).padding() }
                 } else { ContentUnavailableView("Preview unavailable", systemImage: "doc.questionmark") }
@@ -27,14 +35,21 @@ struct DocumentPreview: View {
 }
 
 private struct PDFPreview: UIViewRepresentable {
-    let url: URL
+    let document: PDFDocument
     let page: Int
+
     func makeUIView(context: Context) -> PDFView {
-        let view = PDFView(); view.autoScales = true; view.displayMode = .singlePageContinuous
-        view.document = PDFDocument(url: url)
-        if let target = view.document?.page(at: max(0, page - 1)) { view.go(to: target) }
+        let view = PDFView()
+        view.autoScales = true
+        view.displayMode = .singlePageContinuous
+        view.displayDirection = .vertical
+        view.document = document
+        if let target = document.page(at: min(max(0, page - 1), document.pageCount - 1)) {
+            view.go(to: target)
+        }
         return view
     }
+
     func updateUIView(_ view: PDFView, context: Context) {}
 }
 

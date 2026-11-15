@@ -13,7 +13,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 
 /** Shared, inset-aware presentation for camera pages and original documents. */
-internal class ReportPageLayout(private val activity: AppCompatActivity, title: String) {
+internal class ReportPageLayout(private val activity: AppCompatActivity, title: String, cameraControls: Boolean) {
     private val dark = activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
     private val textColor = if (dark) Color.WHITE else Color.rgb(28, 28, 30)
     private val accent = if (dark) Color.rgb(100, 210, 201) else Color.rgb(0, 127, 121)
@@ -27,6 +27,7 @@ internal class ReportPageLayout(private val activity: AppCompatActivity, title: 
         textSize = 15f; setTextColor(textColor); gravity = Gravity.CENTER
         setPadding(dp(16), dp(12), dp(16), dp(12))
     }
+    val content = FrameLayout(activity)
     val image = ImageView(activity).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
     val slider = SeekBar(activity).apply {
         progressTintList = ColorStateList.valueOf(accent)
@@ -41,14 +42,22 @@ internal class ReportPageLayout(private val activity: AppCompatActivity, title: 
             setTextColor(textColor); gravity = Gravity.CENTER
             setPadding(dp(60), 0, dp(60), 0)
         }, FrameLayout.LayoutParams(-1, dp(60)))
-        header.addView(button("‹") { activity.finish() }.apply {
-            textSize = 32f; contentDescription = "Back"
+        header.addView(ImageButton(activity).apply {
+            setImageResource(R.drawable.report_back)
+            imageTintList = ColorStateList.valueOf(accent)
+            scaleType = ImageView.ScaleType.CENTER
+            contentDescription = "Back"
+            background = GradientDrawable().apply { setColor(surface); cornerRadius = dp(14).toFloat() }
+            setOnClickListener { activity.finish() }
         }, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.START or Gravity.CENTER_VERTICAL))
         root.addView(header)
         root.addView(label)
-        root.addView(image, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(slider, LinearLayout.LayoutParams(-1, dp(48)))
-        root.addView(controls)
+        root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        if (cameraControls) {
+            content.addView(image, FrameLayout.LayoutParams(-1, -1))
+            root.addView(slider, LinearLayout.LayoutParams(-1, dp(48)))
+            root.addView(controls)
+        }
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             view.setPadding(safe.left + dp(16), safe.top, safe.right + dp(16), safe.bottom + dp(12))

@@ -121,7 +121,7 @@ struct MetricHistoricalValuesView: View {
         }
         .mobileNavigationTitle("Historical Values")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $preview) { DocumentPreview(location: $0) }
+        .originalReportPreview($preview)
     }
 
     private func showSource(_ point: JSONValue) async {

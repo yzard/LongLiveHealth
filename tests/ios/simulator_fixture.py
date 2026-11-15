@@ -24,8 +24,6 @@ fail_review = False
 report_status_chart = False
 observations = []
 context = {}
-analysis_enabled = False
-runs = []
 relation = {}
 request_counts = {}
 admin_password_changed = False
@@ -34,12 +32,38 @@ fail_preferences = False
 source_preferences = {"version": int(time.time() * 1000), "preferences": {"reference_profile": {"birth_date": None, "reference_sex": None}, "source_aliases": {}, "source_priority": {}, "sleep_target_minutes": None}}
 
 
+def report_pdf(page_count):
+    page_ids = ' '.join(f'{3 + index * 2} 0 R' for index in range(page_count))
+    objects = [
+        b'<< /Type /Catalog /Pages 2 0 R >>',
+        f'<< /Type /Pages /Kids [{page_ids}] /Count {page_count} >>'.encode(),
+    ]
+    for index in range(page_count):
+        objects.append(
+            f'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Contents {4 + index * 2} 0 R >>'.encode()
+        )
+        drawing = f'0.1 0.4 {0.2 + index * 0.12:.2f} rg 30 {60 + index * 35} 240 45 re f'.encode()
+        objects.append(f'<< /Length {len(drawing)} >>\nstream\n'.encode() + drawing + b'\nendstream')
+    data = bytearray(b'%PDF-1.4\n')
+    offsets = []
+    for index, content in enumerate(objects, 1):
+        offsets.append(len(data))
+        data.extend(f'{index} 0 obj\n'.encode() + content + b'\nendobj\n')
+    xref = len(data)
+    size = len(objects) + 1
+    data.extend(f'xref\n0 {size}\n0000000000 65535 f \n'.encode())
+    for offset in offsets:
+        data.extend(f'{offset:010d} 00000 n \n'.encode())
+    data.extend(f'trailer\n<< /Size {size} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF'.encode())
+    return data
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
     def do_POST(self):
-        global fail_upload, upload_delay, fail_review, context, analysis_enabled, relation, admin_password_changed, refresh_failure, source_preferences, fail_preferences, report_status_chart
+        global fail_upload, upload_delay, fail_review, context, relation, admin_password_changed, refresh_failure, source_preferences, fail_preferences, report_status_chart
         length = int(self.headers.get('Content-Length', 0))
         raw = self.rfile.read(length)
         body = json.loads(raw) if self.headers.get('Content-Type') == 'application/json' else {}
@@ -68,23 +92,23 @@ class Handler(BaseHTTPRequestHandler):
             observations.clear()
             source_preferences = {"version": int(time.time() * 1000), "preferences": {"reference_profile": {"birth_date": None, "reference_sex": None}, "source_aliases": {}, "source_priority": {}, "sleep_target_minutes": None}}
             context = {}
-            runs.clear()
             relation = {}
-            analysis_enabled = False
             fail_upload = False
             upload_delay = 0
             fail_review = False
             report_status_chart = False
         if route == 'test/enable-report-status-chart':
             report_status_chart = True
-        if route == 'test/seed-report':
+        if route in ('test/seed-report', 'test/seed-multipage-report'):
+            multipage = route == 'test/seed-multipage-report'
+            report_id = 'fixture-multipage' if multipage else 'fixture-report'
             reports[:] = [
                 {
-                    'report_id': 'fixture-report',
-                    'original_name': 'fixture.png',
+                    'report_id': report_id,
+                    'original_name': 'fixture.pdf' if multipage else 'fixture.png',
                     'context': {'source_name': 'Example Laboratory'},
                     'collection_date': '2026-10-01',
-                    'page_count': 1,
+                    'page_count': 4 if multipage else 1,
                     'revision': 1,
                     'created_at': 1790985600,
                 }
@@ -93,7 +117,7 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     'observation_id': 'fixture-glucose',
                     'interpretation': {'result': {'display': '99.1 mg/dL'}, 'reference': {'reason': 'No reference interval was printed'}},
-                    'report_id': 'fixture-report',
+                    'report_id': report_id,
                     'revision': 1,
                     'status': 'confirmed',
                     'payload': {
@@ -102,7 +126,7 @@ class Handler(BaseHTTPRequestHandler):
                         'raw_result': '5.5',
                         'raw_unit': 'mmol/L',
                         'sampled_at': '2026-10-01',
-                        'source': {'page': 1, 'quote': 'Glucose 5.5 mmol/L'},
+                        'source': {'page': 2 if multipage else 1, 'quote': 'Glucose 5.5 mmol/L'},
                     },
                 }
             ]
@@ -200,8 +224,7 @@ class Handler(BaseHTTPRequestHandler):
                     observations.remove(old)
                 observations.append(revised)
             reports[0]['revision'] += 1
-        if route == 'test/enable-workflows':
-            analysis_enabled = True
+        if route == 'test/seed-related-report':
             reports.append(
                 {
                     'report_id': 'other-report',
@@ -215,19 +238,6 @@ class Handler(BaseHTTPRequestHandler):
             relation = {'kind': body.get('kind'), 'preferred_report_id': body.get('preferred_report_id')}
         if route == 'exports/delete':
             exports.clear()
-        if route == 'analysis/create':
-            runs[:] = [
-                {
-                    'run_id': 'fixture-analysis',
-                    'status': 'ready',
-                    'created_at': 1790985600,
-                    'output': {'review': {'summary': 'Synthetic lipid review', 'findings': []}, 'evidence': []},
-                    'input': {'observations': observations.copy()},
-                    'feedback': [],
-                }
-            ]
-        if route == 'analysis/feedback':
-            runs[0]['feedback'].append({'feedback_id': 'fixture-feedback', 'note': body['note']})
         if route == 'test/slow-upload':
             upload_delay = 2
         if route == 'test/fail-upload':
@@ -264,7 +274,7 @@ class Handler(BaseHTTPRequestHandler):
                 'is_admin': False,
                 'must_change_password': False,
             },
-            'server/status': {'capabilities': {'analysis': analysis_enabled}},
+            'server/status': {'status': 'ok'},
             'reports/list': {'reports': reports},
             'jobs/list': {'jobs': []},
             'metrics/list': {
@@ -293,7 +303,6 @@ class Handler(BaseHTTPRequestHandler):
                 ],
                 'excluded_count': 0,
             },
-            'analysis/list': {'runs': runs},
             'insights/get': {
                 'computed_at': int(time.time()),
                 'cardiovascular': {
@@ -346,7 +355,6 @@ class Handler(BaseHTTPRequestHandler):
                 'extraction_outputs': [{'page': 1, 'stage': 'ocr', 'run_id': 'fixture-ocr', 'model': 'synthetic'}],
             },
             'observations/history': {'history': observations},
-            'analysis/get': runs[0] if runs else {},
             'reports/input/get': {'text_layer': {'status': 'available', 'text': 'Synthetic page text', 'words': []}},
             'reports/extraction/get': {'content': 'Synthetic OCR output', 'response_body': '{"synthetic": true}'},
             'test/state': {'upload_ids': upload_ids, 'context': context},
@@ -578,23 +586,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
-        if self.path == '/shared-report.pdf':
-            objects = [
-                b'<< /Type /Catalog /Pages 2 0 R >>',
-                b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-                b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Contents 4 0 R >>',
-                b'<< /Length 0 >>\nstream\n\nendstream',
-            ]
-            data = b'%PDF-1.4\n'
-            offsets = [0]
-            for index, content in enumerate(objects, 1):
-                offsets.append(len(data))
-                data += f'{index} 0 obj\n'.encode() + content + b'\nendobj\n'
-            xref = len(data)
-            data += b'xref\n0 5\n0000000000 65535 f \n'
-            for offset in offsets[1:]:
-                data += f'{offset:010d} 00000 n \n'.encode()
-            data += f'trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF'.encode()
+        if self.path in ('/shared-report.pdf', '/api/v1/files/fixture-multipage/download'):
+            data = report_pdf(1 if self.path == '/shared-report.pdf' else 4)
             self.send_response(200)
             self.send_header('Content-Type', 'application/pdf')
             self.send_header('Content-Disposition', 'inline; filename="shared-report.pdf"')

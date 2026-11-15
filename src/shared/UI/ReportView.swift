@@ -40,7 +40,7 @@ struct ReportView: View {
         .initialTask { await reload() }
         .task(id: model.jobs.first { $0["file_id"].stringValue == reportID }?["job_id"].stringValue) { await followExtraction() }
         .refreshable { await reload() }
-        .sheet(item: $preview) { DocumentPreview(location: $0) }
+        .originalReportPreview($preview)
         .sheet(item: $editor) { target in
             ObservationEditor(observation: target.observation, metrics: model.metrics,
                 pageCount: Int(document["report"]["page_count"].numberValue ?? 1), choosingMetric: target.choosingMetric) { change, metric in

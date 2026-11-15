@@ -27,7 +27,6 @@ final class AppModel {
     private(set) var reportDataRevision = 0
     private(set) var sourcePreferences: JSONValue = .null
     private(set) var sourceCatalog: [JSONValue] = []
-    var capabilities: JSONValue = .null
     var errorMessage: String?
     var selectedTab = "Insights"
     var dataPath: [DataDestination] = []
@@ -66,7 +65,6 @@ final class AppModel {
         sourcePreferences = try responses.load("wellness/preferences/get", body: .object([:]))?["result"] ?? .null
         sourceCatalog = try responses.load("wellness/sources", body: .object([:]))?["result"]["catalog"].arrayValue ?? []
         jobs = [] // Processing failures and progress must be fetched live.
-        capabilities = try responses.load("server/status", body: .object([:]))?["result"]["capabilities"] ?? .null
         lastRefresh = nil
         credentials?.retire()
         credentials = SessionController(saved)
@@ -80,7 +78,7 @@ final class AppModel {
         "wellness/history", "wellness/chart", "wellness/measurements", "wellness/preferences/get", "wellness/sources",
         "wellness/sleep", "wellness/sleep/regularity",
         "wellness/entries/list", "wellness/library", "wellness/nutrition/day", "wellness/diet", "wellness/meals",
-        "wellness/meal-glucose", "wellness/import/list", "wellness/records/list", "wellness/records/get", "metrics/history/get", "browse/catalog", "analysis/list", "analysis/get", "reports/list", "reports/get", "reports/extraction/get", "metrics/list", "server/status", "exports/list", "reports/input/get", "wellness/food/lookup", "wellness/food/portion", "wellness/reminders"
+        "wellness/meal-glucose", "wellness/import/list", "wellness/records/list", "wellness/records/get", "metrics/history/get", "browse/catalog", "reports/list", "reports/get", "reports/extraction/get", "metrics/list", "exports/list", "reports/input/get", "wellness/food/lookup", "wellness/food/portion", "wellness/reminders"
     ]
     func request(_ path: String, body: JSONValue) async throws -> JSONValue {
         guard let client, let responseCache, let token = session?.token else { throw APIError.invalidResponse }
@@ -175,7 +173,6 @@ final class AppModel {
                 if var latest = try SessionVault.load() { latest.mustChangePassword = true; try SessionVault.save(latest) }
                 return
             }
-            let status = try await request("server/status", body: .object([:]))
             var loaded: [JSONValue] = []; var cursor: JSONValue = .null
             repeat {
                 let page = try await request("reports/list", body: .object(["limit": .number(100), "after_id": cursor]))["reports"].arrayValue
@@ -193,7 +190,7 @@ final class AppModel {
                 let id = previous["report_id"].stringValue
                 try archive.remove(name: "source-\(id)")
             }
-            offlineNotice = nil; capabilities = status["capabilities"]; reports = loaded; jobs = tasks; metrics = definitions; lastRefresh = Date()
+            offlineNotice = nil; reports = loaded; jobs = tasks; metrics = definitions; lastRefresh = Date()
         }
     }
 
@@ -470,7 +467,7 @@ final class AppModel {
             credentials.retire(); self.credentials = nil
             try MobilePlatform.cancelUploads()
             try SessionVault.clear()
-            sourcePreferences = .null; sourceCatalog = []; session = nil; archive = nil; responseCache = nil; reports = []; jobs = []; drafts = []; metrics = []; capabilities = .null
+            sourcePreferences = .null; sourceCatalog = []; session = nil; archive = nil; responseCache = nil; reports = []; jobs = []; drafts = []; metrics = []
             lastRefresh = nil; offlineNotice = nil
             MobilePlatform.clearNotifications()
         }
@@ -508,7 +505,7 @@ final class AppModel {
         try MobilePlatform.cancelUploads()
         try SessionVault.clear(); try archive?.clear()
         MobilePlatform.clearNotifications()
-        entryMutation = nil; offlineNotice = nil; sourcePreferences = .null; sourceCatalog = []; session = nil; archive = nil; responseCache = nil; reports = []; drafts = []; jobs = []; metrics = []; lastRefresh = nil; capabilities = .null; health.status = "Not connected"
+        entryMutation = nil; offlineNotice = nil; sourcePreferences = .null; sourceCatalog = []; session = nil; archive = nil; responseCache = nil; reports = []; drafts = []; jobs = []; metrics = []; lastRefresh = nil; health.status = "Not connected"
     }
 
     private func expireLocalSession() throws {
@@ -520,7 +517,7 @@ final class AppModel {
         try SessionVault.clear()
         // Preserve pending reports and Health checkpoints for this account's next login.
         sourcePreferences = .null; sourceCatalog = []; session = nil; archive = nil; responseCache = nil; reports = []; drafts = []; jobs = []; metrics = []
-        capabilities = .null; lastRefresh = nil; isLocked = false; biometricUnlock = false
+        lastRefresh = nil; isLocked = false; biometricUnlock = false
         MobilePlatform.clearNotifications()
     }
 

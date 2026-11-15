@@ -28,12 +28,6 @@ struct InsightsView: View {
                         InsightDashboardCard(model: model, panel: panel, response: response, expanded: false)
                     }.buttonStyle(.plain).accessibilityIdentifier("insight-card-\(panel["id"].stringValue)")
                 }
-                if response != .null {
-                    Text("Updated \(Date(timeIntervalSince1970: response["computed_at"].numberValue ?? 0).formatted(date: .abbreviated, time: .shortened))")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                NavigationLink("Ask about your data") { ArchiveCoachView(model: model) }
-                NavigationLink("AI Reviews") { AnalysisHistoryView(model: model) }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
         }
         .mobileNavigationTitle("Insights")

@@ -102,7 +102,6 @@ companion object {
 
     private suspend fun perform(operation: String, input: JSONObject): JSONObject = when (operation) {
         "authenticate" -> authenticate(input)
-        "speech.transcribe" -> SpeechServices.transcribe()
         "health.authorize" -> {
             val owner = activity.get() ?: error("Open the app to allow Health Connect access")
             JSONObject().put("granted", org.json.JSONArray(owner.requestHealthPermissions(emptySet()).toList()))

@@ -41,22 +41,38 @@ struct DocumentLocation: Identifiable {
     let page: Int
 }
 
-struct DocumentPreview: View {
-    let location: DocumentLocation
-    @Environment(\.dismiss) var dismiss
-    @State var failure: String?
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 16) {
-                if let failure { Text(failure) }
-                Button("Open original report") { Task { await open() } }
-            }.mobileNavigationTitle("Original · page \(location.page)")
-                .toolbar { Button("Done") { dismiss() } }
-                .task { await open() }
-        }
+extension View {
+    func originalReportPreview(_ location: Binding<DocumentLocation?>) -> some View {
+        modifier(OriginalReportPreview(location: location))
     }
-    private func open() async {
-        do { _ = try await AndroidSystem.perform("document.open", input: .object(["path": .string(location.url.path), "page": .number(Double(location.page))])) }
-        catch { failure = error.localizedDescription }
+}
+
+struct OriginalReportPreview: ViewModifier {
+    @Binding var location: DocumentLocation?
+    @State var failure: String?
+
+    func body(content: Content) -> some View {
+        content
+            .task(id: location?.id) {
+                guard let requested = location else { return }
+                defer {
+                    if location?.id == requested.id { location = nil }
+                }
+                do {
+                    _ = try await AndroidSystem.perform("document.open", input: .object([
+                        "path": .string(requested.url.path), "page": .number(Double(requested.page))
+                    ]))
+                } catch is CancellationError {
+                } catch {
+                    failure = error.localizedDescription
+                }
+            }
+            .alert("Could not open original report", isPresented: Binding(
+                get: { failure != nil }, set: { if !$0 { failure = nil } }
+            )) {
+                Button("OK") { failure = nil }
+            } message: {
+                Text(failure ?? "")
+            }
     }
 }

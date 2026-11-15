@@ -99,7 +99,7 @@ struct ReferenceGuidePage: View {
                 }
             }.padding()
         }.mobileNavigationTitle("Reference Levels").navigationBarTitleDisplayMode(.inline)
-            .sheet(item: $preview) { DocumentPreview(location: $0) }
+            .originalReportPreview($preview)
     }
     private func openOriginal() async {
         guard let token = model.session?.token else { return }

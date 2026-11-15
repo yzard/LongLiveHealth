@@ -68,6 +68,10 @@ nonisolated final class SmokeTests: XCTestCase {
             app.buttons["Done"].firstMatch.tap()
             XCTAssertTrue(card.waitForExistence(timeout: 5))
         }
+        app.swipeUp()
+        XCTAssertFalse(app.buttons["AI Reviews"].exists)
+        XCTAssertFalse(app.buttons["Ask about your data"].exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Updated ")).firstMatch.exists)
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.lifetime = .keepAlways; add(shot)
     }
 
@@ -1175,10 +1179,9 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["NewYork-Presbyterian"].firstMatch.exists)
         app.navigationBars.buttons.firstMatch.tap()
         tapTab(app, "Insights")
-        reveal(app, app.buttons["AI Reviews"])
-        app.buttons["AI Reviews"].tap()
-        XCTAssertTrue(app.staticTexts["Personal research preview"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["Review lipid history and recent health data"].isEnabled)
+        XCTAssertTrue(app.buttons["insight-card-sleep"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["AI Reviews"].exists)
+        XCTAssertFalse(app.buttons["Ask about your data"].exists)
         tapTab(app, "Health")
         XCTAssertTrue(app.buttons["Sync Now"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Last 30 days")).firstMatch.exists)
@@ -1250,7 +1253,7 @@ nonisolated final class SmokeTests: XCTestCase {
         app.buttons["Sign Out and Clear This Device"].tap()
         XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 10))
     }
-    @MainActor func testReportEditingEvidenceRelationshipsAndAnalysis() async throws {
+    @MainActor func testReportEditingEvidenceAndRelationships() async throws {
         func control(_ path: String) async throws {
             var request = URLRequest(url: URL(string: "http://127.0.0.1:18765/api/v1/\(path)")!)
             request.httpMethod = "POST"
@@ -1258,7 +1261,7 @@ nonisolated final class SmokeTests: XCTestCase {
         }
         try await control("test/reset")
         try await control("test/seed-report")
-        try await control("test/enable-workflows")
+        try await control("test/seed-related-report")
         let app = XCUIApplication()
         app.launch()
         if app.tabBars.buttons["Data"].exists {
@@ -1306,19 +1309,8 @@ nonisolated final class SmokeTests: XCTestCase {
         app.navigationBars.buttons.firstMatch.tap()
         app.swipeDown()
         tapTab(app, "Insights")
-        reveal(app, app.buttons["AI Reviews"])
-        app.buttons["AI Reviews"].tap()
-        XCTAssertTrue(app.buttons["Review lipid history and recent health data"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Review lipid history and recent health data"].isEnabled)
-        app.buttons["Review lipid history and recent health data"].tap()
-        let ready = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Ready")).firstMatch
-        XCTAssertTrue(ready.waitForExistence(timeout: 10)); ready.tap()
-        XCTAssertTrue(app.staticTexts["Synthetic lipid review"].waitForExistence(timeout: 5))
-        let feedback = app.textFields["Incorrect, helpful, or discussed with your clinician"].exists ? app.textFields["Incorrect, helpful, or discussed with your clinician"] : app.textViews["Incorrect, helpful, or discussed with your clinician"]
-        feedback.tap(); feedback.typeText("Synthetic feedback")
-        app.buttons["Save feedback"].tap()
-        XCTAssertTrue(app.staticTexts["Synthetic feedback"].waitForExistence(timeout: 10))
-        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.buttons["insight-card-sleep"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["AI Reviews"].exists)
         tapTab(app, "Data")
         reveal(app, app.buttons["Create ZIP export"])
         app.buttons["Create ZIP export"].tap()

@@ -16,22 +16,3 @@ struct CalendarPlanButton: View {
         }
     }
 }
-
-struct VoiceQuestionButton: View {
-    @Binding var question: String
-    @State var busy = false
-    @State var failure: String?
-    var body: some View {
-        VStack(alignment: .leading) {
-            Button("Dictate on this device") { Task {
-                busy = true; defer { busy = false }
-                do {
-                    let result = try await AndroidSystem.perform("speech.transcribe", input: .object([:]))
-                    if !result["text"].stringValue.isEmpty { question = result["text"].stringValue }
-                } catch { failure = error.localizedDescription }
-            } }.disabled(busy)
-            if busy { ProgressView("Listening") }
-            if let failure { Text(failure).font(.caption).foregroundStyle(.secondary) }
-        }
-    }
-}
