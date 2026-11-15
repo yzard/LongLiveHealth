@@ -41,13 +41,7 @@ struct ReportView: View {
         .task(id: model.jobs.first { $0["file_id"].stringValue == reportID }?["job_id"].stringValue) { await followExtraction() }
         .refreshable { await reload() }
         .originalReportPreview($preview)
-        .sheet(item: $editor) { target in
-            ObservationEditor(observation: target.observation, metrics: model.metrics,
-                resultTitle: LaboratoryPresentation.resultTitle(target.observation, renamedMetrics: model.renamedLabMetrics),
-                pageCount: Int(document["report"]["page_count"].numberValue ?? 1), choosingMetric: target.choosingMetric) { change, metric in
-                try await save(observations: [change], context: .null, newMetric: metric)
-            }
-        }
+        .sheet(item: $editor) { target in reviewEditor(target) }
         .sheet(item: $healthWriter) { target in ReviewedGlucoseWriter(model: model, observation: target.observation) }
         .sheet(isPresented: $contextVisible) { ContextEditor(context: document["context"]) { context in try await save(observations: [], context: context, newMetric: .null) } }
         .alert("Rescan report?", isPresented: $rescanConfirmation) {
@@ -286,9 +280,8 @@ struct ReportView: View {
         let observations = ready
         return HStack {
             NavigationLink {
-                List {
-                    ForEach(ready, id: \.identifier) { observation in observationRow(observation) }
-                }.mobileNavigationTitle("Ready to Confirm")
+                ReadyToConfirmView(model: model, reportID: reportID, document: $document,
+                    reviewEditor: reviewEditor, toggleStatus: toggleStatus)
             } label: {
                 Text(observations.count == 1 ? "1 result ready to confirm" : "\(observations.count) results ready to confirm")
                     .foregroundStyle(.primary).frame(maxWidth: .infinity, alignment: .leading)
@@ -327,6 +320,14 @@ struct ReportView: View {
         }
         await model.refresh(automatic: false)
         await reload()
+    }
+
+    private func reviewEditor(_ target: EditTarget) -> ObservationEditor {
+        ObservationEditor(observation: target.observation, metrics: model.metrics,
+            resultTitle: LaboratoryPresentation.resultTitle(target.observation, renamedMetrics: model.renamedLabMetrics),
+            pageCount: Int(document["report"]["page_count"].numberValue ?? 1), choosingMetric: target.choosingMetric) { change, metric in
+            try await save(observations: [change], context: .null, newMetric: metric)
+        }
     }
 
     private func observationRow(_ observation: JSONValue, canConfirm: Bool = true) -> some View {
@@ -505,6 +506,39 @@ struct ReportView: View {
         await model.perform { guard let client = model.client else { return }
             _ = try await model.request("reports/relate", body: .object(["report_id": .string(reportID), "preferred_report_id": .null, "kind": .string("duplicate"), "expected_revision": document["report"]["revision"]]))
         }; await reload()
+    }
+}
+
+struct ReadyToConfirmView: View {
+    let model: AppModel
+    let reportID: String
+    @Binding var document: JSONValue
+    let reviewEditor: (ReportView.EditTarget) -> ObservationEditor
+    let toggleStatus: (JSONValue, String) async -> Void
+    @State var editor: ReportView.EditTarget?
+    @State var healthWriter: ReportView.EditTarget?
+    @State var preview: DocumentLocation?
+
+    var body: some View {
+        List {
+            ForEach(document["observations"].arrayValue.filter(ReportReview.canBulkConfirm), id: \.identifier) { observation in
+                ReportObservationRow(model: model, observation: observation,
+                    changeStatus: { _ = Task { await toggleStatus(observation["observation_id"], observation["status"].stringValue) } },
+                    edit: { editor = ReportView.EditTarget(observation: observation, choosingMetric: false) },
+                    chooseMetric: { editor = ReportView.EditTarget(observation: observation, choosingMetric: true) },
+                    showSource: { page in _ = Task { await openSource(page) } },
+                    writeHealth: { healthWriter = ReportView.EditTarget(observation: observation, choosingMetric: false) })
+            }
+        }
+        .mobileNavigationTitle("Ready to Confirm")
+        .sheet(item: $editor) { target in reviewEditor(target) }
+        .sheet(item: $healthWriter) { target in ReviewedGlucoseWriter(model: model, observation: target.observation) }
+        .originalReportPreview($preview)
+    }
+
+    private func openSource(_ page: Int) async {
+        do { preview = DocumentLocation(url: try await model.source(reportID), page: page) }
+        catch { model.errorMessage = error.localizedDescription }
     }
 }
 
