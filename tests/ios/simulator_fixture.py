@@ -70,6 +70,7 @@ class Handler(BaseHTTPRequestHandler):
         route = self.path.removeprefix('/api/v1/')
         request_counts[route] = request_counts.get(route, 0) + 1
         status = 200
+        review_conflict = None
         created_metric = None
         if route == 'health/sync' and self.headers.get('Authorization') == 'Bearer reject-sync':
             status = 503
@@ -197,11 +198,25 @@ class Handler(BaseHTTPRequestHandler):
         if route == 'reports/delete':
             reports[:] = [item for item in reports if item['report_id'] != body.get('report_id')]
             observations[:] = [item for item in observations if item['report_id'] != body.get('report_id')]
+        if route == 'test/update-observation-elsewhere':
+            observations[0]['status'] = 'pending'
+            observations[0]['revision'] += 1
         if route == 'test/fail-review':
             fail_review = True
         if route == 'reports/review' and fail_review:
             fail_review = False
             status = 503
+        if route == 'reports/review' and status == 200:
+            if body.get('expected_revision') != reports[0]['revision']:
+                review_conflict = 'Report changed; reload before reviewing'
+            else:
+                revisions = {row['observation_id']: row['revision'] for row in observations}
+                if any(change.get('observation_id') and
+                       revisions.get(change['observation_id']) != change.get('expected_revision')
+                       for change in body.get('observations', [])):
+                    review_conflict = 'Observation changed'
+            if review_conflict:
+                status = 409
         if route == 'reports/review' and status == 200:
             if body.get('new_metric'):
                 created_metric = dict(body['new_metric'], metric_id='custom:fixture')
@@ -579,6 +594,8 @@ class Handler(BaseHTTPRequestHandler):
             offset = int(body.get('sample_offset', 0))
             count = 12000
             response = {'record_type':'electrocardiogram','version':1,'start_at':int(time.time())-int(body['record_id'].split('-')[-1])*86400,'sampling_frequency_hz':500,'sample_count':count,'samples':[{'time_since_start':i/500,'lead_i_volts':math.sin(i/15)/1000} for i in range(offset,min(count,offset+5000))],'next_sample_offset':offset+5000 if offset+5000<count else None,'source_classification':1,'details':{'ecg_symptoms_status':1},'notes':[]}
+        if review_conflict:
+            response = {'error': {'code': 'conflict', 'message': review_conflict}}
         data = json.dumps(response).encode()
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')

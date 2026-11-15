@@ -81,6 +81,10 @@ final class AppModel {
         "wellness/meal-glucose", "wellness/import/list", "wellness/records/list", "wellness/records/get", "metrics/history/get", "browse/catalog", "reports/list", "reports/get", "reports/extraction/get", "metrics/list", "exports/list", "reports/input/get", "wellness/food/lookup", "wellness/food/portion", "wellness/reminders"
     ]
     func request(_ path: String, body: JSONValue) async throws -> JSONValue {
+        try await request(path, body: body, permitsOfflineFallback: true)
+    }
+
+    private func request(_ path: String, body: JSONValue, permitsOfflineFallback: Bool) async throws -> JSONValue {
         guard let client, let responseCache, let token = session?.token else { throw APIError.invalidResponse }
         let cacheable = Self.cachedReads.contains(path)
         let reportRevision = ["browse/catalog", "metrics/history/get", "insights/get"].contains(path)
@@ -122,7 +126,7 @@ final class AppModel {
                   reportRevision == nil || reportRevision == reportDataRevision else { throw CancellationError() }
             if case APIError.status(401, _) = error { try expireLocalSession(); throw error }
             if case APIError.status(404, _) = error { try responseCache.remove(path, body: body) }
-            if cacheable, let network = error as? URLError,
+            if cacheable, permitsOfflineFallback, let network = error as? URLError,
                [.timedOut, .notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed].contains(network.code),
                let snapshot = try responseCache.load(path, body: body), let savedAt = snapshot["saved_at"].numberValue {
                 offlineNotice = "Cached view from " + Date(timeIntervalSince1970: savedAt).formatted() + (network.code == .timedOut ? ". Timeout." : ". Server unavailable.")
@@ -322,6 +326,10 @@ final class AppModel {
             try archive?.remove(name: "source-\(id)")
             throw APIError.status(404, message)
         }
+    }
+
+    func refreshReportAfterReviewConflict(_ id: String) async throws -> JSONValue {
+        try await request("reports/get", body: .object(["report_id": .string(id)]), permitsOfflineFallback: false)
     }
 
     func source(_ id: String) async throws -> URL {

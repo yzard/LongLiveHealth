@@ -329,12 +329,16 @@ struct ReportView: View {
     }
 
     private func observationRow(_ observation: JSONValue, canConfirm: Bool = true) -> some View {
-        ReportObservationRow(observation: observation, isBusy: model.isBusy,
-            changeStatus: canConfirm ? { _ = Task { await toggleStatus(observation) } } : nil,
+        let id = observation["observation_id"]
+        let renderedStatus = observation["status"].stringValue
+        let revision = observation["revision"].numberValue ?? 0
+        return ReportObservationRow(observation: observation, isBusy: model.isBusy,
+            changeStatus: canConfirm ? { _ = Task { await toggleStatus(id, renderedStatus: renderedStatus) } } : nil,
             edit: { editor = EditTarget(observation: observation, choosingMetric: false) },
             chooseMetric: { editor = EditTarget(observation: observation, choosingMetric: true) },
             showSource: { showSource(page: $0) },
             writeHealth: { healthWriter = EditTarget(observation: observation, choosingMetric: false) })
+            .id("\(id.stringValue)-\(revision)-\(renderedStatus)")
     }
 
     @ViewBuilder private var reportDetails: some View {
@@ -411,23 +415,36 @@ struct ReportView: View {
                     .map { ReportReview.change($0, to: "confirmed") }
                 guard !changes.isEmpty else { return }
                 try Task.checkCancellation()
-                try await save(observations: changes, context: .null, newMetric: .null)
+                guard try await saveStatusChanges(changes) else { return }
             }
         } catch { confirmationError = error.localizedDescription }
     }
-    private func toggleStatus(_ observation: JSONValue) async {
+    private func toggleStatus(_ id: JSONValue, renderedStatus: String) async {
         guard !confirmingAll, !savingReview, !rescanning else { return }
+        guard let current = document["observations"].arrayValue.first(where: { $0["observation_id"] == id }),
+              current["status"].stringValue == renderedStatus else { return }
         let nextStatus: String
-        switch observation["status"].stringValue {
+        switch renderedStatus {
         case "pending": nextStatus = "confirmed"
         case "confirmed": nextStatus = "pending"
         default: return
         }
-        let change = ReportReview.change(observation, to: nextStatus)
         await model.perform {
-            try await save(observations: [change], context: .null, newMetric: .null)
+            _ = try await saveStatusChanges([ReportReview.change(current, to: nextStatus)])
         }
     }
+
+    private func saveStatusChanges(_ changes: [JSONValue]) async throws -> Bool {
+        do {
+            try await save(observations: changes, context: .null, newMetric: .null)
+            return true
+        } catch APIError.status(409, _) {
+            let latest = try await model.refreshReportAfterReviewConflict(reportID)
+            try await applySavedReport(latest)
+            return false
+        }
+    }
+
     private func followExtraction() async {
         while !Task.isCancelled {
             guard model.jobs.contains(where: { $0["file_id"].stringValue == reportID && ["queued", "running"].contains($0["status"].stringValue) }) else { return }
@@ -440,31 +457,47 @@ struct ReportView: View {
                 model.jobs = response["jobs"].arrayValue
                 let latest = try await model.report(reportID)
                 guard !Task.isCancelled, model.session?.token == token, !confirmingAll, !savingReview, !contextVisible, editor == nil else { continue }
-                if document != latest { document = latest }
-                if let index = model.reports.firstIndex(where: { $0["report_id"].stringValue == reportID }) {
-                    model.reports[index] = latest["report"]; model.reports[index]["context"] = latest["context"]
-                }
+                _ = adoptReport(latest)
             } catch { return }
         }
     }
-    private func reload() async { do { document = try await model.report(reportID) } catch { model.errorMessage = error.localizedDescription } }
+    private func reload() async {
+        do { _ = adoptReport(try await model.report(reportID)) }
+        catch { model.errorMessage = error.localizedDescription }
+    }
     private func save(observations: [JSONValue], context: JSONValue, newMetric: JSONValue) async throws {
         guard model.client != nil, !savingReview else { throw APIError.invalidResponse }
         savingReview = true
         defer { savingReview = false }
         var request: JSONValue = .object(["report_id": .string(reportID), "expected_revision": document["report"]["revision"], "context": context, "observations": .array(observations)])
         if newMetric != .null { request["new_metric"] = newMetric }
-        document = try await model.request("reports/review", body: request)
-        if document["created_metric"] != .null {
-            model.metrics.append(document["created_metric"])
+        let response = try await model.request("reports/review", body: request)
+        if response["created_metric"] != .null {
+            model.metrics.append(response["created_metric"])
         }
-        let savedDocument = document
+        try await applySavedReport(response)
+    }
+
+    private func adoptReport(_ snapshot: JSONValue) -> Bool {
+        guard let revision = snapshot["report"]["revision"].numberValue,
+              revision >= (document["report"]["revision"].numberValue ?? 0) else { return false }
+        if document != snapshot { document = snapshot }
+        if let index = model.reports.firstIndex(where: { $0["report_id"].stringValue == reportID }) {
+            model.reports[index] = snapshot["report"]
+            model.reports[index]["context"] = snapshot["context"]
+        }
+        return true
+    }
+
+    private func applySavedReport(_ snapshot: JSONValue) async throws {
+        guard adoptReport(snapshot) else { return }
         let savedToken = model.session?.token
-        let cachedBytes = try await Task.detached(priority: .utility) { try JSONEncoder().encode(savedDocument) }.value
+        let cachedBytes = try await Task.detached(priority: .utility) { try JSONEncoder().encode(snapshot) }.value
         guard model.session?.token == savedToken, !Task.isCancelled else { throw CancellationError() }
-        try model.archive?.saveBytes(cachedBytes, name: "report-\(reportID).json")
-        if let index = model.reports.firstIndex(where: { $0["report_id"].stringValue == reportID }) { model.reports[index] = document["report"]; model.reports[index]["context"] = document["context"] }
-        try model.archive?.save(model.reports, name: "reports.json")
+        if document["report"]["revision"] == snapshot["report"]["revision"] {
+            try model.archive?.saveBytes(cachedBytes, name: "report-\(reportID).json")
+            try model.archive?.save(model.reports, name: "reports.json")
+        }
     }
     private func showSource(page: Int) { Task { do { preview = DocumentLocation(url: try await model.source(reportID), page: page) } catch { model.errorMessage = error.localizedDescription } } }
     private func unlink() async {

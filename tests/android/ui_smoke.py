@@ -687,6 +687,24 @@ def report_status_actions(check_chart=False):
                  if node.get("text") == "Confirm" or node.get("content-desc") == "Confirm"]
         tap_node(nodes[-1])
 
+    def check_conflict(action, expected_label):
+        before = control("test/counts")
+        control("test/update-observation-elsewhere")
+        tap(action)
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            counts = control("test/counts")
+            current = labels()
+            assert "Could not complete the action" not in current, current
+            if counts.get("reports/get", 0) > before.get("reports/get", 0) and expected_label in current:
+                break
+        else:
+            raise AssertionError("A 409 did not refresh the report")
+        counts = control("test/counts")
+        assert counts.get("reports/review", 0) == before.get("reports/review", 0) + 1
+        assert counts.get("reports/get", 0) == before.get("reports/get", 0) + 1
+        assert control("reports/get")["observations"][0]["status"] == "pending"
+
     control("test/fail-review")
     confirm_result()
     for _ in range(15):
@@ -717,10 +735,16 @@ def report_status_actions(check_chart=False):
     adb("shell", "input", "keyevent", "KEYCODE_BACK")
     wait_for("Hold")
     assert control("reports/get")["observations"][0]["status"] == "confirmed"
+    check_conflict("Hold", "1 result ready to confirm")
+    assert "Hold" not in labels()
+    check_conflict("Confirm", "1 result ready to confirm")
+    tap("Confirm")
+    wait_for("Hold")
+    assert control("reports/get")["observations"][0]["status"] == "confirmed"
     if check_chart:
         tap("Browse")
         wait_for("mg/dL")
-    print("PASS: failed Confirm preserves pending, successful Confirm exposes Hold, and re-confirm restores the row")
+    print("PASS: server revisions drive Confirm/Hold, and single and bulk 409 each refresh once without a retry")
 
 
 def report_settings():
