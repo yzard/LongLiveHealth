@@ -26,11 +26,19 @@ for route, (file, literal) in dynamic.items():
 callers['/longlivehealth.apk'] = {'Initial Android installation download'}
 # The browser still calls these routes after the mobile Trends redesign.
 web = (ROOT / 'src/frontend/app.mjs').read_text()
-for path in ('wellness/review', 'wellness/timeline'):
+for path in (
+    'analysis/create', 'analysis/get', 'analysis/list', 'analysis/retry',
+    'server/status', 'wellness/review', 'wellness/timeline',
+):
     assert f"post('{path}'" in web
     callers['/api/v1/' + path] = {'Browser UI'}
-assert not routes - callers.keys(), f'Routes without mobile callers: {sorted(routes - callers.keys())}'
-assert not callers.keys() - routes, f'Mobile calls without server routes: {sorted(callers.keys() - routes)}'
+# These are documented API operations retained for programmatic clients.
+api = (ROOT / 'docs/api.md').read_text()
+for path in ('analysis/feedback', 'wellness/coach'):
+    assert f'| {path} |' in api or f'| `{path}` |' in api
+    callers['/api/v1/' + path] = {'Documented public API'}
+assert not routes - callers.keys(), f'Routes without documented consumers: {sorted(routes - callers.keys())}'
+assert not callers.keys() - routes, f'Consumer calls without server routes: {sorted(callers.keys() - routes)}'
 print(f'Public API inventory passed: {len(routes)} routes, each with an explicit caller or installation purpose')
 if __name__ == '__main__' and '--write-inventory' in __import__('sys').argv:
     target = ROOT / 'docs/reviews/2026-10-31-mobile-api-inventory.md'

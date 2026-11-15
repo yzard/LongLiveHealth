@@ -120,10 +120,12 @@ pub(crate) fn metric_aliases(id: &str) -> impl Iterator<Item = &'static str> {
         )
 }
 
+pub(crate) type OcrMetricEntry<'a> = (&'a str, &'a str, &'a str, Vec<&'a str>, Vec<&'a str>);
+
 pub(crate) fn ocr_metric_catalog<'a>(
     account_metrics: &'a [CustomMetric],
     account_codes: &'a std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
-) -> Vec<(&'a str, &'a str, &'a str, Vec<&'a str>, Vec<&'a str>)> {
+) -> Vec<OcrMetricEntry<'a>> {
     let mut catalog: std::collections::BTreeMap<_, _> = DEFINITIONS
         .values()
         .map(|metric| (metric.metric_id, (metric.name, metric.standard_unit)))
