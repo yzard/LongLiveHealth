@@ -725,6 +725,20 @@ impl Database {
         Err(AppError::Conflict("Report changed during automatic naming"))
     }
     pub async fn review(&self, user_id: &str, request: ReviewRequest) -> Result<Value, AppError> {
+        self.review_with_analysis(user_id, request, false).await
+    }
+
+    pub(crate) async fn review_with_analysis(
+        &self,
+        user_id: &str,
+        request: ReviewRequest,
+        analysis_enabled: bool,
+    ) -> Result<Value, AppError> {
+        let queue_analysis = analysis_enabled
+            && request
+                .observations
+                .iter()
+                .any(|item| item.status == "confirmed");
         let report = self.report_summary(user_id, &request.report_id).await?;
         if request.new_metric.is_some()
             && (request.observations.len() != 1
@@ -963,11 +977,22 @@ impl Database {
             .bind(user_id)
             .execute(&mut *transaction)
             .await?;
+        if queue_analysis {
+            sqlx::query(queries::QUEUE_REPORT_ANALYSIS)
+                .bind(user_id)
+                .bind(uuid::Uuid::new_v4().to_string())
+                .bind(now()?)
+                .execute(&mut *transaction)
+                .await?;
+        }
         transaction.commit().await?;
         self.reconcile_report_drafts().await?;
         let mut document = self.report(user_id, &request.report_id).await?;
         if let Some(metric) = created_metric {
             document["created_metric"] = serde_json::to_value(metric)?;
+        }
+        if queue_analysis {
+            document["analysis_trigger"] = json!({"status":"queued"});
         }
         Ok(document)
     }

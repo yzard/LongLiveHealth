@@ -192,6 +192,12 @@ CREATE TABLE analysis_runs (
     UNIQUE (user_id, run_id)
 );
 CREATE INDEX analysis_queue ON analysis_runs (status, created_at);
+CREATE TABLE report_analysis_requests (
+    user_id TEXT PRIMARY KEY REFERENCES users (user_id) ON DELETE CASCADE,
+    request_id TEXT NOT NULL,
+    requested_at INTEGER NOT NULL,
+    available_at INTEGER NOT NULL
+);
 CREATE TABLE analysis_feedback (
     user_id TEXT NOT NULL,
     run_id TEXT NOT NULL,

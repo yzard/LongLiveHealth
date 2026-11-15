@@ -75,6 +75,98 @@ async fn analysis_uses_confirmed_snapshot_and_becomes_stale_after_correction() {
     server.abort();
 }
 
+#[tokio::test]
+async fn report_confirmation_persists_one_background_snapshot_across_restart() {
+    use axum::http::StatusCode;
+    use longlivehealth::{analysis::prepare_next_report_analysis, app::create_application};
+    use serde_json::json;
+
+    let (_directory, mut state) = fixture().await;
+    add_user(&state, "alice").await;
+    let report = archive(&state, "alice").await;
+    let token = crate::token(&state, "alice").await;
+    let mut config = (*state.config).clone();
+    config.analysis_enabled = true;
+    state.config = std::sync::Arc::new(config.clone());
+    let router = create_application(state.clone());
+    let change = |status: &str| json!({"status":status,"payload":crate::observation_payload()});
+    let (status, draft) = crate::request(
+        &router,
+        "/api/v1/reports/review",
+        Some(&token),
+        json!({"report_id":report,"expected_revision":1,"observations":[change("pending")]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{draft}");
+    assert!(draft.get("analysis_trigger").is_none());
+    assert!(!prepare_next_report_analysis(&state).await.unwrap());
+
+    let (status, rejected) = crate::request(
+        &router,
+        "/api/v1/reports/review",
+        Some(&token),
+        json!({"report_id":report,"expected_revision":1,"observations":[change("confirmed")]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{rejected}");
+    assert!(!prepare_next_report_analysis(&state).await.unwrap());
+
+    let (status, single) = crate::request(
+        &router,
+        "/api/v1/reports/review",
+        Some(&token),
+        json!({"report_id":report,"expected_revision":2,"observations":[change("confirmed")]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{single}");
+    assert_eq!(single["analysis_trigger"]["status"], "queued");
+
+    let (status, batch) = crate::request(&router, "/api/v1/reports/review", Some(&token),
+        json!({"report_id":report,"expected_revision":3,"observations":[change("confirmed"),change("confirmed")]})).await;
+    assert_eq!(status, StatusCode::OK, "{batch}");
+    assert_eq!(batch["analysis_trigger"]["status"], "queued");
+    let observations = batch["observations"].as_array().unwrap();
+    assert_eq!(
+        observations
+            .iter()
+            .filter(|item| item["status"] == "confirmed")
+            .count(),
+        3
+    );
+    assert_eq!(
+        observations
+            .iter()
+            .filter(|item| item["status"] == "pending")
+            .count(),
+        1
+    );
+
+    let (_, before) =
+        crate::request(&router, "/api/v1/analysis/list", Some(&token), json!({})).await;
+    assert_eq!(before["runs"], json!([]));
+    drop(router);
+    state.shutdown().await.unwrap();
+    drop(state);
+
+    let state = longlivehealth::app::AppState::open(config).await.unwrap();
+    assert!(prepare_next_report_analysis(&state).await.unwrap());
+    assert!(!prepare_next_report_analysis(&state).await.unwrap());
+    let router = create_application(state);
+    let (status, after) =
+        crate::request(&router, "/api/v1/analysis/list", Some(&token), json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{after}");
+    let runs = after["runs"].as_array().unwrap();
+    assert_eq!(runs.len(), 1);
+    let (_, run) = crate::request(
+        &router,
+        "/api/v1/analysis/get",
+        Some(&token),
+        json!({"run_id":runs[0]["run_id"]}),
+    )
+    .await;
+    assert_eq!(run["input"]["observations"].as_array().unwrap().len(), 3);
+}
+
 #[test]
 fn nonexistent_evidence_cannot_be_published() {
     let output:longlivehealth::analysis::AnalysisOutput=serde_json::from_value(serde_json::json!({"summary":"A concern","findings":[{"topic":"lipid_risk","title":"Concern","hypothesis":"Something","observation_ids":["invented"],"evidence_source_ids":["fake"],"other_explanations":["unknown"],"missing_information":["unknown"],"questions_for_clinician":["why"]}]})).unwrap();

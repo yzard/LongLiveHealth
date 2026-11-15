@@ -6,6 +6,29 @@ pub const DELETE_HEALTH_ORIGINS: &str = "UPDATE health_records SET deleted = 1, 
 pub const PURGE_HEALTH_ORIGINS: &str =
     "DELETE FROM health_originals WHERE user_id = ? AND platform = ? AND record_id = ?";
 pub const INSERT_ANALYSIS: &str = "INSERT INTO analysis_runs (run_id, user_id, status, input_digest, input_json, created_at, model) VALUES (?, ?, 'queued', ?, ?, ?, ?)";
+pub const CREATE_REPORT_ANALYSIS_REQUESTS: &str = r#"
+CREATE TABLE IF NOT EXISTS report_analysis_requests (
+    user_id TEXT PRIMARY KEY REFERENCES users (user_id) ON DELETE CASCADE,
+    request_id TEXT NOT NULL,
+    requested_at INTEGER NOT NULL,
+    available_at INTEGER NOT NULL
+)
+"#;
+pub const QUEUE_REPORT_ANALYSIS: &str = r#"
+INSERT INTO report_analysis_requests (user_id, request_id, requested_at, available_at)
+VALUES (?1, ?2, ?3, ?3)
+ON CONFLICT(user_id) DO UPDATE SET
+    request_id = excluded.request_id,
+    requested_at = excluded.requested_at,
+    available_at = excluded.available_at
+"#;
+pub const NEXT_REPORT_ANALYSIS: &str = "SELECT user_id, request_id, requested_at FROM report_analysis_requests WHERE available_at <= ? ORDER BY available_at, user_id LIMIT 1";
+pub const CURRENT_REPORT_ANALYSIS: &str =
+    "SELECT EXISTS(SELECT 1 FROM report_analysis_requests WHERE user_id = ? AND request_id = ?)";
+pub const FINISH_REPORT_ANALYSIS: &str =
+    "DELETE FROM report_analysis_requests WHERE user_id = ? AND request_id = ?";
+pub const RETRY_REPORT_ANALYSIS: &str =
+    "UPDATE report_analysis_requests SET available_at = ? WHERE user_id = ? AND request_id = ?";
 pub const ANALYSIS_BY_DIGEST: &str = "SELECT run_id FROM analysis_runs WHERE user_id = ? AND input_digest = ? AND status != 'stale' ORDER BY created_at DESC LIMIT 1";
 pub const ANALYSIS_LIST: &str = "SELECT run_id, status, output_json, error_code, created_at, model, json_extract(input_json,'$.prompt_version') AS prompt_version FROM analysis_runs WHERE user_id = ? ORDER BY created_at DESC LIMIT 100";
 pub const ANALYSIS_GET: &str = "SELECT run_id, status, input_json, output_json, error_code, created_at, model FROM analysis_runs WHERE user_id = ? AND run_id = ?";

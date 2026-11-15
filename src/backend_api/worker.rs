@@ -37,6 +37,7 @@ pub async fn run(state: AppState, stop: CancellationToken) {
             extraction_loop(state.clone()),
             maintenance_loop(state.clone()),
             analysis_loop(state.clone()),
+            report_analysis_loop(state.clone()),
             export_loop(state.clone()),
             daily_view_loop(state)
         );
@@ -62,6 +63,17 @@ async fn analysis_loop(state: AppState) {
         }
     }
 }
+async fn report_analysis_loop(state: AppState) {
+    let mut tick = tokio::time::interval(Duration::from_secs(2));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tick.tick().await;
+        if let Err(error) = crate::analysis::prepare_next_report_analysis(&state).await {
+            tracing::warn!(code=%error,"report analysis snapshot worker will retry");
+        }
+    }
+}
+
 async fn export_loop(state: AppState) {
     let mut tick = tokio::time::interval(Duration::from_secs(2));
     loop {

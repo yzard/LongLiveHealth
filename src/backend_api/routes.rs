@@ -196,37 +196,15 @@ async fn review_report(
     current: CurrentUser,
     Json(request): Json<crate::reports::ReviewRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let confirmed = request
-        .observations
-        .iter()
-        .any(|item| item.status == "confirmed");
-    let mut response = {
-        let _guard = state.file_mutation.lock().await;
-        state
-            .database
-            .review(&current.user.user_id, request)
-            .await?
-    };
-    if confirmed && state.config.analysis_enabled {
-        let end = chrono::Utc::now().date_naive();
-        let scope = crate::analysis::AnalysisRequest {
-            start_date: (end - chrono::Duration::days(90)).to_string(),
-            end_date: end.to_string(),
-            timezone: "UTC".into(),
-        };
-        response["analysis_trigger"] = match crate::analysis::request_analysis(
-            &state,
+    let _guard = state.file_mutation.lock().await;
+    let response = state
+        .database
+        .review_with_analysis(
             &current.user.user_id,
-            scope,
+            request,
+            state.config.analysis_enabled,
         )
-        .await
-        {
-            Ok(run_id) => json!({"run_id":run_id}),
-            Err(_) => {
-                json!({"status":"not_queued","reason":"Analysis requires mapped lipid data and a stable snapshot"})
-            }
-        };
-    }
+        .await?;
     Ok(Json(response))
 }
 

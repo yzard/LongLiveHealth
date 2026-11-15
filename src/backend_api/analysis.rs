@@ -55,6 +55,15 @@ pub async fn request_analysis(
     if !state.config.analysis_enabled {
         return Err(AppError::Invalid("Analysis provider is disabled"));
     }
+    let input = prepare_analysis_input(state, user_id, request).await?;
+    enqueue(state, user_id, &input).await
+}
+
+async fn prepare_analysis_input(
+    state: &AppState,
+    user_id: &str,
+    request: AnalysisRequest,
+) -> Result<Value, AppError> {
     let revision = state.database.data_revision(user_id).await?;
     let observations = state
         .database
@@ -136,7 +145,7 @@ pub async fn request_analysis(
     let profile = crate::reference_guides::profile(state, user_id).await?;
     let input = json!({"data_revision":revision,"scope":request,"laboratory_scope":"all_confirmed_history_by_collection_date","reference_profile":profile,"prompt_revision":7,"observations":observations,"normalized":normalized,"contexts":contexts,"health":health,"evidence":evidence(),
         "provider":{"model":state.config.llm.model,"base_url":state.config.llm.base_url,"extra_body":state.config.llm.extra_body},"prompt_version":"lipid-review-v1","algorithm_version":crate::health::ALGORITHM_VERSION,"verification_status":"unverified"});
-    enqueue(state, user_id, &input).await
+    Ok(input)
 }
 
 /// Provider projection removes repeated rendering metadata, not clinical observations.
@@ -253,6 +262,17 @@ pub(crate) async fn enqueue(
     user_id: &str,
     input: &Value,
 ) -> Result<String, AppError> {
+    enqueue_snapshot(state, user_id, input, None)
+        .await?
+        .ok_or(AppError::Internal)
+}
+
+async fn enqueue_snapshot(
+    state: &AppState,
+    user_id: &str,
+    input: &Value,
+    request_id: Option<&str>,
+) -> Result<Option<String>, AppError> {
     let revision = input["data_revision"].as_i64().ok_or(AppError::Internal)?;
     let encoded = serde_json::to_string(input)?;
     if encoded.len() > 512 * 1024 {
@@ -266,6 +286,16 @@ pub(crate) async fn enqueue(
         .as_bytes(),
     );
     let mut transaction = state.database.pool.begin_with("BEGIN IMMEDIATE").await?;
+    if let Some(request_id) = request_id {
+        let current: bool = sqlx::query_scalar(queries::CURRENT_REPORT_ANALYSIS)
+            .bind(user_id)
+            .bind(request_id)
+            .fetch_one(&mut *transaction)
+            .await?;
+        if !current {
+            return Ok(None);
+        }
+    }
     let current: Option<i64> = sqlx::query_scalar(queries::USER_DATA_REVISION)
         .bind(user_id)
         .fetch_optional(&mut *transaction)
@@ -280,21 +310,76 @@ pub(crate) async fn enqueue(
         .bind(&input_digest)
         .fetch_optional(&mut *transaction)
         .await?;
-    if let Some(run_id) = existing {
-        return Ok(run_id);
+    let run_id = if let Some(run_id) = existing {
+        run_id
+    } else {
+        let run_id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(queries::INSERT_ANALYSIS)
+            .bind(&run_id)
+            .bind(user_id)
+            .bind(input_digest)
+            .bind(encoded)
+            .bind(now()?)
+            .bind(&state.config.llm.model)
+            .execute(&mut *transaction)
+            .await?;
+        run_id
+    };
+    if let Some(request_id) = request_id {
+        sqlx::query(queries::FINISH_REPORT_ANALYSIS)
+            .bind(user_id)
+            .bind(request_id)
+            .execute(&mut *transaction)
+            .await?;
     }
-    let run_id = uuid::Uuid::new_v4().to_string();
-    sqlx::query(queries::INSERT_ANALYSIS)
-        .bind(&run_id)
-        .bind(user_id)
-        .bind(input_digest)
-        .bind(encoded)
-        .bind(now()?)
-        .bind(&state.config.llm.model)
-        .execute(&mut *transaction)
-        .await?;
     transaction.commit().await?;
-    Ok(run_id)
+    Ok(Some(run_id))
+}
+
+pub async fn prepare_next_report_analysis(state: &AppState) -> Result<bool, AppError> {
+    if !state.config.analysis_enabled {
+        return Ok(false);
+    }
+    let Some((user_id, request_id, requested_at)) =
+        sqlx::query_as::<_, (String, String, i64)>(queries::NEXT_REPORT_ANALYSIS)
+            .bind(now()?)
+            .fetch_optional(&state.database.pool)
+            .await?
+    else {
+        return Ok(false);
+    };
+    let end = chrono::DateTime::from_timestamp(requested_at, 0)
+        .ok_or(AppError::Internal)?
+        .date_naive();
+    let scope = AnalysisRequest {
+        start_date: (end - chrono::Duration::days(90)).to_string(),
+        end_date: end.to_string(),
+        timezone: "UTC".into(),
+    };
+    let result = match prepare_analysis_input(state, &user_id, scope).await {
+        Ok(input) => enqueue_snapshot(state, &user_id, &input, Some(&request_id)).await,
+        Err(error) => Err(error),
+    };
+    match result {
+        Ok(_) => {}
+        Err(AppError::Invalid(_) | AppError::TooLarge | AppError::NotFound) => {
+            sqlx::query(queries::FINISH_REPORT_ANALYSIS)
+                .bind(&user_id)
+                .bind(&request_id)
+                .execute(&state.database.pool)
+                .await?;
+        }
+        Err(error) => {
+            sqlx::query(queries::RETRY_REPORT_ANALYSIS)
+                .bind(now()? + 10)
+                .bind(&user_id)
+                .bind(&request_id)
+                .execute(&state.database.pool)
+                .await?;
+            return Err(error);
+        }
+    }
+    Ok(true)
 }
 
 pub fn validate_output(output: &AnalysisOutput, input: &Value) -> Result<(), AppError> {
