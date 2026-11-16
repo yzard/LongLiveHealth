@@ -2,11 +2,14 @@ import Foundation
 
 public nonisolated enum ReportReview {
     public static func canBulkConfirm(_ observation: JSONValue) -> Bool {
-        let payload = observation["payload"]
-        return observation["status"] == .string("pending")
+        observation["status"] == .string("pending")
             && hasReviewableMapping(observation)
             && observation["browse_issues"].arrayValue.isEmpty
-            && !payload["source"]["quote"].stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && hasRequiredEvidence(observation["payload"])
+    }
+
+    private static func hasRequiredEvidence(_ payload: JSONValue) -> Bool {
+        !payload["source"]["quote"].stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !payload["raw_name"].stringValue.isEmpty
             && !payload["raw_result"].stringValue.isEmpty
             && !payload["sampled_at"].stringValue.isEmpty
@@ -30,8 +33,14 @@ public nonisolated enum ReportReview {
     }
 
     public static func canConfirmIndividually(_ observation: JSONValue) -> Bool {
-        canBulkConfirm(observation)
-            || (observation["payload"]["unmapped_choice"] == .null && hasSavedMapping(observation))
+        if canBulkConfirm(observation) { return true }
+        let payload = observation["payload"]
+        let choice = payload["unmapped_choice"]
+        if choice == .null { return hasSavedMapping(observation) }
+        return observation["status"] == .string("pending")
+            && choice["kind"] == .string("new")
+            && hasRequiredEvidence(payload)
+            && observation["browse_issues"].arrayValue.allSatisfy { $0["code"] == .string("negative_with_unit") }
     }
 
     public static func suggestedMetricID(_ observation: JSONValue) -> String? {

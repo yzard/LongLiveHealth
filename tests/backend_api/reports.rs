@@ -1376,6 +1376,107 @@ async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
 }
 
 #[tokio::test]
+async fn a_saved_new_metric_can_confirm_a_qualitative_result_with_a_compatible_unit() {
+    use longlivehealth::metric_history::{HistoryRequest, history};
+    use longlivehealth::reports::{NewMetric, UnmappedChoice};
+    use serde_json::Value;
+
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "alice").await;
+    let report = archive(&state, "alice").await;
+    let request = |revision, row: Option<&Value>, status: &str, payload| ReviewRequest {
+        report_id: report.clone(),
+        expected_revision: revision,
+        context: None,
+        new_metric: None,
+        observations: vec![ReviewItem {
+            observation_id: row.map(|row| row["observation_id"].as_str().unwrap().to_owned()),
+            expected_revision: row.and_then(|row| row["revision"].as_i64()),
+            status: status.into(),
+            payload,
+        }],
+    };
+    let mut payload = observation_payload();
+    payload.raw_name = "Urobilinogen (50563-6)".into();
+    payload.raw_result = "Negative".into();
+    payload.raw_unit = Some("mg/dL".into());
+    payload.reference_range = None;
+    payload.report_flag = None;
+    payload.metric_id = None;
+    payload.unmapped_choice = Some(UnmappedChoice::New(NewMetric {
+        name: "Urobilinogen in Urine".into(),
+        standard_unit: "U/L".into(),
+    }));
+    let saved = state
+        .database
+        .review(&user.user_id, request(1, None, "pending", payload.clone()))
+        .await
+        .unwrap();
+    let wrong = &saved["observations"][0];
+    assert!(
+        wrong["browse_issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["code"] == "unsupported_unit")
+    );
+    assert!(
+        state
+            .database
+            .review(
+                &user.user_id,
+                request(2, Some(wrong), "confirmed", payload.clone())
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        state
+            .database
+            .custom_metrics(&user.user_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    payload.unmapped_choice = Some(UnmappedChoice::New(NewMetric {
+        name: "Urobilinogen in Urine".into(),
+        standard_unit: "mg/dL".into(),
+    }));
+    let saved = state
+        .database
+        .review(
+            &user.user_id,
+            request(2, Some(wrong), "pending", payload.clone()),
+        )
+        .await
+        .unwrap();
+    let pending = &saved["observations"][0];
+    assert_eq!(pending["status"], "pending");
+    assert_eq!(pending["browse_issues"].as_array().unwrap().len(), 1);
+    assert_eq!(pending["browse_issues"][0]["code"], "negative_with_unit");
+    let confirmed = state
+        .database
+        .review(
+            &user.user_id,
+            request(3, Some(pending), "confirmed", payload),
+        )
+        .await
+        .unwrap();
+    let row = &confirmed["observations"][0];
+    assert_eq!(row["status"], "confirmed");
+    assert_eq!(row["payload"]["raw_result"], "Negative");
+    assert_eq!(row["payload"]["raw_unit"], "mg/dL");
+    assert!(row.get("reported_negative_bound").is_none());
+    let metric_id = row["resolved_metric_id"].as_str().unwrap().to_owned();
+    let history = history(&state.database, &user.user_id, HistoryRequest { metric_id })
+        .await
+        .unwrap();
+    assert_eq!(history["records"][0]["display_value"], "Negative");
+    assert_eq!(history["points"], serde_json::json!([]));
+}
+
+#[tokio::test]
 async fn confirming_multiple_new_results_creates_each_distinct_saved_definition_once() {
     use longlivehealth::reports::{NewMetric, UnmappedChoice};
 

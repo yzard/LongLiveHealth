@@ -1350,14 +1350,15 @@ impl Database {
                             code.and_then(|code| native_links.get(code)),
                         ) || inconsistent.contains(&id)
                             || observation.payload.source.quote.trim().is_empty()
-                            || !browse_issues(
+                            || browse_issues(
                                 &observation.payload,
                                 &preview,
                                 None,
                                 Some(&definition),
                                 &[],
                             )
-                            .is_empty()
+                            .iter()
+                            .any(|issue| issue.code != "negative_with_unit")
                         {
                             return Err(AppError::Invalid(
                                 "Resolve the current report warnings before confirming a new metric",
