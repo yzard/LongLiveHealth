@@ -205,7 +205,7 @@ pub async fn snapshot(
     let revision = database.data_revision(user).await?;
     let as_of = now()?;
     let health = crate::metric_history::load_health(
-        database,
+        &database.pool,
         user,
         "HKClinicalTypeIdentifierVitalSignRecord",
     )

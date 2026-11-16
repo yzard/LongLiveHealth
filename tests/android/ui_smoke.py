@@ -522,6 +522,7 @@ def report_metric_review():
             wait_for("Negative mg/dL" if negative else "99.1 mg/dL (5.5 mmol/L)")
             tap("Suggested match")
             wait_for("Review result")
+            wait_for("Metric maps to")
             wait_for("Appearance - urine" if negative else "Glucose")
             assert "Unmapped" not in labels()
             assert "No matching Browse metric. Review this result." not in labels()

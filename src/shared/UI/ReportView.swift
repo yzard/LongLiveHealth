@@ -325,7 +325,18 @@ struct ReportView: View {
     private func reviewEditor(_ target: EditTarget) -> ObservationEditor {
         ObservationEditor(observation: target.observation, metrics: model.metrics,
             pageCount: Int(document["report"]["page_count"].numberValue ?? 1), choosingMetric: target.choosingMetric) { change in
-            try await save(observations: [change], context: .null)
+                do {
+                    try await save(observations: [change], context: .null)
+                } catch APIError.status(409, let message)
+                    where message == "Report changed; reload before reviewing" || message == "Observation changed" {
+                    let latest = try await model.refreshReportAfterReviewConflict(reportID)
+                    try await applySavedReport(latest)
+                    let id = change["observation_id"]
+                    if id != .null && latest["observations"].arrayValue.first(where: { $0["observation_id"] == id })?["revision"] != change["expected_revision"] {
+                        throw APIError.status(409, "This result changed. Check the refreshed result before reapplying your edits.")
+                    }
+                    throw APIError.status(409, "The report was refreshed. Your edits are still open. Tap Save to submit them again.")
+                }
         }
     }
 

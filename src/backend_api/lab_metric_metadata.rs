@@ -107,7 +107,7 @@ pub(crate) async fn clinical_groups(
     database: &Database,
     user: &str,
 ) -> Result<BTreeMap<String, Group>, AppError> {
-    let records = metric_history::load_health(database, user, "").await?;
+    let records = metric_history::load_health(&database.pool, user, "").await?;
     database
         .cpu
         .run(move || Ok(crate::clinical_labs::groups(&records)))

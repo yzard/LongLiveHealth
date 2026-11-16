@@ -49,6 +49,13 @@ struct ObservationEditor: View {
                         }
                     }
                 }.interactiveDismissDisabled()
+                .alert("Could not save", isPresented: Binding(
+                    get: { error != nil }, set: { if !$0 { error = nil } }
+                )) {
+                    Button("OK", role: .cancel) { error = nil }
+                } message: {
+                    Text(error ?? "")
+                }
         }
     }
     private var status: String {
@@ -70,6 +77,7 @@ struct ObservationEditor: View {
     }
 
     private func submit() async {
+        guard !saving else { return }
         saving = true
         defer { saving = false }
         do {
@@ -105,8 +113,11 @@ struct ObservationEditor: View {
         Section("Mapping") {
             recommendedName
             HStack {
-                SelectionPicker(title: "Metric mapping", selection: mapping, placeholder: "Unmapped",
+                Text("Metric maps to")
+                SelectionPicker(title: "Metric maps to", selection: mapping, placeholder: "Unmapped",
                     choices: mappingChoices)
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Button("Mark as New", action: markAsNew)
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("mark-as-new-metric")
@@ -138,7 +149,6 @@ struct ObservationEditor: View {
             TextField("Exact source text", text: Binding(get: { payload["source"]["quote"].stringValue }, set: { payload["source"]["quote"] = .string($0) }), axis: .vertical)
             field("Your notes", "notes")
         }
-        if let error { Section { Text(error).foregroundStyle(.red) } }
     }
 
     @ViewBuilder private var metricOptions: some View {

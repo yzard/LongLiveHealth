@@ -10,7 +10,7 @@ use chrono::{DateTime, NaiveDate};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use sqlx::Row;
+use sqlx::{Row, SqliteConnection};
 use std::collections::HashSet;
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -440,6 +440,14 @@ struct StoredObservation {
     payload_json: String,
     context_json: String,
 }
+struct ReportSnapshot {
+    document: Value,
+    observations: Vec<StoredObservation>,
+    custom_metrics: Vec<CustomMetric>,
+    metadata: Metadata,
+    evidence: Vec<(i64, Option<String>, bool)>,
+}
+
 impl StoredObservation {
     fn decode(
         self,
@@ -840,50 +848,57 @@ impl Database {
             self.custom_metrics(user_id).await?,
             self.lab_metric_metadata(user_id).await?,
             false,
+            None,
         )
         .await
     }
     pub async fn report(&self, user_id: &str, report_id: &str) -> Result<Value, AppError> {
         let mut transaction = self.pool.begin().await?;
+        let snapshot = Self::load_report_snapshot(&mut transaction, user_id, report_id).await?;
+        transaction.commit().await?;
+        self.render_report(user_id, snapshot, None).await
+    }
+
+    async fn load_report_snapshot(
+        connection: &mut SqliteConnection,
+        user_id: &str,
+        report_id: &str,
+    ) -> Result<ReportSnapshot, AppError> {
         let report: ReportSummary = sqlx::query_as(queries::REPORT)
             .bind(user_id)
             .bind(report_id)
-            .fetch_optional(&mut *transaction)
+            .fetch_optional(&mut *connection)
             .await?
             .ok_or(AppError::NotFound)?;
         let context: Value = serde_json::from_str(&report.context_json)?;
         let observations = sqlx::query_as::<_, StoredObservation>(queries::OBSERVATIONS)
             .bind(user_id)
             .bind(report_id)
-            .fetch_all(&mut *transaction)
+            .fetch_all(&mut *connection)
             .await?;
         let custom_metrics = sqlx::query_as(queries::CUSTOM_LAB_METRICS)
             .bind(user_id)
-            .fetch_all(&mut *transaction)
+            .fetch_all(&mut *connection)
             .await?;
-        let metadata = Metadata::load(&mut transaction, user_id).await?;
-        let relation=sqlx::query(queries::REPORT_RELATION).bind(user_id).bind(report_id).fetch_optional(&mut *transaction).await?
+        let metadata = Metadata::load(connection, user_id).await?;
+        let relation=sqlx::query(queries::REPORT_RELATION).bind(user_id).bind(report_id).fetch_optional(&mut *connection).await?
             .map(|row| json!({"preferred_report_id":row.get::<String,_>("preferred_report_id"),"kind":row.get::<String,_>("kind")}));
-        let pages=sqlx::query(queries::EXTRACTION_PAGES).bind(user_id).bind(report_id).fetch_all(&mut *transaction).await?.into_iter()
+        let pages=sqlx::query(queries::EXTRACTION_PAGES).bind(user_id).bind(report_id).fetch_all(&mut *connection).await?.into_iter()
             .map(|row|json!({"run_id":row.get::<String,_>("run_id"),"page":row.get::<i64,_>("page_number"),"status":row.get::<String,_>("status"),
                 "content":row.get::<String,_>("content"),"model":row.get::<String,_>("model"),"created_at":row.get::<i64,_>("created_at")})).collect::<Vec<_>>();
         let outputs = sqlx::query(queries::EXTRACTION_OUTPUTS).bind(user_id).bind(report_id)
-            .fetch_all(&mut *transaction).await?.into_iter().map(|row| json!({
+            .fetch_all(&mut *connection).await?.into_iter().map(|row| json!({
                 "run_id":row.get::<String,_>("run_id"), "page":row.get::<i64,_>("page_number"),
                 "stage":row.get::<String,_>("stage"), "model":row.get::<String,_>("model"),
                 "adapter":row.get::<String,_>("adapter"), "created_at":row.get::<i64,_>("created_at")
             })).collect::<Vec<_>>();
-        let inputs = sqlx::query(queries::EXTRACTION_INPUTS).bind(user_id).bind(report_id).fetch_all(&mut *transaction).await?
+        let inputs = sqlx::query(queries::EXTRACTION_INPUTS).bind(user_id).bind(report_id).fetch_all(&mut *connection).await?
             .into_iter().map(|row| json!({"run_id":row.get::<String,_>("run_id"),"page":row.get::<i64,_>("page_number"),"created_at":row.get::<i64,_>("created_at"),"text_status":row.get::<Option<String>,_>("text_status"),"error_code":row.get::<Option<String>,_>("error_code")})).collect::<Vec<_>>();
-        let duplicates = sqlx::query(queries::DUPLICATE_FILES).bind(user_id).bind(user_id).bind(report_id).bind(report_id).fetch_all(&mut *transaction).await?.into_iter().map(|row|json!({"report_id":row.get::<String,_>("file_id"),"original_name":row.get::<String,_>("original_name"),"reason":"identical_file_bytes"})).collect::<Vec<_>>();
-        transaction.commit().await?;
-        let observations = self
-            .decode_report_rows(user_id, observations, custom_metrics, metadata, true)
-            .await?;
+        let duplicates = sqlx::query(queries::DUPLICATE_FILES).bind(user_id).bind(user_id).bind(report_id).bind(report_id).fetch_all(&mut *connection).await?.into_iter().map(|row|json!({"report_id":row.get::<String,_>("file_id"),"original_name":row.get::<String,_>("original_name"),"reason":"identical_file_bytes"})).collect::<Vec<_>>();
         let evidence = sqlx::query(queries::EXTRACTION_VALIDATION_CONTENT)
             .bind(user_id)
             .bind(report_id)
-            .fetch_all(&self.pool)
+            .fetch_all(&mut *connection)
             .await?
             .into_iter()
             .map(|row| {
@@ -894,6 +909,38 @@ impl Database {
                 )
             })
             .collect::<Vec<_>>();
+        Ok(ReportSnapshot {
+            document: json!({"duplicate_candidates":duplicates,"report":report,"context":context,"relation":relation,"pages":pages,"extraction_outputs":outputs,"extraction_inputs":inputs}),
+            observations,
+            custom_metrics,
+            metadata,
+            evidence,
+        })
+    }
+
+    async fn render_report(
+        &self,
+        user_id: &str,
+        snapshot: ReportSnapshot,
+        connection: Option<&mut SqliteConnection>,
+    ) -> Result<Value, AppError> {
+        let ReportSnapshot {
+            mut document,
+            observations,
+            custom_metrics,
+            metadata,
+            evidence,
+        } = snapshot;
+        let observations = self
+            .decode_report_rows(
+                user_id,
+                observations,
+                custom_metrics,
+                metadata,
+                true,
+                connection,
+            )
+            .await?;
         let validation_issues = self
             .cpu
             .run(move || {
@@ -909,10 +956,11 @@ impl Database {
                     .collect::<Vec<_>>())
             })
             .await?;
-        Ok(
-            json!({"validation_issues":validation_issues,"duplicate_candidates":duplicates,"report":report,"context":context,"observations":observations,"relation":relation,"pages":pages,"extraction_outputs":outputs,"extraction_inputs":inputs}),
-        )
+        document["validation_issues"] = json!(validation_issues);
+        document["observations"] = json!(observations);
+        Ok(document)
     }
+
     pub async fn extraction_input(
         &self,
         user_id: &str,
@@ -1399,15 +1447,23 @@ impl Database {
                 .execute(&mut *transaction)
                 .await?;
         }
-        transaction.commit().await?;
-        self.reconcile_report_drafts().await?;
-        let mut document = self.report(user_id, &request.report_id).await?;
+        // Build the authoritative response before committing. CPU admission can
+        // reject the rendering work, and the client must be able to retry safely.
+        let snapshot =
+            Self::load_report_snapshot(&mut transaction, user_id, &request.report_id).await?;
+        let mut document = self
+            .render_report(user_id, snapshot, Some(&mut transaction))
+            .await?;
         if let Some(metric) = created_metrics.first() {
             document["created_metric"] = serde_json::to_value(metric)?;
             document["created_metrics"] = serde_json::to_value(&created_metrics)?;
         }
         if queue_analysis {
             document["analysis_trigger"] = json!({"status":"queued"});
+        }
+        transaction.commit().await?;
+        if let Err(error) = self.reconcile_report_drafts().await {
+            tracing::warn!(code=%error, "report saved; draft reconciliation failed");
         }
         Ok(document)
     }
@@ -1453,6 +1509,7 @@ impl Database {
                 self.custom_metrics(user_id).await?,
                 self.lab_metric_metadata(user_id).await?,
                 false,
+                None,
             )
             .await?;
         let mut first_report = std::collections::HashMap::new();
@@ -1691,6 +1748,7 @@ impl Database {
         mut custom_metrics: Vec<CustomMetric>,
         metadata: Metadata,
         include_suggestions: bool,
+        connection: Option<&mut SqliteConnection>,
     ) -> Result<Vec<Observation>, AppError> {
         let needs_review_catalog = |payload: &ObservationPayload| {
             payload
@@ -1717,7 +1775,14 @@ impl Database {
                             .is_some_and(|id| lab_metric_metadata::is_clinical_id(id)))
             })
         }) {
-            lab_metric_metadata::clinical_groups(self, user).await?
+            if let Some(connection) = connection {
+                let records = crate::metric_history::load_health(connection, user, "").await?;
+                self.cpu
+                    .run(move || Ok(crate::clinical_labs::groups(&records)))
+                    .await?
+            } else {
+                lab_metric_metadata::clinical_groups(self, user).await?
+            }
         } else {
             Default::default()
         };
@@ -1766,5 +1831,86 @@ impl Database {
                 Ok(observations)
             })
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn review_rate_limit_leaves_report_and_observation_revisions_unchanged() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = Database::open(directory.path()).await.unwrap();
+        let user = database
+            .create_user("reviewer", "test-hash", 1)
+            .await
+            .unwrap();
+        database
+            .archive_file(
+                &user.user_id,
+                &crate::models::ArchivedFile {
+                    file_id: "report".into(),
+                    upload_id: "upload".into(),
+                    original_name: "test.pdf".into(),
+                    relative_path: "raw/test.pdf".into(),
+                    processing_path: None,
+                    processing_sha256: None,
+                    content_type: "application/pdf".into(),
+                    sha256: "test-digest".into(),
+                    byte_count: 1,
+                    page_count: 1,
+                    created_at: 1,
+                },
+            )
+            .await
+            .unwrap();
+
+        let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut release = Vec::new();
+        let mut tasks = Vec::new();
+        for _ in 0..2 {
+            let cpu = database.cpu.clone();
+            let started = started_tx.clone();
+            let (tx, rx) = std::sync::mpsc::channel::<()>();
+            release.push(tx);
+            tasks.push(tokio::spawn(async move {
+                cpu.run(move || {
+                    started.send(()).unwrap();
+                    let _ = rx.recv();
+                    Ok(())
+                })
+                .await
+            }));
+        }
+        for _ in 0..2 {
+            started_rx.recv().await.unwrap();
+        }
+
+        let request = || {
+            serde_json::from_value::<ReviewRequest>(json!({
+                "report_id":"report", "expected_revision":1,
+                "observations":[{"status":"pending", "payload":{
+                    "raw_name":"Example measurement", "raw_result":"10", "sampled_at":"2026-11-16",
+                    "source":{"page":1,"quote":"Example measurement 10"}
+                }}]
+            }))
+            .unwrap()
+        };
+        let failed = database.review(&user.user_id, request()).await;
+        drop(release);
+        for task in tasks {
+            task.await.unwrap().unwrap();
+        }
+        assert!(matches!(failed, Err(AppError::RateLimited)));
+        let after_failure = database.report(&user.user_id, "report").await.unwrap();
+        assert_eq!(after_failure["report"]["revision"], 1);
+        assert_eq!(after_failure["observations"], json!([]));
+
+        let saved = database.review(&user.user_id, request()).await.unwrap();
+        assert_eq!(saved["report"]["revision"], 2);
+        assert_eq!(saved["observations"][0]["revision"], 1);
+        assert_eq!(saved["observations"][0]["status"], "pending");
+        assert_eq!(saved["observations"].as_array().unwrap().len(), 1);
     }
 }

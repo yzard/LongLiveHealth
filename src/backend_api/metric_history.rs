@@ -135,7 +135,7 @@ pub async fn history(
         );
     }
     let health = load_health(
-        database,
+        &database.pool,
         user_id,
         if request.metric_id == "glucose" {
             "blood_glucose"
@@ -414,15 +414,15 @@ fn append_value(
         "sampled_at":date,"timestamp":timestamp,"value":value,"unit":unit,"original":original}));
 }
 
-pub(crate) async fn load_health(
-    database: &Database,
+pub(crate) async fn load_health<'a>(
+    executor: impl sqlx::SqliteExecutor<'a>,
     user_id: &str,
     quantity_kind: &str,
 ) -> Result<Vec<Value>, AppError> {
     let mut stream = sqlx::query(queries::METRIC_HEALTH_HISTORY)
         .bind(user_id)
         .bind(quantity_kind)
-        .fetch(&database.pool);
+        .fetch(executor);
     let mut rows = Vec::new();
     let mut bytes = 0;
     while let Some(row) = stream.try_next().await? {
@@ -441,7 +441,7 @@ pub(crate) async fn load_health(
 }
 
 pub async fn browse(database: &Database, user_id: &str) -> Result<Value, AppError> {
-    let records = load_health(database, user_id, "").await?;
+    let records = load_health(&database.pool, user_id, "").await?;
     let metadata = database.lab_metric_metadata(user_id).await?;
     let reports = database.confirmed(user_id).await?;
     let custom_metrics = database.custom_metrics(user_id).await?;
