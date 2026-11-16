@@ -4,7 +4,7 @@ public nonisolated enum ReportReview {
     public static func canBulkConfirm(_ observation: JSONValue) -> Bool {
         let payload = observation["payload"]
         return observation["status"] == .string("pending")
-            && hasSavedMapping(observation)
+            && hasReviewableMapping(observation)
             && observation["browse_issues"].arrayValue.isEmpty
             && !payload["source"]["quote"].stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !payload["raw_name"].stringValue.isEmpty
@@ -12,7 +12,17 @@ public nonisolated enum ReportReview {
             && !payload["sampled_at"].stringValue.isEmpty
     }
 
-    public static func hasSavedMapping(_ observation: JSONValue) -> Bool {
+    private static func hasReviewableMapping(_ observation: JSONValue) -> Bool {
+        if hasSavedMapping(observation) { return true }
+        // OCR suggestions have their own fields. A server-resolved ID is a verified
+        // match even when the pending payload has no explicit reviewer selection.
+        let payload = observation["payload"]
+        return payload["metric_id"].stringValue.isEmpty
+            && payload["unmapped_choice"] == .null
+            && !observation["resolved_metric_id"].stringValue.isEmpty
+    }
+
+    private static func hasSavedMapping(_ observation: JSONValue) -> Bool {
         let payload = observation["payload"]
         let mapping = payload["metric_id"].stringValue
         return (!mapping.isEmpty && observation["resolved_metric_id"] == .string(mapping))
@@ -20,8 +30,8 @@ public nonisolated enum ReportReview {
     }
 
     public static func canConfirmIndividually(_ observation: JSONValue) -> Bool {
-        hasSavedMapping(observation)
-            && (observation["payload"]["unmapped_choice"] == .null || canBulkConfirm(observation))
+        canBulkConfirm(observation)
+            || (observation["payload"]["unmapped_choice"] == .null && hasSavedMapping(observation))
     }
 
     public static func suggestedMetricID(_ observation: JSONValue) -> String? {

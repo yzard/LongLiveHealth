@@ -13,6 +13,7 @@ import Testing
     ])
     var uncertain = ready
     uncertain["payload"]["metric_id"] = .null
+    uncertain["resolved_metric_id"] = .null
     uncertain["payload"]["ocr_mapping_note"] = .string("Specimen could not be verified")
     var invalid = ready
     invalid["browse_issues"] = .array([.object(["scope": .string("chart"), "code": .string("invalid_date")])])
@@ -28,6 +29,30 @@ import Testing
     #expect(eligible == [ready])
     #expect(confirmed["payload"] == payload)
     #expect(confirmed["expected_revision"] == .number(3))
+}
+
+@Test func rescanQueuesOnlyUnblockedServerResolvedMappings() {
+    let resolved: JSONValue = .object([
+        "observation_id": .string("scan"), "status": .string("pending"), "revision": .number(4),
+        "resolved_metric_id": .string("example"),
+        "payload": .object(["raw_name": .string("Example marker"), "raw_result": .string("4.6"),
+            "sampled_at": .string("2026-11-01"), "source": .object(["quote": .string("Example marker 4.6")])]),
+    ])
+    var suggestion = resolved
+    suggestion["resolved_metric_id"] = .null
+    suggestion["payload"]["ocr_metric_candidate"] = .string("example")
+    suggestion["metric_suggestions"] = .array([.object(["metric_id": .string("example")])])
+    var blocked = resolved
+    blocked["browse_issues"] = .array([.object(["scope": .string("chart"), "code": .string("unsupported_unit")])])
+    var deliberatelyUnmapped = resolved
+    deliberatelyUnmapped["payload"]["unmapped_choice"] = .object(["kind": .string("unmapped")])
+    var mismatched = resolved
+    mismatched["payload"]["metric_id"] = .string("another")
+    let rows = [resolved, suggestion, blocked, deliberatelyUnmapped, mismatched]
+    #expect(rows.filter(ReportReview.canBulkConfirm) == [resolved])
+    #expect(rows.filter(ReportReview.canConfirmIndividually) == [resolved])
+    #expect(ReportReview.change(resolved, to: "confirmed")["payload"] == resolved["payload"])
+    #expect(resolved["status"] == .string("pending"))
 }
 
 @Test func successiveSavedMatchesMoveToReadyWhileIndependentIssuesRemain() {
