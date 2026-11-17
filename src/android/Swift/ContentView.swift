@@ -9,6 +9,9 @@ import SkipFuse
 
 struct ContentView: View {
     @State var model = AndroidApplication.shared.model
+    @State var languageSettings = InterfaceLanguageSettings.shared
+    @State var dataPage: DataPage?
+
     var body: some View {
         Group {
             if model.session == nil {
@@ -25,19 +28,20 @@ struct ContentView: View {
                 NavigationStack { PasswordChangeView(model: model, required: true) }
             } else {
                 TabView(selection: $model.selectedTab) {
-                    NavigationStack { InsightsView(model: model) }.tabItem {
-                        Label { TabTitle(key: "Insights") } icon: { Image(systemName: MobileSymbol.name("sparkles")) }
-                    }.tag("Insights")
-                    BrowseView(model: model).tabItem {
-                        Label { TabTitle(key: "Browse") } icon: { Image(systemName: MobileSymbol.name("list.bullet")) }
-                    }.tag("Browse")
-                    DataCenterView(model: model).tabItem {
-                        Label { TabTitle(key: "Data") } icon: { Image(systemName: MobileSymbol.name("externaldrive")) }
-                    }.tag("Data")
-                }.initialTask { await model.resumeForeground() }
+                    NavigationStack { InsightsView(model: model) }
+                        .tabItem { Label(uiText("Insights"), systemImage: MobileSymbol.name("sparkles")) }.tag("Insights")
+                    BrowseView(model: model)
+                        .tabItem { Label(uiText("Browse"), systemImage: MobileSymbol.name("list.bullet")) }.tag("Browse")
+                    DataCenterView(model: model, selected: $dataPage)
+                        .tabItem { Label(uiText("Data"), systemImage: MobileSymbol.name("externaldrive")) }.tag("Data")
+                }
+                // Skip's navigation host retains the initial text in tab items and toolbars.
+                // Keep the active tab and Data destination outside that host when language changes.
+                .id(languageSettings.language.rawValue)
+                .initialTask { await model.resumeForeground() }
             }
         }.tint(.teal)
-            .environment(\.locale, InterfaceLanguageSettings.shared.language.locale)
+            .environment(\.locale, languageSettings.language.locale)
             .sheet(isPresented: Binding(get: { model.showSharedReportImport && model.session != nil && !model.isLocked && !model.privacyCovered }, set: { model.showSharedReportImport = $0 })) { SharedReportImportView(model: model) }
             .alert(uiText("Could not complete the action"), isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
                 Button(uiText("OK")) { model.errorMessage = nil }
@@ -48,14 +52,5 @@ struct ContentView: View {
                     do { try await Task.sleep(for: .seconds(30)) } catch { return }
                 }
             }
-    }
-}
-
-/// Skip keeps the tab items alive while their navigation stacks change.
-struct TabTitle: View {
-    let key: String
-
-    var body: some View {
-        Text(uiLabel(key))
     }
 }

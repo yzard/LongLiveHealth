@@ -10,10 +10,10 @@ enum DataPage: Hashable {
 struct DataCenterView: View {
     var model: AppModel
     #if os(Android)
-    @State var selected: DataPage?
+    @Binding var selected: DataPage?
     var body: some View {
         AdaptiveDetailLayout(selected: selected != nil) {
-            NavigationStack { Sidebar(center: self) }
+            NavigationStack { menu }
         } detail: {
             if let selected {
                 NavigationStack {
@@ -31,13 +31,6 @@ struct DataCenterView: View {
         }
     }
 
-    struct Sidebar: View {
-        let center: DataCenterView
-
-        var body: some View {
-            center.menu
-        }
-    }
     #else
     var body: some View { menu }
     #endif
