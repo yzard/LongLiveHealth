@@ -513,13 +513,13 @@ try:
         'source': {'page': 1, 'quote': 'Synthetic test only'},
     }
     api(
-        'reports/review',
+        'reports/submit',
         {
             'report_id': report,
             'expected_revision': current['report']['revision'],
             'observations': [
                 {
-                    'status': 'confirmed',
+                    'status': 'submitted',
                     'payload': observation,
                     **(
                         {'observation_id': recognized['observation_id'], 'expected_revision': recognized['revision']}
@@ -562,7 +562,7 @@ try:
         assert 'xMin' in evidence['raw_bbox_xml']
         pdf_observation['payload']['metric_id'] = 'ldl_cholesterol'
         api(
-            'reports/review',
+            'reports/submit',
             {
                 'report_id': pdf_report,
                 'expected_revision': pdf_document['report']['revision'],
@@ -570,7 +570,7 @@ try:
                     {
                         'observation_id': pdf_observation['observation_id'],
                         'expected_revision': pdf_observation['revision'],
-                        'status': 'confirmed',
+                        'status': 'submitted',
                         'payload': pdf_observation['payload'],
                     }
                 ],
@@ -623,12 +623,12 @@ try:
                     {
                         'observation_id': row['observation_id'],
                         'expected_revision': row['revision'],
-                        'status': 'confirmed',
+                        'status': 'submitted',
                         'payload': row['payload'],
                     }
                 )
         api(
-            'reports/review',
+            'reports/submit',
             {
                 'report_id': scan_report,
                 'expected_revision': scanned_document['report']['revision'],
@@ -769,7 +769,7 @@ try:
             assert b'lab-units-v5' in archive.read('observations.csv')
             assert archive.read(scan_upload['file']['relative_path']) == scanned
     command(compose + ['restart', 'backend_api'])
-    assert eventually(lambda: api('reports/get', {'report_id': report}), 60)['observations'][0]['status'] == 'confirmed'
+    assert eventually(lambda: api('reports/get', {'report_id': report}), 60)['observations'][0]['status'] == 'submitted'
     command(compose + ['stop', 'backend_api'])
     backend = command(compose + ['ps', '-a', '-q', 'backend_api']).decode().strip()
     snapshot.mkdir()

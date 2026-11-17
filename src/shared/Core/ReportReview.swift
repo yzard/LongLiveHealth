@@ -1,9 +1,9 @@
 import Foundation
 
 public nonisolated enum ReportReview {
-    public static func canBulkConfirm(_ observation: JSONValue) -> Bool {
+    public static func canBulkSubmit(_ observation: JSONValue) -> Bool {
         observation["status"] == .string("pending")
-            && !observation["payload"]["ocr_mapping_note"].stringValue.contains("Previously excluded. Review before confirming.")
+            && !observation["payload"]["ocr_mapping_note"].stringValue.hasPrefix("Previously excluded.")
             && hasReviewableMapping(observation)
             && observation["browse_issues"].arrayValue.isEmpty
             && hasRequiredEvidence(observation["payload"])
@@ -47,7 +47,7 @@ public nonisolated enum ReportReview {
     public static func savedMetricID(_ observation: JSONValue) -> String? {
         let selected = observation["payload"]["metric_id"].stringValue
         if !selected.isEmpty { return selected }
-        guard observation["status"] == .string("confirmed") else { return nil }
+        guard observation["status"] == .string("submitted") else { return nil }
         let resolved = observation["resolved_metric_id"].stringValue
         return resolved.isEmpty ? nil : resolved
     }

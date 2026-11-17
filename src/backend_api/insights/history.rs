@@ -546,7 +546,7 @@ async fn laboratory_cards(
         .await?;
     let mut report_sources = BTreeMap::new();
     let definitions = crate::laboratory::metrics();
-    for observation in database.confirmed(user).await? {
+    for observation in database.submitted_observations(user).await? {
         let Some(metric) = observation.resolved_metric_id.as_deref() else {
             continue;
         };
@@ -599,7 +599,7 @@ async fn laboratory_cards(
                     "[null,null]".into(),
                 );
                 card.missing.insert(
-                    "No confirmed blood test results or hospital laboratory observations".into(),
+                    "No submitted blood test results or hospital laboratory observations".into(),
                     0,
                 );
                 cards.push(card);

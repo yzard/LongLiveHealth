@@ -26,7 +26,7 @@ Android 安装包通过公开的 `GET /longlivehealth.apk` 下载（旧路径 `/
 | reports/get | report_id | report、context、observations、relation、pages、extraction_outputs 元数据、duplicate_candidates |
 | reports/input/get | report_id、run_id、page | 完整页面证据，text_layer、词坐标、raw_bbox_xml、error_code；按用户归属鉴权 |
 | reports/extraction/get | report_id、run_id、page、stage（当前为 ocr） | response_body、status_code、content 可空 |
-| reports/review | 见下方 | 新报告快照；可能附 analysis_trigger |
+| reports/submit | 见下方 | 新报告快照；可能附 analysis_trigger |
 | reports/rescan | report_id、expected_revision、replace_results=true | job；删除该报告的全部旧结果和旧 OCR 输出，原件逐页重新提交 OCR。执行时重新读取当前指标名称和 LOINC。全份报告通过校验后发布新的 pending 结果，扫描中禁止编辑结果。失败时保留本轮诊断，旧结果不会恢复。 |
 | reports/relate | report_id、expected_revision、preferred_report_id 可空、kind | updated |
 | reports/delete | report_id、expected_revision | cleanup_queued |
@@ -55,7 +55,7 @@ Android 安装包通过公开的 `GET /longlivehealth.apk` 下载（旧路径 `/
   "observations": [{
     "observation_id": null,
     "expected_revision": null,
-    "status": "confirmed",
+    "status": "submitted",
     "payload": {
       "raw_name": "LDL Cholesterol", "raw_result": "120", "raw_unit": "mg/dL",
       "reference_range": "<100", "report_flag": "H", "sampled_at": "2026-08-01",
@@ -67,9 +67,9 @@ Android 安装包通过公开的 `GET /longlivehealth.apk` 下载（旧路径 `/
 }
 ```
 
-新项 ID/修订为空；修改项必须带 observation_id 和 expected_revision。状态为 pending 或 confirmed。context=null 表示不改背景；对象中的空值可以清除背景。一个请求事务执行，可只提交部分行；报告或行版本过期返回 409。bounding_box 是归一化 left/top/right/bottom；无法定位时为空，不伪造位置。
+新项 ID/修订为空；修改项必须带 observation_id 和 expected_revision。状态为 pending 或 submitted。context=null 表示不改背景；对象中的空值可以清除背景。一个请求事务执行，可只提交部分行；报告或行版本过期返回 409。bounding_box 是归一化 left/top/right/bottom；无法定位时为空，不伪造位置。
 
-OCR 候选始终 pending、metric_id=null，不能自行确认。有效结构携带 warnings 时，任务成功且相关页为 needs_review；完整提醒随回复保留。网络、结构或字段校验失败仍是任务失败；成功完成提取不代表已经人工审核。原单位和文本结果都保留；仅已确认、已映射、可比较且有采样日期的结果进入数值趋势。当前字典 17 项见 metrics/list（含 accepted_units、conversion_version）。API 使用 lab-units-v3 的指标专属注册表，支持常见质量浓度、血脂/血糖/肌酐摩尔浓度及 HbA1c IFCC→NGSP 的明确规则；不会让 OCR 换算。受控空格/大小写/微符号别名不改变原单位，未知单位不做模糊纠正。
+OCR 候选始终 pending、metric_id=null，不会自动提交。有效结构携带 warnings 时，任务成功且相关页为 needs_review；完整提醒随回复保留。网络、结构或字段校验失败仍是任务失败；成功完成提取不代表已经人工审核。原单位和文本结果都保留；仅已提交、已映射、可比较且有采样日期的结果进入数值趋势。当前字典 17 项见 metrics/list（含 accepted_units、conversion_version）。API 使用 lab-units-v3 的指标专属注册表，支持常见质量浓度、血脂/血糖/肌酐摩尔浓度及 HbA1c IFCC→NGSP 的明确规则；不会让 OCR 换算。受控空格/大小写/微符号别名不改变原单位，未知单位不做模糊纠正。
 
 reports/get 的 observations 含 interpretation（result/reference/version）：状态、明确原因、原单位及单位来源、标准单位、value 或上下界/包含性、显示文本和规则/来源。简单比较符/范围可换算边界但不会成为精确趋势点。参考范围显式单位优先，否则使用报告结果列单位并标记 unit_origin=observation；条件化/复杂范围保留原文，不生成假阈值。
 
@@ -126,7 +126,7 @@ extraction_outputs 保存每个阶段最终接收的 UTF-8 HTTP 回复（上限 
 
 导出 manifest.version=1：表 JSONL（当前记录、原件索引、OCR 回复及当前人工复核结果）、辅助 CSV（含标准化结果/参考区间/状态/规则版本），extraction_inputs.jsonl 收录每页证据，以及按数据库 relative_path/raw_path 收录的有效原件；ZIP 使用 raw/<user>/<source>/<file> 路径。Apple Health 已删除记录的旧原件和删除标记仍包含在归档中，但不作为可见指标；其他类型已删除内容不再导出。
 
-列表按 ID 游标，不保证多请求期间新增数据的快照；趋势最多读取 10,000 条已确认结果，超限明确报错。iPhone 可比较两项指标，图表使用各自尺度；API 保持独立 metric_id/unit。
+列表按 ID 游标，不保证多请求期间新增数据的快照；趋势最多读取 10,000 条已提交结果，超限明确报错。iPhone 可比较两项指标，图表使用各自尺度；API 保持独立 metric_id/unit。
 
 上传校验/摘要、大载荷编解码、PDF 证据处理与 ZIP 使用共享两个 CPU 槽；HTTP 请求无法准入返回 429，不累积无限重 CPU 队列。取消后正在运行的阻塞闭包继续持有槽位和临时文件使用权；服务停服等待它们结束，再清理临时文件。
 
@@ -172,7 +172,7 @@ Manual edits require the next version. A stale version or a change of entry type
 
 `wellness/review` 接收 `start_at`、`end_at` 与 `timezone`。它使用手动日志的 366 天、1000 项与 4 MiB 限制，返回每日已记录合计、缺项数量、配对测量与窗口力量纪录。没有日志的日期不补零。宏量完整只表示已有日志中的字段齐全。力量纪录按动作名称与重复次数分开，不预测 1RM。结果包含输入 ID/版本、算法版本与账户修订。
 
-导出 v1 的 `members` 对除 `manifest.json` 外的每个成员记录 SHA-256 和字节数。`table_counts` 记录各表行数，`table_columns` 记录 SQLite 列结构，`database_schema_version` 为 1。清单未签名。修改清单和全部内容后重算摘要，仍不能据此证明真实性。独立读取器仅支持第一版格式，不保留历史格式兼容。
+导出 v1 的 `members` 对除 `manifest.json` 外的每个成员记录 SHA-256 和字节数。`table_counts` 记录各表行数，`table_columns` 记录 SQLite 列结构，`database_schema_version` 为 9。清单未签名。修改清单和全部内容后重算摘要，仍不能据此证明真实性。独立读取器仅支持第一版格式，不保留历史格式兼容。
 
 `wellness/import/tcx` 接收与 GPX 相同的 `filename` 和 UTF-8 `xml`。单文件支持一个 TCX v2 Activity，最多 4 MiB、1000 圈和 50000 点，覆盖不超过七天。不要求 GPS，因此可保留室内训练。使用来源圈次距离，来源计时与经过时间分开。保存心率、踏频、海拔、位置及完整原 XML。扩展字段仍保留在原 XML，不声称全部已标准化。依据 [Garmin TCX v2 schema](https://www8.garmin.com/xmlschemas/TrainingCenterDatabasev2.xsd)。导入列表包含 `source_id`。删除请求必须同时提交 `record_id`、`source_id` 和 `expected_version`。
 
@@ -235,9 +235,9 @@ wellness/entries/save 和 wellness/entries/delete 返回 record_id、sync 和 re
 
 Report review context accepts optional `source_name`: the clinic/laboratory/institution, such as Function Health. Nonempty names must be at most 160 UTF-8 bytes, without control characters; Apple Health is reserved for device archives. Imports select the file first; OCR fills missing title/source fields. The Report source button edits these fields after import. Existing reports without a name use their filename until a source is identified or entered. Upload retries preserve the same upload ID.
 
-Report history includes only confirmed observations and preserves existing duplicate/superseded-report exclusions and analyte-specific conversions. Apple Health includes active blood glucose quantity records and finalized/amended/corrected clinical FHIR Observations with recognized LOINC codes. Clinical components use their own codes/quantities and the parent collection date. Imported/issued timestamps do not replace missing collection dates. Unrecognized codes, unsupported clinical resources, non-final results, bounds and incompatible units remain archived and are reported as exclusions when relevant; they are not guessed from display labels. The clinical mapping uses a closed list of verified LOINC codes (reference: https://loinc.org/). It does not yet map every clinical code or FHIR resource format.
+Report history includes only submitted observations and preserves existing duplicate/superseded-report exclusions and analyte-specific conversions. Apple Health includes active blood glucose quantity records and finalized/amended/corrected clinical FHIR Observations with recognized LOINC codes. Clinical components use their own codes/quantities and the parent collection date. Imported/issued timestamps do not replace missing collection dates. Unrecognized codes, unsupported clinical resources, non-final results, bounds and incompatible units remain archived and are reported as exclusions when relevant; they are not guessed from display labels. The clinical mapping uses a closed list of verified LOINC codes (reference: https://loinc.org/). It does not yet map every clinical code or FHIR resource format.
 
-The read is user-scoped and applies current deletion state. A single history request is bounded by the existing 10,000-confirmed-observation limit plus 10,000 applicable Health records / 32 MiB of projected clinical data. Exceeding a bound returns 413, never a silently truncated chart. Raw HealthKit binary archives are excluded from this query projection. Large archives that exceed these bounds require a subsequent paginated history implementation.
+The read is user-scoped and applies current deletion state. A single history request is bounded by the existing 10,000-submitted-observation limit plus 10,000 applicable Health records / 32 MiB of projected clinical data. Exceeding a bound returns 413, never a silently truncated chart. Raw HealthKit binary archives are excluded from this query projection. Large archives that exceed these bounds require a subsequent paginated history implementation.
 
 
 ### Persistent mobile sessions
@@ -280,12 +280,12 @@ and `10*9/L` as count-unit aliases of `10^9/L`. UCUM count notation reference:
 https://hl7.org/fhir/us/core/STU9/Observation-cbc-leukocytes.html .
 
 `POST /api/v1/browse/catalog` returns the authenticated user's available categories and entries, including laboratory
-items discovered from imported clinical Observations/components and confirmed
+items discovered from imported clinical Observations/components and submitted
 report metrics. `metrics/list` includes the built-in and account-defined laboratory metrics and the account's Apple Health clinical metrics for report review.
 
-`metrics/rename` saves the display name for an existing Blood Work metric in the account's Browse catalog. Apple Health and confirmed report results continue to reference the same `metric_id`. `metric.loinc` in the history response lists the associated codes with `code` and `official_name` (null if the bundled LOINC dictionary lacks the name).
+`metrics/rename` saves the display name for an existing Blood Work metric in the account's Browse catalog. Apple Health and submitted report results continue to reference the same `metric_id`. `metric.loinc` in the history response lists the associated codes with `code` and `official_name` (null if the bundled LOINC dictionary lacks the name).
 
-Confirming an explicit report mapping records the printed LOINC for the selected metric when available. A code already assigned to a different metric produces a review error and preserves the original assignment. OCR jobs read the current names, units, IDs and LOINC associations from the account's catalog when they start.
+Submitting an explicit report mapping records the printed LOINC for the selected metric when available. A code already assigned to a different metric produces a review error and preserves the original assignment. OCR jobs read the current names, units, IDs and LOINC associations from the account's catalog when they start.
 Clinical identity uses LOINC (across providers), otherwise provider-scoped coding;
 uncoded records retain individual identity rather than merging guessed labels.
 Dynamic `clinical:<digest>` IDs are accepted by `metrics/history/get` only when
@@ -310,7 +310,7 @@ not append them again to the clinical historical list. Unit derivation version:
 `lab-units-v5`.
 
 
-Storage schema 8 keeps Apple Health originals in `raw/<user>/apple_health/<category>.frames`.
+Storage schema 8 and later keep Apple Health originals in `raw/<user>/apple_health/<category>.frames`.
 Each frame is an unsigned 8-byte little-endian UTF-8 JSON length followed by the exact JSON bytes.
 Updates and deletion markers append frames; account deletion removes the user archive.
 Normal Apple batches validate conflicts once, write projections and original indexes in two bulk SQL statements, then flush each changed category once before committing.
@@ -394,7 +394,7 @@ Imports no longer require a source name. The Qwen3.8 OCR response (`laboratory-p
 
 ### Report marker identity and review summary
 
-Report observations include `resolved_metric_id`, derived from an explicit name/abbreviation catalog and compatible units when `payload.metric_id` is null. An explicit reviewed `payload.metric_id` takes precedence. Raw names, values, units and stored payloads are not rewritten. This read-time derivation applies to existing reports as well as new OCR candidates; only confirmed observations enter trends. Unknown or ambiguous names remain unmapped. No fuzzy similarity, token deletion, or LLM-assigned metric IDs are used. Specimen qualifiers, percentages versus absolute counts, free versus total analytes, and routine versus high-sensitivity assays stay separate. Report review can override automatic matching by selecting a catalog metric.
+Report observations include `resolved_metric_id`, derived from an explicit name/abbreviation catalog and compatible units when `payload.metric_id` is null. An explicit reviewed `payload.metric_id` takes precedence. Raw names, values, units and stored payloads are not rewritten. This read-time derivation applies to existing reports as well as new OCR candidates; only submitted observations enter trends. Unknown or ambiguous names remain unmapped. No fuzzy similarity, token deletion, or LLM-assigned metric IDs are used. Specimen qualifiers, percentages versus absolute counts, free versus total analytes, and routine versus high-sensitivity assays stay separate. Report review can override automatic matching by selecting a catalog metric.
 
 The catalog now has 118 report metrics. Known clinical LOINC mappings additionally include ALT 1742-6 and AST 1920-8; unknown clinical codes still use their existing code-derived identity, never guessed from display names. References: https://loinc.org/1742-6 and https://loinc.org/1920-8. Not every clinical code is mapped to the report catalog.
 
@@ -408,23 +408,23 @@ ID and keeps it pending. Pending report observations are persisted in
 OCR evidence and job progress remain in the main database. `reports/get` and
 `observations/history` combine the current records from both stores, preserving
 observation IDs, candidate keys and optimistic revision checks. Charts and analysis
-consume confirmed observations only.
+consume submitted observations only.
 
-`reports/review` with `status=confirmed` commits the reviewed payload to the main
-observation table. The Ready to Confirm batch sends only pending results with a verified mapping and no current review issues, up to 2,000 per request. Needs Review results are confirmed individually from their detail view. After commit, matching older drafts are removed. Reverting a result to pending first persists the draft, then removes the old official row. Cleanup is repeatable and runs at startup as well: a process
+`reports/submit` applies report metadata and observation edits in one transaction. An observation with `status=submitted` commits the reviewed payload to the main
+observation table. The Ready to Submit batch sends only pending results with a verified mapping and no current review issues, up to 2,000 per request. Needs Review results are submitted individually from their detail view. After commit, matching older drafts are removed. Reverting a result to pending first persists the draft, then removes the old official row. Cleanup is repeatable and runs at startup as well: a process
 interruption between copying and cleanup cannot delete the sole durable copy.
-Existing unconfirmed rows are moved into the draft store without re-running OCR. Previously rejected observations become pending, retain their payload and ID, and open in Needs Review.
+Existing pending rows are moved into the draft store without re-running OCR. Previously rejected observations become pending, retain their payload and ID, and open in Needs Review.
 
 A pending result saves an existing metric in `payload.metric_id`. With that ID
 unset, `payload.unmapped_choice` can be `{"kind":"unmapped"}` or
 `{"kind":"new","definition":{"name":"Example assay","standard_unit":"U/L"}}`.
-Both choices suppress automatic mapping. Confirming a valid new definition in
-the detail view creates its metric and confirms the result in the same transaction. The response
+Both choices suppress automatic mapping. Submitting a valid new definition in
+the detail view creates its metric and submits the result in the same transaction. The response
 includes `created_metrics` for any metrics created by the operation. OCR
 suggestions remain in the evidence fields during review.
 
 Account exports retain the same observations JSONL format and include both review
-states. Restore routes unconfirmed rows directly to `draft.sqlite`. Filesystem
+states. Restore routes pending rows directly to `draft.sqlite`. Filesystem
 backups must include both SQLite databases and their active WAL files, or be taken
 with the service stopped; `draft.sqlite` is persistent user data, not disposable tmp.
 
@@ -436,9 +436,9 @@ uses the positive IEEE-754 bit pattern as an internal sortable SQLite version ke
 This keeps fractional and integral dose revisions in one ordered domain without
 truncating fractions. Other types retain their existing integer version contract.
 
-Laboratory history returns all confirmed report results in `records`, including results without a collection date or a plottable numeric value. `points` remains the chart-only projection. Each historical record retains its original payload, report link and source identity. Missing dates and values display as an em dash. OCR prompt v4 explicitly extracts per-result dates, including Function Health dates printed at the right edge of each result row.
+Laboratory history returns all submitted report results in `records`, including results without a collection date or a plottable numeric value. `points` remains the chart-only projection. Each historical record retains its original payload, report link and source identity. Missing dates and values display as an em dash. OCR prompt v4 explicitly extracts per-result dates, including Function Health dates printed at the right edge of each result row.
 
-OCR completion requires a nonempty printed name, a valid collection date and a nonempty result for every nonadministrative result row. Text results such as Negative and Positive are valid. Missing or invalid required fields fail the extraction job; valid draft candidates and the complete provider output remain available for review. `reports/get.validation_issues` lists `page`, one-based `item_index`, `item_name`, `field` and `reason` for the latest OCR run. The iOS report shows these issues directly. This extraction check does not remove previously confirmed incomplete records from historical values.
+OCR completion requires a nonempty printed name, a valid collection date and a nonempty result for every nonadministrative result row. Text results such as Negative and Positive are valid. Missing or invalid required fields fail the extraction job; valid draft candidates and the complete provider output remain available for review. `reports/get.validation_issues` lists `page`, one-based `item_index`, `item_name`, `field` and `reason` for the latest OCR run. The iOS report shows these issues directly. This extraction check does not remove previously submitted incomplete records from historical values.
 
 First imports and rescans both build the OCR prompt from the current Browse metric names and available LOINC codes, including account-specific laboratory mappings and names.
 

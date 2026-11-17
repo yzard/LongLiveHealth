@@ -1,6 +1,6 @@
 use chrono::TimeZone;
 use longlivehealth::insights::{Context, Request, prevent_cvd, recovery, snapshot};
-use longlivehealth::reports::ReviewStatus;
+use longlivehealth::reports::ReportResultStatus;
 use serde_json::json;
 
 fn context() -> Context {
@@ -154,7 +154,7 @@ async fn empty_archive_reports_missing_inputs_without_inventing_risk_or_health_v
 async fn integrated_snapshot_uses_confirmed_labs_paired_pressure_and_report_ranges() {
     use longlivehealth::{
         health::ConnectionRequest,
-        reports::{ReviewItem, ReviewRequest},
+        reports::{ReportResultChange, ReportSubmission},
     };
     let (_directory, state) = crate::fixture().await;
     let user = crate::add_user(&state, "insights-inputs").await;
@@ -172,7 +172,7 @@ async fn integrated_snapshot_uses_confirmed_labs_paired_pressure_and_report_rang
             "<10",
             "nmol/L",
             "<75",
-            ReviewStatus::Confirmed,
+            ReportResultStatus::Submitted,
         ),
         (
             "total_cholesterol",
@@ -180,7 +180,7 @@ async fn integrated_snapshot_uses_confirmed_labs_paired_pressure_and_report_rang
             "200",
             "mg/dL",
             "<200",
-            ReviewStatus::Confirmed,
+            ReportResultStatus::Submitted,
         ),
         (
             "hdl_cholesterol",
@@ -188,7 +188,7 @@ async fn integrated_snapshot_uses_confirmed_labs_paired_pressure_and_report_rang
             "50",
             "mg/dL",
             ">40",
-            ReviewStatus::Confirmed,
+            ReportResultStatus::Submitted,
         ),
         (
             "egfr_creatinine_unspecified",
@@ -196,7 +196,7 @@ async fn integrated_snapshot_uses_confirmed_labs_paired_pressure_and_report_rang
             "90",
             "mL/min/1.73m2",
             ">60",
-            ReviewStatus::Confirmed,
+            ReportResultStatus::Submitted,
         ),
         (
             "apob",
@@ -204,7 +204,7 @@ async fn integrated_snapshot_uses_confirmed_labs_paired_pressure_and_report_rang
             "130",
             "mg/dL",
             "<90",
-            ReviewStatus::Confirmed,
+            ReportResultStatus::Submitted,
         ),
         (
             "total_cholesterol",
@@ -212,7 +212,7 @@ async fn integrated_snapshot_uses_confirmed_labs_paired_pressure_and_report_rang
             "310",
             "mg/dL",
             "<200",
-            ReviewStatus::Pending,
+            ReportResultStatus::Pending,
         ),
     ] {
         let mut payload = crate::observation_payload();
@@ -227,7 +227,7 @@ async fn integrated_snapshot_uses_confirmed_labs_paired_pressure_and_report_rang
             collected.clone()
         });
         payload.report_flag = None;
-        observations.push(ReviewItem {
+        observations.push(ReportResultChange {
             observation_id: None,
             expected_revision: None,
             status,
@@ -236,9 +236,9 @@ async fn integrated_snapshot_uses_confirmed_labs_paired_pressure_and_report_rang
     }
     state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report,
                 expected_revision: 1,
                 context: Some(

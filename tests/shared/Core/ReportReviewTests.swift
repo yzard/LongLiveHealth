@@ -21,14 +21,14 @@ import Testing
     manual["payload"]["source"]["quote"] = .string("")
     var missingDate = ready
     missingDate["payload"]["sampled_at"] = .null
-    let confirmed = ReportReview.change(ready, to: "confirmed")
+    let submitted = ReportReview.change(ready, to: "submitted")
     let rejected = ReportReview.change(ready, to: "rejected")
-    let eligible = [ready, uncertain, invalid, manual, missingDate, confirmed, rejected].filter {
-        ReportReview.canBulkConfirm($0)
+    let eligible = [ready, uncertain, invalid, manual, missingDate, submitted, rejected].filter {
+        ReportReview.canBulkSubmit($0)
     }
     #expect(eligible == [ready])
-    #expect(confirmed["payload"] == payload)
-    #expect(confirmed["expected_revision"] == .number(3))
+    #expect(submitted["payload"] == payload)
+    #expect(submitted["expected_revision"] == .number(3))
 }
 
 @Test func rescanQueuesOnlyUnblockedServerResolvedMappings() {
@@ -49,8 +49,8 @@ import Testing
     var mismatched = resolved
     mismatched["payload"]["metric_id"] = .string("another")
     let rows = [resolved, suggestion, blocked, deliberatelyUnmapped, mismatched]
-    #expect(rows.filter(ReportReview.canBulkConfirm) == [resolved])
-    #expect(ReportReview.change(resolved, to: "confirmed")["payload"] == resolved["payload"])
+    #expect(rows.filter(ReportReview.canBulkSubmit) == [resolved])
+    #expect(ReportReview.change(resolved, to: "submitted")["payload"] == resolved["payload"])
     #expect(resolved["status"] == .string("pending"))
 }
 
@@ -70,7 +70,7 @@ import Testing
         ])
     }
     var report = observations
-    #expect(report.filter(ReportReview.canBulkConfirm).isEmpty)
+    #expect(report.filter(ReportReview.canBulkSubmit).isEmpty)
     var withoutCandidate = observations[0]
     withoutCandidate["payload"]["ocr_metric_candidate"] = .null
     #expect(ReportReview.defaultMetricID(withoutCandidate) == nil)
@@ -85,7 +85,7 @@ import Testing
                 .object(["scope": .string("review"), "code": .string("inconsistent_subcount")])
             ])
         }
-        #expect(report.filter(ReportReview.canBulkConfirm).count == min(index + 1, 2))
+        #expect(report.filter(ReportReview.canBulkSubmit).count == min(index + 1, 2))
     }
     #expect(report.allSatisfy { $0["status"] == .string("pending") })
 
@@ -94,13 +94,13 @@ import Testing
         "definition": .object(["name": .string("New test"), "standard_unit": .string("1")])])
     #expect(ReportReview.defaultMetricID(newMetric) == nil)
     #expect(ReportReview.suggestedMetricID(newMetric) == nil)
-    #expect(ReportReview.canBulkConfirm(newMetric))
+    #expect(ReportReview.canBulkSubmit(newMetric))
     #expect(ReportReview.suggestionNote(newMetric, includeMetricName: true) == "Check the measurement identity")
     let advisory: JSONValue = .object(["code": .string("negative_with_unit")])
     newMetric["payload"]["raw_result"] = .string("Negative")
     newMetric["browse_issues"] = .array([advisory])
-    #expect(!ReportReview.canBulkConfirm(newMetric))
+    #expect(!ReportReview.canBulkSubmit(newMetric))
     newMetric["browse_issues"] = .array([])
     newMetric["payload"]["unmapped_choice"] = .object(["kind": .string("unmapped")])
-    #expect(!ReportReview.canBulkConfirm(newMetric))
+    #expect(!ReportReview.canBulkSubmit(newMetric))
 }

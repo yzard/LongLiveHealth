@@ -68,18 +68,18 @@ nonisolated final class LiveReportLayoutTests: XCTestCase {
             let report = app.buttons[id]
             guard report.isHittable else { continue }
             report.tap()
-            let ready = app.buttons["ready-to-confirm-results"]
+            let ready = app.buttons["ready-to-submit-results"]
             XCTAssertTrue(ready.waitForExistence(timeout: 15))
-            let confirm = app.buttons["confirm-all-results"]
-            XCTAssertEqual(confirm.label, "Confirm")
-            XCTAssertEqual(ready.frame.midY, confirm.frame.midY, accuracy: 2)
+            let submit = app.buttons["submit-all-results"]
+            XCTAssertEqual(submit.label, "Submit")
+            XCTAssertEqual(ready.frame.midY, submit.frame.midY, accuracy: 2)
             let review = app.staticTexts["Needs Review"]
             if review.exists { XCTAssertGreaterThan(review.frame.minY, ready.frame.maxY) }
             if ready.isEnabled {
                 ready.tap()
-                XCTAssertTrue(app.navigationBars["Ready to Confirm"].waitForExistence(timeout: 10))
+                XCTAssertTrue(app.navigationBars["Ready to Submit"].waitForExistence(timeout: 10))
                 foundReady = true
-                app.navigationBars["Ready to Confirm"].buttons.firstMatch.tap()
+                app.navigationBars["Ready to Submit"].buttons.firstMatch.tap()
             }
             app.navigationBars.firstMatch.buttons.firstMatch.tap()
         }

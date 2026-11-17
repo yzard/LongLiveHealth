@@ -1,5 +1,5 @@
-use crate::{add_user, archive, confirm, fixture};
-use longlivehealth::reports::ReviewStatus;
+use crate::{add_user, archive, fixture, submit};
+use longlivehealth::reports::ReportResultStatus;
 use std::io::Read;
 
 #[tokio::test]
@@ -7,19 +7,19 @@ async fn export_contains_raw_and_revisions_without_credentials_and_delete_cleans
     let (_directory, state) = fixture().await;
     let user = add_user(&state, "alice").await;
     let report = archive(&state, "alice").await;
-    confirm(&state, &user.user_id, &report).await;
+    submit(&state, &user.user_id, &report).await;
     state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            longlivehealth::reports::ReviewRequest {
+            longlivehealth::reports::ReportSubmission {
                 report_id: report.clone(),
                 expected_revision: 2,
                 context: None,
-                observations: vec![longlivehealth::reports::ReviewItem {
+                observations: vec![longlivehealth::reports::ReportResultChange {
                     observation_id: None,
                     expected_revision: None,
-                    status: ReviewStatus::Pending,
+                    status: ReportResultStatus::Pending,
                     payload: crate::observation_payload(),
                 }],
             },
@@ -65,7 +65,7 @@ async fn export_contains_raw_and_revisions_without_credentials_and_delete_cleans
     assert!(zip.by_name("sessions.jsonl").is_err());
     let manifest: serde_json::Value =
         serde_json::from_reader(zip.by_name("manifest.json").unwrap()).unwrap();
-    assert_eq!(manifest["database_schema_version"], 8);
+    assert_eq!(manifest["database_schema_version"], 9);
     drop(zip);
     let checker = std::process::Command::new("python3")
         .arg(concat!(
@@ -157,7 +157,14 @@ async fn export_contains_raw_and_revisions_without_credentials_and_delete_cleans
             .len(),
         2
     );
-    assert_eq!(restored_db.confirmed(&user.user_id).await.unwrap().len(), 1);
+    assert_eq!(
+        restored_db
+            .submitted_observations(&user.user_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
     restored_db.close().await;
     state
         .database

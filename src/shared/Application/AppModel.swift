@@ -117,7 +117,7 @@ final class AppModel {
             }
             guard !Task.isCancelled, session?.token == token else { throw CancellationError() }
             if path == "reports/delete" || path == "reports/rescan" || path == "reports/relate"
-                || (path == "reports/review" && !body["observations"].arrayValue.isEmpty) {
+                || (path == "reports/submit" && !body["observations"].arrayValue.isEmpty) {
                 reportDataRevision += 1
             }
             if path == "wellness/entries/save" || path == "wellness/entries/delete" {
@@ -318,7 +318,7 @@ final class AppModel {
                     if report["context"]["source_name"].stringValue != sourceName {
                         var context = report["context"] == .null ? JSONValue.object([:]) : report["context"]
                         context["source_name"] = .string(sourceName)
-                        _ = try await request("reports/review", body: .object([
+                        _ = try await request("reports/submit", body: .object([
                             "report_id": .string(reportID), "expected_revision": report["report"]["revision"],
                             "context": context, "observations": .array([])
                         ]))

@@ -12,7 +12,7 @@ import SkipFuse
     static func isProtectedDataError(_ error: Error) -> Bool { !MobilePlatform.protectedDataAvailable }
 
     func writeReviewedGlucose(_ observation: JSONValue, server: URL, userID: String, sampledAt: Date) async throws {
-        guard observation["status"] == .string("confirmed"), observation["payload"]["metric_id"] == .string("glucose"),
+        guard observation["status"] == .string("submitted"), observation["payload"]["metric_id"] == .string("glucose"),
               let value = Double(observation["payload"]["raw_result"].stringValue), value.isFinite, value >= 0 else { throw APIError.invalidResponse }
         _ = try await AndroidSystem.perform("health.writeGlucose", input: .object([
             "value": .number(value), "unit": observation["payload"]["raw_unit"], "at": .number(sampledAt.timeIntervalSince1970),

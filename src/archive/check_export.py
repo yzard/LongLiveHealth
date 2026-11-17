@@ -127,7 +127,7 @@ def audit(path, max_bytes):
         require(manifest.get('format') == 'longlivehealth-export', 'Unknown archive format')
         require(type(manifest.get('version')) is int and manifest['version'] == 1, 'Only export version 1 is supported')
         version = manifest['version']
-        require(manifest.get('database_schema_version') == 8, 'Unknown database schema')
+        require(manifest.get('database_schema_version') in (8, 9), 'Unknown database schema')
         inventory = manifest.get('members')
         require(
             isinstance(inventory, dict) and set(inventory) == names - {'manifest.json'},

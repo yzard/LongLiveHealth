@@ -28,7 +28,7 @@ pub async fn mock() -> (String, tokio::task::JoinHandle<()>) {
         );
         if request["messages"][0]["content"]
             .as_str()
-            .is_some_and(|prompt| prompt.contains("Review confirmed lipid"))
+            .is_some_and(|prompt| prompt.contains("Review submitted lipid"))
         {
             let input: Value =
                 serde_json::from_str(request["messages"][1]["content"].as_str().unwrap()).unwrap();

@@ -40,7 +40,7 @@ class CompactStorageTests(unittest.TestCase):
         raw.write_text(payload)
         connection.execute('INSERT INTO health_records VALUES (?,?,?,?,?,?,?,?,?,?,?)', (owner, 'apple_health', 'watch', 'sample', 'steps', 1, 2, 1, 0, json.dumps(compact_storage.check_export.health_projection(record)), 'revision'))
         connection.execute('INSERT INTO health_originals (user_id,platform,source_id,record_id,raw_id,raw_path,received_at) VALUES (?,?,?,?,?,?,?)', (owner, 'apple_health', 'watch', 'sample', 'revision', relative, 1))
-        connection.execute('PRAGMA user_version=8')
+        connection.execute('PRAGMA user_version=9')
         connection.commit()
         connection.close()
         return db, raw, payload

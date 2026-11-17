@@ -112,7 +112,7 @@ CREATE TABLE observations (
     user_id TEXT NOT NULL,
     report_id TEXT NOT NULL,
     current_revision INTEGER NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed')),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'submitted')),
     payload_json TEXT NOT NULL DEFAULT '{}',
     updated_at INTEGER NOT NULL DEFAULT 0,
     candidate_key TEXT,

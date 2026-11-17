@@ -27,7 +27,18 @@ public nonisolated struct ResponseCache: Sendable {
         return SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined() + ".json"
     }
     public func load(_ path: String, body: JSONValue) throws -> JSONValue? {
-        try archive.load(JSONValue.self, name: Self.key(path, body: body))
+        let cached = try archive.load(JSONValue.self, name: Self.key(path, body: body))
+        guard path == "reports/get", var cached else { return cached }
+        let observations = cached["result"]["observations"].arrayValue
+        if observations.contains(where: { $0["status"] == .string("confirmed") }) {
+            cached["result"]["observations"] = .array(observations.map { observation in
+                guard observation["status"] == .string("confirmed") else { return observation }
+                var updated = observation
+                updated["status"] = .string("submitted")
+                return updated
+            })
+        }
+        return cached
     }
     @concurrent public func save(_ result: JSONValue, path: String, body: JSONValue) async throws {
         try archive.save(.object(["saved_at": .number(Date().timeIntervalSince1970), "result": result]) as JSONValue, name: Self.key(path, body: body))

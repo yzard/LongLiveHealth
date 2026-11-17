@@ -49,8 +49,8 @@ pub fn router(upload_limit: usize) -> Router<AppState> {
             post(get_extraction_output),
         )
         .route(
-            "/api/v1/reports/review",
-            post(review_report).layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
+            "/api/v1/reports/submit",
+            post(submit_report).layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
         )
         .route("/api/v1/reports/relate", post(relate_reports))
         .route("/api/v1/metrics/list", post(list_metrics))
@@ -192,15 +192,15 @@ async fn get_extraction_output(
     .await
 }
 
-async fn review_report(
+async fn submit_report(
     State(state): State<AppState>,
     current: CurrentUser,
-    Json(request): Json<crate::reports::ReviewRequest>,
+    Json(request): Json<crate::reports::ReportSubmission>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let _guard = state.file_mutation.lock().await;
     let response = state
         .database
-        .review_with_analysis(
+        .submit_report_changes_with_analysis(
             &current.user.user_id,
             request,
             state.config.analysis_enabled,
@@ -250,7 +250,7 @@ async fn rescan_report(
 ) -> Result<Json<serde_json::Value>, AppError> {
     if request.replace_results != Some(true) {
         return Err(AppError::Invalid(
-            "Update the app to confirm that rescanning deletes all existing results",
+            "Update the app to rescan and replace all existing results",
         ));
     }
     let _guard = state.file_mutation.lock().await;

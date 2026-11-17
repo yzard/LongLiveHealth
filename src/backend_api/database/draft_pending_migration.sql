@@ -17,7 +17,7 @@ CREATE INDEX observations_report ON observations (user_id, report_id);
 INSERT INTO observations
 SELECT observation_id,user_id,report_id,current_revision + CASE WHEN status='rejected' THEN 1 ELSE 0 END,'pending',
        CASE WHEN status='rejected'
-            THEN json_set(payload_json,'$.ocr_mapping_note','Previously excluded. Review before confirming. ' || coalesce(json_extract(payload_json,'$.ocr_mapping_note'),''))
+            THEN json_set(payload_json,'$.ocr_mapping_note','Previously excluded. Review before submitting. ' || coalesce(json_extract(payload_json,'$.ocr_mapping_note'),''))
             ELSE payload_json END,
        updated_at,candidate_key,ocr_revision
 FROM observations_v2;

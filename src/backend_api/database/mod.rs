@@ -71,7 +71,7 @@ impl Database {
         let version: i64 = sqlx::query_scalar(queries::SCHEMA_VERSION)
             .fetch_one(&mut *transaction)
             .await?;
-        if version != 0 && version != 8 {
+        if !matches!(version, 0 | 8 | 9) {
             return Err(AppError::Conflict(
                 "Run the offline storage migration before starting this server",
             ));
@@ -82,6 +82,14 @@ impl Database {
                 .await?;
         } else {
             sqlx::query(queries::CREATE_CUSTOM_LAB_METRICS)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        if version == 8 {
+            sqlx::raw_sql(include_str!("report_submission_migration.sql"))
+                .execute(&mut *transaction)
+                .await?;
+            sqlx::query(queries::REVIEW_OBSERVATIONS_VIEW)
                 .execute(&mut *transaction)
                 .await?;
         }

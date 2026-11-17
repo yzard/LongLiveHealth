@@ -1,4 +1,4 @@
-use longlivehealth::reports::ReviewStatus;
+use longlivehealth::reports::ReportResultStatus;
 use longlivehealth::wellness::{DayRequest, algorithms::*, select_metric};
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -402,7 +402,7 @@ fn clinical_age_matches_independent_probability_space_reference() {
 #[tokio::test]
 async fn clinical_model_requires_complete_reviewed_collection_and_explicit_research_use() {
     use longlivehealth::{
-        reports::{ReviewItem, ReviewRequest},
+        reports::{ReportResultChange, ReportSubmission},
         wellness::clinical::ClinicalRequest,
     };
     let (_directory, state) = crate::fixture().await;
@@ -455,10 +455,10 @@ async fn clinical_model_requires_complete_reviewed_collection_and_explicit_resea
             payload.raw_name = metric.into();
             payload.raw_result = value.into();
             payload.raw_unit = Some(unit.into());
-            ReviewItem {
+            ReportResultChange {
                 observation_id: None,
                 expected_revision: None,
-                status: ReviewStatus::Confirmed,
+                status: ReportResultStatus::Submitted,
                 payload,
             }
         })
@@ -471,9 +471,9 @@ async fn clinical_model_requires_complete_reviewed_collection_and_explicit_resea
         .revision;
     state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report.clone(),
                 expected_revision: revision,
                 context: None,

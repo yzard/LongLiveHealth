@@ -451,7 +451,7 @@ pub(crate) async fn load_health<'a>(
 pub async fn browse(database: &Database, user_id: &str) -> Result<Value, AppError> {
     let records = load_health(&database.pool, user_id, "").await?;
     let metadata = database.lab_metric_metadata(user_id).await?;
-    let reports = database.confirmed(user_id).await?;
+    let reports = database.submitted_observations(user_id).await?;
     let mut custom_metrics = database.custom_metrics(user_id).await?;
     custom_metrics.extend(metadata.named_report_metrics());
     database

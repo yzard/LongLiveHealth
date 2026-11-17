@@ -28,7 +28,7 @@ impl Database {
         }
         let revision = self.data_revision(user).await?;
         self.report_summary(user, &request.report_id).await?;
-        let observations = self.confirmed(user).await?;
+        let observations = self.submitted_observations(user).await?;
         let wanted = [
             "albumin",
             "creatinine",

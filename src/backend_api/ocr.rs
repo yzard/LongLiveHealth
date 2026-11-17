@@ -104,7 +104,7 @@ pub(crate) async fn database_metrics(
     database: &crate::database::Database,
     user_id: &str,
 ) -> Result<Arc<MetricCatalog>, AppError> {
-    // A confirmation writes the definition and its LOINC link together.
+    // Submitting a result writes the definition and its LOINC link together.
     let mut snapshot = database.pool.begin().await?;
     let metadata = crate::lab_metric_metadata::Metadata::load(&mut snapshot, user_id).await?;
     let stored: Vec<CustomMetric> = sqlx::query_as(crate::database::queries::CUSTOM_LAB_METRICS)

@@ -13,7 +13,7 @@
       }
     },
     "lab_metric_loinc_links": {
-      "meaning": "Owner-confirmed LOINC links used to match future report observations.",
+      "meaning": "Owner-submitted LOINC links used to match future report observations.",
       "fields": {
         "user_id": "Owner account identifier.",
         "loinc_code": "Reported LOINC test code.",
@@ -73,7 +73,7 @@
       }
     },
     "extraction_outputs": {
-      "meaning": "Complete per-page provider responses, including failed or unconfirmed extraction evidence.",
+      "meaning": "Complete per-page provider responses, including failed extraction evidence and draft results.",
       "fields": {
         "user_id": "Archive owner identifier. Every exported row belongs to the manifest owner.",
         "report_id": "Identifier of the report that owns this row.",

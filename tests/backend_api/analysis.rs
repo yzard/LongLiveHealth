@@ -1,12 +1,12 @@
-use crate::{add_user, archive, confirm, fixture};
-use longlivehealth::reports::ReviewStatus;
+use crate::{add_user, archive, fixture, submit};
+use longlivehealth::reports::ReportResultStatus;
 
 #[tokio::test]
-async fn analysis_uses_confirmed_snapshot_and_becomes_stale_after_correction() {
+async fn analysis_uses_submitted_snapshot_and_becomes_stale_after_correction() {
     let (_directory, mut state) = fixture().await;
     let user = add_user(&state, "alice").await;
     let report = archive(&state, "alice").await;
-    let observation = confirm(&state, &user.user_id, &report).await;
+    let observation = submit(&state, &user.user_id, &report).await;
     let (address, server) = super::provider::mock().await;
     let mut config = (*state.config).clone();
     config.analysis_enabled = true;
@@ -53,16 +53,16 @@ async fn analysis_uses_confirmed_snapshot_and_becomes_stale_after_correction() {
     changed.raw_result = "110".into();
     state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            longlivehealth::reports::ReviewRequest {
+            longlivehealth::reports::ReportSubmission {
                 report_id: report,
                 expected_revision: 2,
                 context: None,
-                observations: vec![longlivehealth::reports::ReviewItem {
+                observations: vec![longlivehealth::reports::ReportResultChange {
                     observation_id: Some(observation),
                     expected_revision: Some(1),
-                    status: ReviewStatus::Confirmed,
+                    status: ReportResultStatus::Submitted,
                     payload: changed,
                 }],
             },
@@ -76,7 +76,7 @@ async fn analysis_uses_confirmed_snapshot_and_becomes_stale_after_correction() {
 }
 
 #[tokio::test]
-async fn report_confirmation_persists_one_background_snapshot_across_restart() {
+async fn report_submission_persists_one_background_snapshot_across_restart() {
     use axum::http::StatusCode;
     use longlivehealth::{analysis::prepare_next_report_analysis, app::create_application};
     use serde_json::json;
@@ -92,7 +92,7 @@ async fn report_confirmation_persists_one_background_snapshot_across_restart() {
     let change = |status: &str| json!({"status":status,"payload":crate::observation_payload()});
     let (status, draft) = crate::request(
         &router,
-        "/api/v1/reports/review",
+        "/api/v1/reports/submit",
         Some(&token),
         json!({"report_id":report,"expected_revision":1,"observations":[change("pending")]}),
     )
@@ -103,9 +103,9 @@ async fn report_confirmation_persists_one_background_snapshot_across_restart() {
 
     let (status, rejected) = crate::request(
         &router,
-        "/api/v1/reports/review",
+        "/api/v1/reports/submit",
         Some(&token),
-        json!({"report_id":report,"expected_revision":1,"observations":[change("confirmed")]}),
+        json!({"report_id":report,"expected_revision":1,"observations":[change("submitted")]}),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{rejected}");
@@ -113,23 +113,23 @@ async fn report_confirmation_persists_one_background_snapshot_across_restart() {
 
     let (status, single) = crate::request(
         &router,
-        "/api/v1/reports/review",
+        "/api/v1/reports/submit",
         Some(&token),
-        json!({"report_id":report,"expected_revision":2,"observations":[change("confirmed")]}),
+        json!({"report_id":report,"expected_revision":2,"observations":[change("submitted")]}),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{single}");
     assert_eq!(single["analysis_trigger"]["status"], "queued");
 
-    let (status, batch) = crate::request(&router, "/api/v1/reports/review", Some(&token),
-        json!({"report_id":report,"expected_revision":3,"observations":[change("confirmed"),change("confirmed")]})).await;
+    let (status, batch) = crate::request(&router, "/api/v1/reports/submit", Some(&token),
+        json!({"report_id":report,"expected_revision":3,"observations":[change("submitted"),change("submitted")]})).await;
     assert_eq!(status, StatusCode::OK, "{batch}");
     assert_eq!(batch["analysis_trigger"]["status"], "queued");
     let observations = batch["observations"].as_array().unwrap();
     assert_eq!(
         observations
             .iter()
-            .filter(|item| item["status"] == "confirmed")
+            .filter(|item| item["status"] == "submitted")
             .count(),
         3
     );
@@ -183,7 +183,7 @@ fn nonexistent_evidence_cannot_be_published() {
 fn provider_projection_preserves_lab_values_and_all_daily_sources() {
     use serde_json::json;
     let input = json!({"provider":{"api_key":"must-not-be-forwarded"},"evidence":[
-        {"id":"observation:one:1","kind":"confirmed_report_observation","value":{
+        {"id":"observation:one:1","kind":"submitted_report_observation","value":{
             "observation_id":"one","report_id":"report","resolved_metric_id":"apob",
             "payload":{"raw_name":"ApoB","raw_result":"<120","raw_unit":"mg/dL","sampled_at":"2026-07-30","reference_range":"<90","report_flag":"Above Range","notes":"calc","source":{"quote":"repeated report text"}},
             "interpretation":{"result":{"value":120}}}},

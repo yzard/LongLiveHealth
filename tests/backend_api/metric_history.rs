@@ -1,10 +1,10 @@
 use crate::{add_user, archive, fixture, observation_payload};
 use base64::{Engine, engine::general_purpose::STANDARD};
-use longlivehealth::reports::ReviewStatus;
+use longlivehealth::reports::ReportResultStatus;
 use longlivehealth::{
     health::{ConnectionRequest, HealthRecordInput, SyncRequest},
     metric_history::{HistoryRequest, history},
-    reports::{ReviewItem, ReviewRequest},
+    reports::{ReportResultChange, ReportSubmission},
 };
 use serde_json::{Value, json};
 
@@ -35,14 +35,14 @@ async fn renamed_report_metrics_are_suggested_by_loinc_or_original_identity_and_
         payload.raw_unit = unit.map(str::to_owned);
         payload.sampled_at = Some(format!("{year}-10-20"));
         payload.metric_id = None;
-        ReviewItem {
+        ReportResultChange {
             observation_id: None,
             expected_revision: None,
             status,
             payload,
         }
     };
-    let request = |report_id: &str, observations| ReviewRequest {
+    let request = |report_id: &str, observations| ReportSubmission {
         report_id: report_id.into(),
         expected_revision: 1,
         context: Some(serde_json::from_value(json!({"source_name":"Fixture Laboratory"})).unwrap()),
@@ -50,17 +50,17 @@ async fn renamed_report_metrics_are_suggested_by_loinc_or_original_identity_and_
     };
     state
         .database
-        .review(
+        .submit_report_changes(
             &alice.user_id,
             request(
                 &first,
                 vec![
-                    row("pH (50560-2)", "2018", None, ReviewStatus::Confirmed),
+                    row("pH (50560-2)", "2018", None, ReportResultStatus::Submitted),
                     row(
                         "Synthetic particle ratio",
                         "2018",
                         Some("U/L"),
-                        ReviewStatus::Confirmed,
+                        ReportResultStatus::Submitted,
                     ),
                 ],
             ),
@@ -109,19 +109,29 @@ async fn renamed_report_metrics_are_suggested_by_loinc_or_original_identity_and_
         .await
         .unwrap();
     let second_report = db
-        .review(
+        .submit_report_changes(
             &alice.user_id,
             request(
                 &second,
                 vec![
-                    row("Urine pH (50560-2)", "2019", None, ReviewStatus::Pending),
+                    row(
+                        "Urine pH (50560-2)",
+                        "2019",
+                        None,
+                        ReportResultStatus::Pending,
+                    ),
                     row(
                         "Synthetic particle ratio",
                         "2019",
                         Some("U/L"),
-                        ReviewStatus::Pending,
+                        ReportResultStatus::Pending,
                     ),
-                    row("pH (50560-2)", "2019", Some("mg/dL"), ReviewStatus::Pending),
+                    row(
+                        "pH (50560-2)",
+                        "2019",
+                        Some("mg/dL"),
+                        ReportResultStatus::Pending,
+                    ),
                 ],
             ),
         )
@@ -151,17 +161,17 @@ async fn renamed_report_metrics_are_suggested_by_loinc_or_original_identity_and_
             .iter()
             .any(|issue| issue["code"] == "unsupported_unit")
     );
-    let confirmed = db
-        .review(
+    let submitted = db
+        .submit_report_changes(
             &alice.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: second,
                 expected_revision: second_report["report"]["revision"].as_i64().unwrap(),
                 context: None,
-                observations: vec![ReviewItem {
+                observations: vec![ReportResultChange {
                     observation_id: urine["observation_id"].as_str().map(str::to_owned),
                     expected_revision: urine["revision"].as_i64(),
-                    status: ReviewStatus::Confirmed,
+                    status: ReportResultStatus::Submitted,
                     payload: serde_json::from_value({
                         let mut payload = urine["payload"].clone();
                         payload["metric_id"] = aliases[0].0.clone();
@@ -174,11 +184,11 @@ async fn renamed_report_metrics_are_suggested_by_loinc_or_original_identity_and_
         .await
         .unwrap();
     assert!(
-        confirmed["observations"]
+        submitted["observations"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|row| row["status"] == "confirmed" && row["resolved_metric_id"] == aliases[0].0)
+            .any(|row| row["status"] == "submitted" && row["resolved_metric_id"] == aliases[0].0)
     );
     let series = history(
         &db,
@@ -271,16 +281,16 @@ async fn conflicting_history_units_disable_the_chart_and_list_all_reported_units
         payload.sampled_at = Some(format!("2026-08-{:02}", index + 1));
         state
             .database
-            .review(
+            .submit_report_changes(
                 &alice.user_id,
-                ReviewRequest {
+                ReportSubmission {
                     report_id: archive(&state, "alice").await,
                     expected_revision: 1,
                     context: None,
-                    observations: vec![ReviewItem {
+                    observations: vec![ReportResultChange {
                         observation_id: None,
                         expected_revision: None,
-                        status: ReviewStatus::Confirmed,
+                        status: ReportResultStatus::Submitted,
                         payload,
                     }],
                 },
@@ -318,23 +328,23 @@ async fn metric_history_preserves_three_sources_normalizes_and_isolates_users() 
         let report = archive(&state, "alice").await;
         let response = state
             .database
-            .review(
+            .submit_report_changes(
                 &alice.user_id,
-                ReviewRequest {
+                ReportSubmission {
                     report_id: report,
                     expected_revision: 1,
                     context: Some(serde_json::from_value(json!({"source_name":name})).unwrap()),
                     observations: vec![
-                        ReviewItem {
+                        ReportResultChange {
                             observation_id: None,
                             expected_revision: None,
-                            status: ReviewStatus::Confirmed,
+                            status: ReportResultStatus::Submitted,
                             payload: observation_payload(),
                         },
-                        ReviewItem {
+                        ReportResultChange {
                             observation_id: None,
                             expected_revision: None,
-                            status: ReviewStatus::Pending,
+                            status: ReportResultStatus::Pending,
                             payload: observation_payload(),
                         },
                     ],
@@ -464,9 +474,9 @@ async fn report_source_rejects_empty_or_reserved_names_without_changing_revision
     for name in [" ", "Apple Health", "clinic\nother"] {
         let result = state
             .database
-            .review(
+            .submit_report_changes(
                 &alice.user_id,
-                ReviewRequest {
+                ReportSubmission {
                     report_id: report.clone(),
                     expected_revision: 1,
                     observations: vec![],
@@ -502,16 +512,16 @@ async fn quantity_glucose_and_clinical_component_share_report_units_and_dates() 
     payload.raw_unit = Some("mmol/L".into());
     state
         .database
-        .review(
+        .submit_report_changes(
             &alice.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report.clone(),
                 expected_revision: 1,
                 context: Some(serde_json::from_value(json!({"source_name":"Clinic"})).unwrap()),
-                observations: vec![ReviewItem {
+                observations: vec![ReportResultChange {
                     observation_id: None,
                     expected_revision: None,
-                    status: ReviewStatus::Confirmed,
+                    status: ReportResultStatus::Submitted,
                     payload,
                 }],
             },
@@ -568,9 +578,9 @@ async fn quantity_glucose_and_clinical_component_share_report_units_and_dates() 
     }
     state
         .database
-        .review(
+        .submit_report_changes(
             &alice.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report,
                 expected_revision: 2,
                 observations: vec![],
@@ -1037,16 +1047,16 @@ async fn report_aliases_share_history_and_browse_without_rewriting_stored_eviden
         payload.metric_id = None;
         let result = state
             .database
-            .review(
+            .submit_report_changes(
                 &user.user_id,
-                ReviewRequest {
+                ReportSubmission {
                     report_id: report,
                     expected_revision: 1,
                     context: Some(serde_json::from_value(json!({"source_name":source})).unwrap()),
-                    observations: vec![ReviewItem {
+                    observations: vec![ReportResultChange {
                         observation_id: None,
                         expected_revision: None,
-                        status: ReviewStatus::Confirmed,
+                        status: ReportResultStatus::Submitted,
                         payload,
                     }],
                 },
@@ -1103,16 +1113,16 @@ async fn browse_unifies_sodium_sources_and_excludes_workflow_fields() {
     payload.metric_id = None;
     state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report,
                 expected_revision: 1,
                 context: None,
-                observations: vec![ReviewItem {
+                observations: vec![ReportResultChange {
                     observation_id: None,
                     expected_revision: None,
-                    status: ReviewStatus::Confirmed,
+                    status: ReportResultStatus::Submitted,
                     payload,
                 }],
             },
@@ -1236,9 +1246,9 @@ async fn report_history_keeps_undated_and_non_numeric_results() {
     text.raw_result = "Not available".into();
     state
         .database
-        .review(
+        .submit_report_changes(
             &alice.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report,
                 expected_revision: 1,
                 context: Some(
@@ -1246,10 +1256,10 @@ async fn report_history_keeps_undated_and_non_numeric_results() {
                 ),
                 observations: vec![undated, text]
                     .into_iter()
-                    .map(|payload| ReviewItem {
+                    .map(|payload| ReportResultChange {
                         observation_id: None,
                         expected_revision: None,
-                        status: ReviewStatus::Confirmed,
+                        status: ReportResultStatus::Submitted,
                         payload,
                     })
                     .collect(),
@@ -1275,7 +1285,7 @@ async fn report_history_keeps_undated_and_non_numeric_results() {
 }
 
 #[tokio::test]
-async fn every_function_health_marker_is_available_in_browse_after_confirmation() {
+async fn every_function_health_marker_is_available_in_browse_after_submission() {
     let (_directory, state) = crate::fixture().await;
     let user = crate::add_user(&state, "function-labs").await;
     let report = crate::archive(&state, "function-labs").await;
@@ -1296,18 +1306,18 @@ async fn every_function_health_marker_is_available_in_browse_after_confirmation(
         payload.raw_unit = unit.map(str::to_owned);
         payload.raw_result = if unit.is_some() { "1" } else { "Negative" }.into();
         payload.metric_id = None;
-        observations.push(longlivehealth::reports::ReviewItem {
+        observations.push(longlivehealth::reports::ReportResultChange {
             observation_id: None,
             expected_revision: None,
-            status: ReviewStatus::Confirmed,
+            status: ReportResultStatus::Submitted,
             payload,
         });
     }
     state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            longlivehealth::reports::ReviewRequest {
+            longlivehealth::reports::ReportSubmission {
                 report_id: report,
                 expected_revision: 1,
                 context: None,
@@ -1360,16 +1370,16 @@ async fn pdf_lab_codes_and_names_share_history_without_rewriting_evidence() {
         payload.source.quote = format!("{name} 1.5 {unit}");
         let document = state
             .database
-            .review(
+            .submit_report_changes(
                 &alice.user_id,
-                ReviewRequest {
+                ReportSubmission {
                     report_id: report,
                     expected_revision: 1,
                     context: Some(serde_json::from_value(json!({"source_name": source})).unwrap()),
-                    observations: vec![ReviewItem {
+                    observations: vec![ReportResultChange {
                         observation_id: None,
                         expected_revision: None,
-                        status: ReviewStatus::Confirmed,
+                        status: ReportResultStatus::Submitted,
                         payload,
                     }],
                 },
@@ -1427,17 +1437,17 @@ fn numeric_suffixes_preserve_qualifiers_and_reject_code_conflicts() {
 }
 
 #[tokio::test]
-async fn browse_keeps_confirmed_unmapped_results_searchable_with_original_history() {
+async fn browse_keeps_submitted_unmapped_results_searchable_with_original_history() {
     let (_directory, state) = fixture().await;
     let alice = add_user(&state, "alice").await;
     let bob = add_user(&state, "bob").await;
     let mut report_ids = Vec::new();
     for (index, (source, unit, value, status)) in [
-        ("Lab A", None, "6.0", ReviewStatus::Confirmed),
-        ("Lab A", None, "<6.5", ReviewStatus::Confirmed),
-        ("Lab A", Some("mmol/L"), "7", ReviewStatus::Confirmed),
-        ("Lab B", None, "8", ReviewStatus::Confirmed),
-        ("Lab A", None, "9", ReviewStatus::Pending),
+        ("Lab A", None, "6.0", ReportResultStatus::Submitted),
+        ("Lab A", None, "<6.5", ReportResultStatus::Submitted),
+        ("Lab A", Some("mmol/L"), "7", ReportResultStatus::Submitted),
+        ("Lab B", None, "8", ReportResultStatus::Submitted),
+        ("Lab A", None, "9", ReportResultStatus::Pending),
     ]
     .into_iter()
     .enumerate()
@@ -1451,13 +1461,13 @@ async fn browse_keeps_confirmed_unmapped_results_searchable_with_original_histor
         payload.metric_id = None;
         let result = state
             .database
-            .review(
+            .submit_report_changes(
                 &alice.user_id,
-                ReviewRequest {
+                ReportSubmission {
                     report_id: report_id.clone(),
                     expected_revision: 1,
                     context: Some(serde_json::from_value(json!({"source_name":source})).unwrap()),
-                    observations: vec![ReviewItem {
+                    observations: vec![ReportResultChange {
                         observation_id: None,
                         expected_revision: None,
                         status,
@@ -1544,18 +1554,18 @@ async fn browse_hides_drafts_but_reports_keep_review_issues() {
         payload.raw_unit = Some("mIU/L".into());
         payload.metric_id = None;
         payload.ocr_mapping_note = note.map(str::to_owned);
-        items.push(ReviewItem {
+        items.push(ReportResultChange {
             observation_id: None,
             expected_revision: None,
-            status: ReviewStatus::Pending,
+            status: ReportResultStatus::Pending,
             payload,
         });
     }
     let response = state
         .database
-        .review(
+        .submit_report_changes(
             &alice.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report.clone(),
                 expected_revision: 1,
                 context: None,
@@ -1622,18 +1632,18 @@ async fn browse_hides_drafts_but_reports_keep_review_issues() {
     let mut payload: longlivehealth::reports::ObservationPayload =
         serde_json::from_value(uncertain["payload"].clone()).unwrap();
     payload.metric_id = Some("tsh".into());
-    let confirmed = state
+    let submitted = state
         .database
-        .review(
+        .submit_report_changes(
             &alice.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report.clone(),
                 expected_revision: response["report"]["revision"].as_i64().unwrap(),
                 context: None,
-                observations: vec![ReviewItem {
+                observations: vec![ReportResultChange {
                     observation_id: Some(id.into()),
                     expected_revision: Some(1),
-                    status: ReviewStatus::Confirmed,
+                    status: ReportResultStatus::Submitted,
                     payload: payload.clone(),
                 }],
             },
@@ -1666,16 +1676,16 @@ async fn browse_hides_drafts_but_reports_keep_review_issues() {
     assert_eq!(catalog["entries"][0]["kind"], "tsh");
     state
         .database
-        .review(
+        .submit_report_changes(
             &alice.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report,
-                expected_revision: confirmed["report"]["revision"].as_i64().unwrap(),
+                expected_revision: submitted["report"]["revision"].as_i64().unwrap(),
                 context: None,
-                observations: vec![ReviewItem {
+                observations: vec![ReportResultChange {
                     observation_id: Some(id.into()),
                     expected_revision: Some(2),
-                    status: ReviewStatus::Pending,
+                    status: ReportResultStatus::Pending,
                     payload,
                 }],
             },
@@ -1803,16 +1813,16 @@ async fn browse_unifies_total_vitamin_d_without_combining_its_fractions() {
         let report = archive(&state, "vitamin-d-browse").await;
         let response = state
             .database
-            .review(
+            .submit_report_changes(
                 &user.user_id,
-                ReviewRequest {
+                ReportSubmission {
                     report_id: report,
                     expected_revision: 1,
                     context: Some(serde_json::from_value(json!({"source_name":source})).unwrap()),
-                    observations: vec![ReviewItem {
+                    observations: vec![ReportResultChange {
                         observation_id: None,
                         expected_revision: None,
-                        status: ReviewStatus::Confirmed,
+                        status: ReportResultStatus::Submitted,
                         payload,
                     }],
                 },
@@ -2022,10 +2032,10 @@ async fn blood_count_aliases_join_pdf_and_clinical_history() {
         payload.raw_name = printed.into();
         payload.raw_result = "1".into();
         payload.raw_unit = Some(unit.into());
-        observations.push(ReviewItem {
+        observations.push(ReportResultChange {
             observation_id: None,
             expected_revision: None,
-            status: ReviewStatus::Confirmed,
+            status: ReportResultStatus::Submitted,
             payload,
         });
     }
@@ -2045,9 +2055,9 @@ async fn blood_count_aliases_join_pdf_and_clinical_history() {
         .unwrap();
     state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report,
                 expected_revision: 1,
                 context: None,
@@ -2151,16 +2161,16 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
 
     state
         .database
-        .review(
+        .submit_report_changes(
             &alice.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report_id.clone(),
                 expected_revision: 1,
                 context: None,
-                observations: vec![ReviewItem {
+                observations: vec![ReportResultChange {
                     observation_id: None,
                     expected_revision: None,
-                    status: ReviewStatus::Confirmed,
+                    status: ReportResultStatus::Submitted,
                     payload: payload.clone(),
                 }],
             },
@@ -2252,16 +2262,16 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
     payload.raw_name = "Alternate printed name (1968-7)".into();
     state
         .database
-        .review(
+        .submit_report_changes(
             &alice.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report_id.clone(),
                 expected_revision: 2,
                 context: None,
-                observations: vec![ReviewItem {
+                observations: vec![ReportResultChange {
                     observation_id: None,
                     expected_revision: None,
-                    status: ReviewStatus::Pending,
+                    status: ReportResultStatus::Pending,
                     payload: payload.clone(),
                 }],
             },
@@ -2277,11 +2287,11 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
     assert_eq!(pending.resolved_metric_id.as_deref(), Some(id.as_str()));
     assert_eq!(pending.display_name, "Alternate printed name");
 
-    let update = |status: ReviewStatus, revision, payload| ReviewRequest {
+    let update = |status: ReportResultStatus, revision, payload| ReportSubmission {
         report_id: report_id.clone(),
         expected_revision: revision,
         context: None,
-        observations: vec![ReviewItem {
+        observations: vec![ReportResultChange {
             observation_id: Some(pending.observation_id.clone()),
             expected_revision: Some(revision - 2),
             status,
@@ -2292,15 +2302,18 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
     conflict.metric_id = Some("total_bilirubin".into());
     state
         .database
-        .review(
+        .submit_report_changes(
             &alice.user_id,
-            update(ReviewStatus::Pending, 3, conflict.clone()),
+            update(ReportResultStatus::Pending, 3, conflict.clone()),
         )
         .await
         .unwrap();
     let rejected = state
         .database
-        .review(&alice.user_id, update(ReviewStatus::Confirmed, 4, conflict))
+        .submit_report_changes(
+            &alice.user_id,
+            update(ReportResultStatus::Submitted, 4, conflict),
+        )
         .await
         .unwrap_err();
     assert!(rejected.to_string().contains("already linked"));
@@ -2319,7 +2332,7 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
     assert_eq!(
         state
             .database
-            .confirmed(&alice.user_id)
+            .submitted_observations(&alice.user_id)
             .await
             .unwrap()
             .len(),
@@ -2327,13 +2340,17 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
     );
     state
         .database
-        .review(
+        .submit_report_changes(
             &alice.user_id,
-            update(ReviewStatus::Confirmed, 4, payload.clone()),
+            update(ReportResultStatus::Submitted, 4, payload.clone()),
         )
         .await
         .unwrap();
-    let rows = state.database.confirmed(&alice.user_id).await.unwrap();
+    let rows = state
+        .database
+        .submitted_observations(&alice.user_id)
+        .await
+        .unwrap();
     assert_eq!(rows.len(), 2);
     assert!(
         rows.iter()
@@ -2343,16 +2360,16 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
     let bob_report = archive(&state, "bob").await;
     state
         .database
-        .review(
+        .submit_report_changes(
             &bob.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: bob_report.clone(),
                 expected_revision: 1,
                 context: None,
-                observations: vec![ReviewItem {
+                observations: vec![ReportResultChange {
                     observation_id: None,
                     expected_revision: None,
-                    status: ReviewStatus::Pending,
+                    status: ReportResultStatus::Pending,
                     payload,
                 }],
             },
@@ -2384,19 +2401,19 @@ async fn rename_updates_saved_pending_title_and_preserves_unsaved_pdf_title() {
 
     let before = state
         .database
-        .review(
+        .submit_report_changes(
             &alice.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report_id.clone(),
                 expected_revision: 1,
                 context: None,
                 observations: [
-                    (ReviewStatus::Confirmed, mapped.clone()),
-                    (ReviewStatus::Pending, mapped),
-                    (ReviewStatus::Pending, parsed),
+                    (ReportResultStatus::Submitted, mapped.clone()),
+                    (ReportResultStatus::Pending, mapped),
+                    (ReportResultStatus::Pending, parsed),
                 ]
                 .into_iter()
-                .map(|(status, payload)| ReviewItem {
+                .map(|(status, payload)| ReportResultChange {
                     observation_id: None,
                     expected_revision: None,
                     status,

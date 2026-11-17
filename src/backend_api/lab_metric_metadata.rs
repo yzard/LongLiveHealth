@@ -182,7 +182,7 @@ pub(crate) fn clinical_links(
     links
 }
 
-pub(crate) async fn link_confirmed(
+pub(crate) async fn link_submitted(
     transaction: &mut Transaction<'_, Sqlite>,
     user_id: &str,
     metadata: &mut Metadata,

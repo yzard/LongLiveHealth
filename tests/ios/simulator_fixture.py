@@ -122,7 +122,7 @@ class Handler(BaseHTTPRequestHandler):
                     'interpretation': {'result': {'display': '99.1 mg/dL'}, 'reference': {'reason': 'No reference interval was printed'}},
                     'report_id': report_id,
                     'revision': 1,
-                    'status': 'confirmed',
+                    'status': 'submitted',
                     'resolved_metric_id': 'glucose',
                     'payload': {
                         'metric_id': 'glucose',
@@ -232,10 +232,10 @@ class Handler(BaseHTTPRequestHandler):
             observations[0]['revision'] += 1
         if route == 'test/fail-review':
             fail_review = True
-        if route == 'reports/review' and fail_review:
+        if route == 'reports/submit' and fail_review:
             fail_review = False
             status = 503
-        if route == 'reports/review' and status == 200:
+        if route == 'reports/submit' and status == 200:
             if body.get('expected_revision') != reports[0]['revision']:
                 review_conflict = 'Report changed; reload before reviewing'
             else:
@@ -246,7 +246,7 @@ class Handler(BaseHTTPRequestHandler):
                     review_conflict = 'Observation changed'
             if review_conflict:
                 status = 409
-        if route == 'reports/review' and status == 200:
+        if route == 'reports/submit' and status == 200:
             if body.get('context') is not None:
                 context = body['context']
             for change in body.get('observations', []):
@@ -263,7 +263,7 @@ class Handler(BaseHTTPRequestHandler):
                 choice = revised['payload'].get('unmapped_choice') or {}
                 if choice.get('kind') == 'new':
                     revised['display_name'] = choice['definition']['name']
-                if change['status'] == 'confirmed' and choice.get('kind') == 'new':
+                if change['status'] == 'submitted' and choice.get('kind') == 'new':
                     created_metric = dict(choice['definition'], metric_id='custom:fixture')
                 if created_metric:
                     revised['payload']['metric_id'] = created_metric['metric_id']
@@ -401,7 +401,7 @@ class Handler(BaseHTTPRequestHandler):
                 'relation': relation,
                 **report_diagnostics,
             },
-            'reports/review': {
+            'reports/submit': {
                 'created_metric': created_metric,
                 'created_metrics': [created_metric] if created_metric else [],
                 'report': reports[0] if reports else {},
@@ -429,7 +429,7 @@ class Handler(BaseHTTPRequestHandler):
                     'source_id': 'fixture-report', 'source_name': 'Example Laboratory',
                     'timestamp': int(time.time()), 'value': '99.1', 'unit': 'mg/dL',
                 }
-                for row in observations if row['status'] == 'confirmed'
+                for row in observations if row['status'] == 'submitted'
             ], 'excluded_count': 0}
         if route == 'metrics/history/get' and body.get('metric_id') == 'clinical:calcium':
             response = {

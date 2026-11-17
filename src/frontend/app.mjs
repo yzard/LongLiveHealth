@@ -362,7 +362,7 @@ async function insightsView() {
   const wrap = el('div');
   const preset = section('Lipid history & recent health');
   preset.append(el('p', 'PERSONAL RESEARCH PREVIEW', 'eyebrow'),
-    el('p', 'Review confirmed lipid results with the last 90 calendar days of synced health data. The server uses its configured AI service.'),
+    el('p', 'Review submitted lipid results with the last 90 calendar days of synced health data. The server uses its configured AI service.'),
     el('p', 'AI hypotheses are unverified. Check the cited data and use the suggested questions when speaking with your clinician.', 'footnote'));
   const create = actionButton('Run lipid review', async () => {
     const signal = controller.signal;
@@ -374,7 +374,7 @@ async function insightsView() {
   if (!capabilities.analysis) preset.append(el('p', 'AI analysis is disabled on this server. Your administrator can configure and enable the analysis provider.', 'muted'));
   const runs = section('Your reviews');
   runs.append(button('Refresh reviews', navigate, 'quiet'));
-  if (!data.runs.length) runs.append(empty('No reviews yet. Run the preset when confirmed lipid data is available.'));
+  if (!data.runs.length) runs.append(empty('No reviews yet. Run the preset when submitted lipid data is available.'));
   for (const run of data.runs) {
     const link = el('a', null, 'report-row'); link.href = `#insights/${encodeURIComponent(run.run_id)}`;
     const info = el('div'); info.append(el('strong', run.prompt_version === 'archive-coach-v1' ? 'Archive question' : 'Lipid review'), el('span', dated(run.created_at), 'muted'));
@@ -505,7 +505,7 @@ function settingsView() {
     ['Browser timezone', timezone], ['AI analysis', capabilities.analysis ? 'Enabled' : 'Disabled'],
   ]));
   panel.append(el('h3', 'Mobile & web'),
-    el('p', 'Use the mobile app to import reports, review results, sync platform data to this server, and write supported confirmed results to Apple Health.'),
+    el('p', 'Use the mobile app to import reports, review results, sync platform data to this server, and write supported submitted results to Apple Health.'),
     el('p', 'The web viewer browses this archive and runs the server’s preset analysis. AI service configuration belongs to your server.'),
     el('p', 'Your sign-in token stays in this page’s memory. Reloading or closing the page requires signing in again.', 'muted'));
   return panel;

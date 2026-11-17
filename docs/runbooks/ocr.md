@@ -1,6 +1,6 @@
 # API 内置血检 OCR 与共享推理
 
-Long Live Health 仅部署 backend_api 一个业务服务。上传的 PDF/图片仍先归档，持久化后台任务负责逐页渲染、文字证据、图像缩放、提示、模型请求、结构验证与草稿保存。用户 Confirm All 才将指标写入正式结果。没有独立 OCR HTTP 接口或 Python/GPU 容器。
+Long Live Health 仅部署 backend_api 一个业务服务。上传的 PDF/图片仍先归档，持久化后台任务负责逐页渲染、文字证据、图像缩放、提示、模型请求、结构验证与草稿保存。用户点击 Submit 后，指标才进入正式库。没有独立 OCR HTTP 接口或 Python/GPU 容器。
 
 ## 一份配置
 
@@ -22,7 +22,7 @@ OCR 与 Analytics 在 API 内共用一个推理槽位，避免同时向大模型
 
 `./build_docker.sh` 构建 Android APK 和 backend_api 镜像，检查通过后打上日期和 `latest` 标签。传入明确的测试标签只生成测试镜像。Desk 资源有限，构建前先 `systemctl --user stop local-llm.service`；构建完成后再启动服务并执行真实推理验证，不让编译与模型争用内存。
 
-Docker 构建执行 Rust fmt、Clippy、单元和集成测试。`probe-providers` 使用唯一的共享配置发送合成文字探针。`tests/docker/unified_inference.py` 只针对带 `.synthetic-check` 标记的隔离 API 数据根，验证合成图片上传、采集日期、pending/confirm、真实 Analytics 及完整模型归档，不触碰生产库。
+Docker 构建执行 Rust fmt、Clippy、单元和集成测试。`probe-providers` 使用唯一的共享配置发送合成文字探针。`tests/docker/unified_inference.py` 只针对带 `.synthetic-check` 标记的隔离 API 数据根，验证合成图片上传、采集日期、pending/submitted、真实 Analytics 及完整模型归档，不触碰生产库。
 
 ## 2026-10-30 Function Health 采集日期核查
 
@@ -40,7 +40,7 @@ python tests/docker/collection_dates.py --data-dir /path/to/api-data
 
 ## Report rescan
 
-Rescan deletes all existing result rows for the selected report, including confirmed, pending, and manually entered results. It removes prior OCR outputs and preserves the report file and its metadata. Results disappear from Browse and charts as soon as the rescan is queued.
+Rescan deletes all existing result rows for the selected report, including submitted, pending, and manually entered results. It removes prior OCR outputs and preserves the report file and its metadata. Results disappear from Browse and charts as soon as the rescan is queued.
 
 The worker builds a fresh prompt from the current account's metric names and available LOINC codes and sends each original page to the configured model. After extraction, validation, and duplicate checks, it publishes only new pending results from the completed run. The failed run's evidence remains available for diagnosis. A failed run leaves the result list empty. The original file can be rescanned again. The request includes `replace_results: true` after the user acknowledges deletion. The API returns 409 for stale revisions and result edits while a rescan is active.
 

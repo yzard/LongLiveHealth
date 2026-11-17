@@ -79,7 +79,7 @@ original = api(
 envelope = json.loads(original['response_body'])
 assert envelope['engine'] == 'strata' and envelope['model'] == 'qwen3.8-flash-next-iq3_s'
 review = api(
-    'reports/review',
+    'reports/submit',
     {
         'report_id': report_id,
         'expected_revision': report['report']['revision'],
@@ -88,7 +88,7 @@ review = api(
             {
                 'observation_id': row['observation_id'],
                 'expected_revision': row['revision'],
-                'status': 'confirmed',
+                'status': 'submitted',
                 'payload': row['payload'],
             }
             for row in rows

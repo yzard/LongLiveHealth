@@ -108,8 +108,8 @@ def navigation():
     tap("Blood Work"); wait_for("Example Laboratory")
     tap("Example Laboratory"); wait_for("Total Markers")
     assert "126" in labels()
-    wait_for("126 results ready to confirm")
-    tap("126 results ready to confirm")
+    wait_for("126 results ready to submit")
+    tap("126 results ready to submit")
     wait_for("Marker 1")
     for _ in range(4):
         adb("shell", "input", "swipe", "1450", "1500", "1450", "450", "350")
@@ -117,12 +117,12 @@ def navigation():
     # Switching away and back must keep the report, not reset to the Data menu.
     tap("Browse"); wait_for("RANGE")
     tap("Data")
-    wait_for("Ready to Confirm")
+    wait_for("Ready to Submit")
     adb("shell", "input", "keyevent", "KEYCODE_BACK")
-    wait_for("Confirm"); tap("Confirm"); wait_for("0 results ready to confirm")
+    wait_for("Submit"); tap("Submit"); wait_for("0 results ready to submit")
     tap("Report Info"); wait_for("Report Info")
     assert "Report Title" in labels(), "Report editor missing title"
-    print("PASS: session persistence, chart periods/source toggles, fold state, report scroll/tab state/Confirm All/editor")
+    print("PASS: session persistence, chart periods/source toggles, fold state, report scroll/tab state/batch submit/editor")
 
 
 def insight_cards():
@@ -529,10 +529,10 @@ def report_metric_review():
             assert "Unmapped" not in labels()
             assert "No matching Browse metric. Review this result." not in labels()
             if not negative:
-                tap("Possible match")
-                wait_for("Mark as New")
-                tap("Review with the full metric list")
-                wait_for("Glucose")
+                tap("Closest matches")
+                wait_for("Blood glucose")
+                tap("Blood glucose")
+                wait_for("Save Draft")
             if negative:
                 warnings = labels()
                 assert any("Unit mismatch · mg/dL" in label for label in warnings)
@@ -563,7 +563,7 @@ def report_metric_review():
                 adb("shell", "input", "keyevent", "KEYCODE_BACK")
                 wait_for("mg/L")
             tap("Save Draft")
-            wait_for("0 results ready to confirm" if negative else "1 result ready to confirm")
+            wait_for("0 results ready to submit" if negative else "1 result ready to submit")
             saved = control("reports/get")["observations"][0]
             assert saved["payload"]["metric_id"] == ("urine_appearance" if negative else "glucose")
             assert saved["status"] == "pending"
@@ -571,7 +571,7 @@ def report_metric_review():
                 assert saved["payload"]["raw_result"] == "Negative"
                 assert saved["payload"]["raw_unit"] == "mg/L"
             else:
-                tap("1 result ready to confirm")
+                tap("1 result ready to submit")
                 wait_for("Glucose")
                 wait_for("5.5 mmol/L")
         else:
@@ -579,8 +579,8 @@ def report_metric_review():
             wait_for("5.5 mmol/L")
             wait_for("Zyphorin activity")
             tap(issue)
+            wait_for("Review result")
             wait_for("Mark as New")
-            wait_for("No similar Browse metrics found.")
             wait_for("OCR suggestion: Zyphorin panel activity · mmol/L")
             tap("Mark as New")
             wait_for("Save Draft")
@@ -589,22 +589,25 @@ def report_metric_review():
             wait_for(issue)
             assert control("reports/get")["observations"][0]["payload"]["metric_id"] is None
             tap(issue)
+            wait_for("Review result")
             wait_for("Mark as New")
             tap("Mark as New")
             wait_for("Save Draft")
             tap("Save Draft")
-            wait_for("1 result ready to confirm")
-            tap("1 result ready to confirm")
+            wait_for("1 result ready to submit")
+            tap("1 result ready to submit")
             wait_for("Zyphorin activity")
             wait_for("New")
             saved = control("reports/get")["observations"][0]
             assert saved["status"] == "pending"
             assert saved["payload"]["metric_id"] is None
             assert saved["payload"]["unmapped_choice"]["kind"] == "new"
-            tap("Confirm")
-            wait_for("0 results ready to confirm")
+            tap("Submit")
+            wait_for("Ready to Submit")
+            adb("shell", "input", "keyevent", "KEYCODE_BACK")
+            wait_for("0 results ready to submit")
             saved = control("reports/get")["observations"][0]
-            assert saved["status"] == "confirmed"
+            assert saved["status"] == "submitted"
             assert saved["created_metric"] == {
                 "name": "Zyphorin panel activity", "standard_unit": "mmol/L", "metric_id": "custom:fixture",
             }
@@ -655,7 +658,7 @@ def report_mapping_layout():
     row = control("reports/get")["observations"][0]
     assert row["payload"]["metric_id"] == "glucose"
     assert row["payload"]["raw_name"] == "Appearance (5767-9)"
-    assert row["status"] == "confirmed"
+    assert row["status"] == "submitted"
     print("PASS: resolved mapping can be edited, and Save preserves status without a status picker")
 
 
@@ -697,16 +700,16 @@ def report_status_actions(check_chart=False):
     wait_for("Example Laboratory")
     tap("Example Laboratory")
 
-    wait_for("2 results ready to confirm")
-    wait_for("Needs Review")
-    tap("2 results ready to confirm")
-    wait_for("Ready to Confirm")
+    wait_for("2 results ready to submit")
+    wait_for("NEEDS REVIEW")
+    tap("2 results ready to submit")
+    wait_for("Ready to Submit")
     adb("shell", "input", "keyevent", "KEYCODE_BACK")
-    wait_for("2 results ready to confirm")
+    wait_for("2 results ready to submit")
 
     before = control("test/counts")
     control("test/update-observation-elsewhere")
-    tap("Confirm")
+    tap("Submit")
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         counts = control("test/counts")
@@ -715,35 +718,43 @@ def report_status_actions(check_chart=False):
         time.sleep(.2)
     else:
         raise AssertionError("A stale batch did not refresh the report")
-    assert counts["reports/review"] == before.get("reports/review", 0) + 1
+    assert counts["reports/submit"] == before.get("reports/submit", 0) + 1
     assert counts["reports/get"] == before.get("reports/get", 0) + 1
     assert all(row["status"] == "pending" for row in control("reports/get")["observations"])
 
-    tap("Confirm")
-    wait_for("0 results ready to confirm")
+    tap("Submit")
+    wait_for("0 results ready to submit")
     statuses = {row["observation_id"]: row["status"] for row in control("reports/get")["observations"]}
-    assert [statuses[row["observation_id"]] for row in original] == ["confirmed", "confirmed", "pending"]
+    assert [statuses[row["observation_id"]] for row in original] == ["submitted", "submitted", "pending"]
 
     tap("Review")
     wait_for("Review result")
+    size = adb("shell", "wm", "size")
+    width, height = map(int, re.findall(r"(\d+)x(\d+)", size)[-1])
+    for _ in range(5):
+        if "Submit" in labels():
+            break
+        adb("shell", "input", "swipe", str(width // 2), str(height * 3 // 4),
+            str(width // 2), str(height // 3), "400")
+    wait_for("Submit")
     control("test/fail-review")
-    tap("Confirm")
+    tap("Submit")
     wait_for("Could not save")
     tap("OK")
-    wait_for("Review result")
+    wait_for("Save Draft")
     assert next(row for row in control("reports/get")["observations"]
                 if row["observation_id"] == original[-1]["observation_id"])["status"] == "pending"
-    tap("Confirm")
-    wait_for("Confirmed Results")
+    tap("Submit")
+    wait_for("SUBMITTED RESULTS")
     wait_for("View source · page 1")
     rows = control("reports/get")["observations"]
-    assert all(row["status"] == "confirmed" for row in rows)
+    assert all(row["status"] == "submitted" for row in rows)
     assert {row["observation_id"] for row in rows} == {row["observation_id"] for row in original}
-    assert not {"Needs Review", "Hold", "Rejected"}.intersection(labels())
+    assert not {"NEEDS REVIEW", "HOLD", "REJECTED"}.intersection(label.upper() for label in labels())
     if check_chart:
         tap("Browse")
         wait_for("mg/dL")
-    print("PASS: Ready batch and detail confirmation, stale-batch refresh and failed-detail retry")
+    print("PASS: Ready batch and individual submission, stale-batch refresh and failed-detail retry")
 
 
 def report_settings():

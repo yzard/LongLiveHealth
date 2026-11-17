@@ -35,7 +35,7 @@ import HealthKit
 }
 
 @Test func glucoseWritePreservesCollectionTimeAndRetryIdentity() throws {
-    let observation: JSONValue = .object(["status": .string("confirmed"), "observation_id": .string("reviewed-1"), "revision": .number(2),
+    let observation: JSONValue = .object(["status": .string("submitted"), "observation_id": .string("reviewed-1"), "revision": .number(2),
         "payload": .object(["metric_id": .string("glucose"), "raw_result": .string("5.5"), "raw_unit": .string("mmol/L")])])
     let server = URL(string: "https://example.com")!
     let time = Date(timeIntervalSince1970: 1700000000)

@@ -12,14 +12,14 @@ async fn mobile_contract_review_history_export_and_account_isolation() {
     let app = longlivehealth::app::create_application(state.clone());
     let (_, uploaded) = upload(&app, &alice, &uuid::Uuid::new_v4().to_string(), &png()).await;
     let report = uploaded["file"]["file_id"].as_str().unwrap();
-    let review = json!({"report_id":report,"expected_revision":1,"context":{"fasting":true},"observations":[{"observation_id":null,"expected_revision":null,"status":"confirmed","payload":crate::observation_payload()}]});
+    let review = json!({"report_id":report,"expected_revision":1,"context":{"fasting":true},"observations":[{"observation_id":null,"expected_revision":null,"status":"submitted","payload":crate::observation_payload()}]});
     assert_eq!(
-        request(&app, "/api/v1/reports/review", Some(&bob), review.clone())
+        request(&app, "/api/v1/reports/submit", Some(&bob), review.clone())
             .await
             .0,
         StatusCode::NOT_FOUND
     );
-    let (status, result) = request(&app, "/api/v1/reports/review", Some(&alice), review).await;
+    let (status, result) = request(&app, "/api/v1/reports/submit", Some(&alice), review).await;
     assert_eq!(status, StatusCode::OK, "{result}");
     assert_eq!(result["report"]["revision"], 2);
     let observation = result["observations"][0]["observation_id"]

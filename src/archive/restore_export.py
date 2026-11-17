@@ -68,7 +68,12 @@ def restore(archive_path, destination, username, max_bytes):
                         fields = [definition[0] for definition in definitions]
                         statement = queries.insert(table, fields)
                         for row in check_export.rows(archive, table + '.jsonl'):
-                            target = queries.insert('report_drafts', fields) if table == 'observations' and row['status'] != 'confirmed' else statement
+                            target = statement
+                            if table == 'observations':
+                                if manifest['database_schema_version'] == 8 and row['status'] == 'confirmed':
+                                    row['status'] = 'submitted'
+                                if row['status'] != 'submitted':
+                                    target = queries.insert('report_drafts', fields)
                             connection.execute(target, [row[field] for field in fields])
                     check_export.require(connection.execute(queries.CHECK_DRAFT_OWNERS).fetchone()[0] == 0, "Restored draft ownership is invalid")
                     interrupted = connection.execute(queries.CANCEL_ANALYSIS).rowcount
@@ -97,7 +102,7 @@ def restore(archive_path, destination, username, max_bytes):
                     connection.close()
                 result = dict(
                     status='restored',
-                    database_schema_version=8,
+                    database_schema_version=9,
                     tables=audit['tables'],
                     original_files=audit['original_files'],
                     account_status='disabled',

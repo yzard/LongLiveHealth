@@ -527,7 +527,7 @@ impl StoredObservation {
             custom_metrics,
             metadata,
         );
-        let reported_metric_id = (self.status == "confirmed"
+        let reported_metric_id = (self.status == "submitted"
             && resolved.is_none()
             && !crate::laboratory::is_administrative_name(&payload.raw_name))
         .then(|| reported_identity(&payload, source_name, &self.report_id));
@@ -619,7 +619,7 @@ impl StoredObservation {
         });
         let saved_metric = resolved_metric_id
             .as_deref()
-            .filter(|_| payload.metric_id.is_some() || self.status == "confirmed");
+            .filter(|_| payload.metric_id.is_some() || self.status == "submitted");
         let draft_name = new_metric
             .map(|metric| metric.name.trim())
             .filter(|name| !name.is_empty())
@@ -672,26 +672,26 @@ fn resolve_report_mapping<'a>(
 
 #[derive(Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ReviewStatus {
+pub enum ReportResultStatus {
     Pending,
-    Confirmed,
+    Submitted,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ReviewItem {
+pub struct ReportResultChange {
     pub observation_id: Option<String>,
     pub expected_revision: Option<i64>,
-    pub status: ReviewStatus,
+    pub status: ReportResultStatus,
     pub payload: ObservationPayload,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ReviewRequest {
+pub struct ReportSubmission {
     pub report_id: String,
     pub expected_revision: i64,
     pub context: Option<ReportContext>,
-    pub observations: Vec<ReviewItem>,
+    pub observations: Vec<ReportResultChange>,
 }
 
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
@@ -1084,9 +1084,9 @@ impl Database {
                 return Ok(());
             }
             match self
-                .review(
+                .submit_report_changes(
                     user_id,
-                    ReviewRequest {
+                    ReportSubmission {
                         report_id: report_id.into(),
                         expected_revision: report.revision,
                         context: Some(context),
@@ -1102,21 +1102,26 @@ impl Database {
         }
         Err(AppError::Conflict("Report changed during automatic naming"))
     }
-    pub async fn review(&self, user_id: &str, request: ReviewRequest) -> Result<Value, AppError> {
-        self.review_with_analysis(user_id, request, false).await
-    }
-
-    pub(crate) async fn review_with_analysis(
+    pub async fn submit_report_changes(
         &self,
         user_id: &str,
-        request: ReviewRequest,
+        request: ReportSubmission,
+    ) -> Result<Value, AppError> {
+        self.submit_report_changes_with_analysis(user_id, request, false)
+            .await
+    }
+
+    pub(crate) async fn submit_report_changes_with_analysis(
+        &self,
+        user_id: &str,
+        request: ReportSubmission,
         analysis_enabled: bool,
     ) -> Result<Value, AppError> {
         let queue_analysis = analysis_enabled
             && request
                 .observations
                 .iter()
-                .any(|item| item.status == ReviewStatus::Confirmed);
+                .any(|item| item.status == ReportResultStatus::Submitted);
         let report = self.report_summary(user_id, &request.report_id).await?;
         if request.observations.len() > 2000 {
             return Err(AppError::TooLarge);
@@ -1173,7 +1178,7 @@ impl Database {
                 .metric_id
                 .as_deref()
                 .is_some_and(lab_metric_metadata::is_clinical_id)
-                || (item.status == ReviewStatus::Confirmed
+                || (item.status == ReportResultStatus::Submitted
                     && (item.payload.metric_id.is_some()
                         || matches!(item.payload.unmapped_choice, Some(UnmappedChoice::New(_))))
                     && test_code(&item.payload)
@@ -1275,7 +1280,7 @@ impl Database {
             .as_ref()
             .map_or(original_source, |context| context.source_name.as_deref());
         let inconsistent = if request.observations.iter().any(|row| {
-            row.status == ReviewStatus::Confirmed
+            row.status == ReportResultStatus::Submitted
                 && matches!(row.payload.unmapped_choice, Some(UnmappedChoice::New(_)))
         }) {
             let stored = sqlx::query_as::<_, StoredObservation>(queries::OBSERVATIONS)
@@ -1340,7 +1345,7 @@ impl Database {
                 } else {
                     (uuid::Uuid::new_v4().to_string(), 1, None, None)
                 };
-            if observation.status == ReviewStatus::Confirmed {
+            if observation.status == ReportResultStatus::Submitted {
                 match observation.payload.unmapped_choice.as_ref() {
                     Some(UnmappedChoice::New(metric)) => {
                         let code = test_code(&observation.payload);
@@ -1378,7 +1383,7 @@ impl Database {
                             .any(|issue| issue.code != "negative_with_unit")
                         {
                             return Err(AppError::Invalid(
-                                "Resolve the current report warnings before confirming a new metric",
+                                "Resolve the current report warnings before submitting a new metric",
                             ));
                         }
                         observation.payload.metric_id = Some(if let Some(existing) = existing {
@@ -1402,16 +1407,16 @@ impl Database {
                     Some(UnmappedChoice::Unmapped) | None => {}
                 }
             }
-            if observation.status == ReviewStatus::Confirmed
+            if observation.status == ReportResultStatus::Submitted
                 && previous.as_ref().is_none_or(|(status, payload)| {
-                    status != "confirmed"
+                    status != "submitted"
                         || payload.metric_id != observation.payload.metric_id
                         || test_code(payload) != test_code(&observation.payload)
                 })
             {
                 if observation.payload.metric_id.is_some() {
                     // Explicit mappings come from the reviewer. OCR cannot supply this field.
-                    lab_metric_metadata::link_confirmed(
+                    lab_metric_metadata::link_submitted(
                         &mut transaction,
                         user_id,
                         &mut metadata,
@@ -1441,7 +1446,7 @@ impl Database {
                                 .is_some_and(|code| metadata.links.contains_key(code)) =>
                         {
                             return Err(AppError::Invalid(
-                                "Choose a metric mapping or mark the result as new before confirming",
+                                "Choose a metric mapping or mark the result as new before submitting",
                             ));
                         }
                         _ => {}
@@ -1449,8 +1454,8 @@ impl Database {
                 }
             }
             let statement = match observation.status {
-                ReviewStatus::Pending => queries::SAVE_PENDING_OBSERVATION,
-                ReviewStatus::Confirmed => queries::CONFIRM_OBSERVATION,
+                ReportResultStatus::Pending => queries::SAVE_PENDING_OBSERVATION,
+                ReportResultStatus::Submitted => queries::SUBMIT_OBSERVATION,
             };
             sqlx::query(statement)
                 .bind(user_id)
@@ -1510,8 +1515,11 @@ impl Database {
             .collect::<Result<Vec<_>,AppError>>()?;
         Ok(json!({"history":history}))
     }
-    pub async fn confirmed(&self, user_id: &str) -> Result<Vec<Observation>, AppError> {
-        let rows = sqlx::query_as::<_, StoredObservation>(queries::CONFIRMED_OBSERVATIONS)
+    pub async fn submitted_observations(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<Observation>, AppError> {
+        let rows = sqlx::query_as::<_, StoredObservation>(queries::SUBMITTED_OBSERVATIONS)
             .bind(user_id)
             .fetch_all(&self.pool)
             .await?;
@@ -1670,7 +1678,7 @@ pub async fn trends(
     let mut incomparable = 0;
     let mut excluded = Vec::new();
     let mut reported_metric = None;
-    for observation in database.confirmed(user_id).await? {
+    for observation in database.submitted_observations(user_id).await? {
         let Some(id) = observation.browse_metric_id() else {
             continue;
         };
@@ -1916,7 +1924,7 @@ mod tests {
         }
 
         let request = || {
-            serde_json::from_value::<ReviewRequest>(json!({
+            serde_json::from_value::<ReportSubmission>(json!({
                 "report_id":"report", "expected_revision":1,
                 "observations":[{"status":"pending", "payload":{
                     "raw_name":"Example measurement", "raw_result":"10", "sampled_at":"2026-11-16",
@@ -1925,7 +1933,9 @@ mod tests {
             }))
             .unwrap()
         };
-        let failed = database.review(&user.user_id, request()).await;
+        let failed = database
+            .submit_report_changes(&user.user_id, request())
+            .await;
         drop(release);
         for task in tasks {
             task.await.unwrap().unwrap();
@@ -1935,7 +1945,10 @@ mod tests {
         assert_eq!(after_failure["report"]["revision"], 1);
         assert_eq!(after_failure["observations"], json!([]));
 
-        let saved = database.review(&user.user_id, request()).await.unwrap();
+        let saved = database
+            .submit_report_changes(&user.user_id, request())
+            .await
+            .unwrap();
         assert_eq!(saved["report"]["revision"], 2);
         assert_eq!(saved["observations"][0]["revision"], 1);
         assert_eq!(saved["observations"][0]["status"], "pending");

@@ -34,7 +34,7 @@ final class HealthBridge {
     }
 
     nonisolated static func reviewedGlucoseSample(_ observation: JSONValue, server: URL, userID: String, sampledAt: Date) throws -> HKQuantitySample {
-        guard observation["status"] == .string("confirmed"),
+        guard observation["status"] == .string("submitted"),
               observation["payload"]["metric_id"] == .string("glucose"),
               let value = Double(observation["payload"]["raw_result"].stringValue.trimmingCharacters(in: .whitespacesAndNewlines)),
               value.isFinite, value >= 0,

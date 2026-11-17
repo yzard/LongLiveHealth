@@ -9,7 +9,6 @@ struct ObservationEditor: View {
     @State var payload: JSONValue
     @State var printedName: String
     @State var loincCode: String
-    @State var choosingMetric: Bool
     @State var creatingMetric: Bool
     @State var metricSelection: String
     @State var newMetricName: String
@@ -17,15 +16,14 @@ struct ObservationEditor: View {
     @State var saving = false
     @State var error: String?
     @State var preview: DocumentLocation?
-    @State var confirmAsPrinted = false
+    @State var submitAsPrinted = false
     @Environment(\.dismiss) var dismiss
-    init(observation: JSONValue, metrics: [JSONValue], pageCount: Int, choosingMetric: Bool, source: @escaping (Int) async throws -> DocumentLocation, save: @escaping (JSONValue) async throws -> Void) {
+    init(observation: JSONValue, metrics: [JSONValue], pageCount: Int, source: @escaping (Int) async throws -> DocumentLocation, save: @escaping (JSONValue) async throws -> Void) {
         self.observation = observation; self.metrics = metrics; self.pageCount = pageCount; self.source = source; self.save = save
         _payload = State(initialValue: observation == .null ? .object(["source": .object(["page": .number(1), "quote": .string("")])]) : observation["payload"])
         let code = observation["lab_test_code"].stringValue
         _printedName = State(initialValue: LaboratoryPresentation.printedName(observation["payload"]["raw_name"].stringValue, code: code))
         _loincCode = State(initialValue: code)
-        _choosingMetric = State(initialValue: choosingMetric)
         let savedChoice = observation["payload"]["unmapped_choice"]
         let proposal = savedChoice["kind"] == .string("new")
             ? savedChoice["definition"] : observation["payload"]["ocr_new_metric"]
@@ -37,19 +35,12 @@ struct ObservationEditor: View {
     }
     var body: some View {
         NavigationStack {
-            Form {
-                if choosingMetric {
-                    metricOptions
-                } else {
-                    reviewSections
-                }
-            }.mobileNavigationTitle(choosingMetric ? "Choose a Browse metric" : observation == .null ? "Add result" : "Review result")
+            Form { reviewSections }
+                .mobileNavigationTitle(observation == .null ? "Add result" : "Review result")
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }
-                    if !choosingMetric {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button(status == "pending" ? "Save Draft" : "Save") { Task { await submit(as: status) } }.disabled(saveDisabled)
-                        }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(status == "pending" ? "Save Draft" : "Save") { Task { await submit(as: status) } }.disabled(saveDisabled)
                     }
                 }.interactiveDismissDisabled()
                 .alert("Could not save", isPresented: Binding(
@@ -60,9 +51,9 @@ struct ObservationEditor: View {
                     Text(error ?? "")
                 }
                 .originalReportPreview($preview)
-                .alert("Confirm as printed?", isPresented: $confirmAsPrinted) {
+                .alert("Submit as printed?", isPresented: $submitAsPrinted) {
                     Button("Cancel", role: .cancel) {}
-                    Button("Confirm for History") { Task { await submit(as: "confirmed") } }
+                    Button("Submit for History") { Task { await submit(as: "submitted") } }
                 } message: { Text("The result is saved as printed. It may be unavailable in metric charts.") }
         }
     }
@@ -72,7 +63,7 @@ struct ObservationEditor: View {
     }
 
     private var canMarkAsNew: Bool {
-        status == "pending" || (status == "confirmed" && ReportReview.savedMetricID(observation) == nil)
+        status == "pending" || (status == "submitted" && ReportReview.savedMetricID(observation) == nil)
     }
 
     private var saveDisabled: Bool {
@@ -139,14 +130,16 @@ struct ObservationEditor: View {
                 TextField("Metric name", text: $newMetricName)
                 TextField("Standard unit", text: $newMetricUnit)
                 Button("Keep unmapped") { creatingMetric = false }
-            } else if !observation["metric_suggestions"].arrayValue.isEmpty {
-                Button(suggestedMetricID == nil ? "Closest matches" : "Possible match") {
-                    choosingMetric = true
-                }.font(.caption)
+            } else {
+                candidateOptions
             }
             let suggestion = ReportReview.suggestionNote(observation, includeMetricName: true)
-            if !suggestion.isEmpty {
-                Text("OCR suggestion: \(suggestion)").font(.caption).foregroundStyle(.secondary)
+            let proposal = observation["payload"]["ocr_new_metric"]
+            let proposed = [proposal["name"].stringValue, proposal["standard_unit"].stringValue]
+                .filter { !$0.isEmpty }.joined(separator: " · ")
+            let note = suggestion.isEmpty && metricSelection.isEmpty ? proposed : suggestion
+            if !note.isEmpty {
+                Text("OCR suggestion: \(note)").font(.caption).foregroundStyle(.secondary)
             }
             mappingIssues
         }
@@ -156,13 +149,13 @@ struct ObservationEditor: View {
         }
         if status == "pending" {
             Section {
-                Button("Confirm") {
+                Button("Submit") {
                     let unitConflict = payload["raw_unit"] == observation["payload"]["raw_unit"]
                         && observation["browse_issues"].arrayValue.contains { $0["code"] == .string("unsupported_unit") }
-                    if !creatingMetric && (metricSelection.isEmpty || unitConflict) { confirmAsPrinted = true }
-                    else { Task { await submit(as: "confirmed") } }
+                    if !creatingMetric && (metricSelection.isEmpty || unitConflict) { submitAsPrinted = true }
+                    else { Task { await submit(as: "submitted") } }
                 }
-                    .accessibilityIdentifier("confirm-reviewed-result")
+                    .accessibilityIdentifier("submit-reviewed-result")
                     .disabled(saveDisabled)
             }
         }
@@ -181,70 +174,49 @@ struct ObservationEditor: View {
         }
     }
 
-    @ViewBuilder private var metricOptions: some View {
-        Section("As printed on the report") {
-            printedRows(editable: false)
-        }
-        Section {
-            recommendedName
-            mappingIssues
-            Button("Mark as New", action: markAsNew)
-                .accessibilityIdentifier("create-browse-metric")
-                .disabled(!canMarkAsNew)
-            let proposal = observation["payload"]["ocr_new_metric"]
-            if proposal != .null {
-                let proposed = [proposal["name"].stringValue, proposal["standard_unit"].stringValue]
-                    .filter { !$0.isEmpty }.joined(separator: " · ")
-                Text("OCR suggestion: \(proposed)").font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        Section("Closest matches") {
-            let suggestions = observation["metric_suggestions"].arrayValue
-            if suggestions.isEmpty {
-                Text("No similar Browse metrics found.").foregroundStyle(.secondary)
-            }
-            ForEach(Array(suggestions.enumerated()), id: \.offset) { _, suggestion in
-                Button {
-                    mapping.wrappedValue = suggestion["metric_id"].stringValue
-                    creatingMetric = false
-                    choosingMetric = false
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(suggestion["name"].stringValue)
-                        Text([suggestion["standard_unit"].stringValue, matchLabel(suggestion["unit_match"].stringValue),
-                              suggestion["metric_id"] == observation["payload"]["ocr_metric_candidate"] ? "OCR suggestion" : ""]
-                            .filter { !$0.isEmpty }.joined(separator: " · "))
-                            .font(.caption).foregroundStyle(.secondary)
+    @ViewBuilder private var candidateOptions: some View {
+        let suggestions = observation["metric_suggestions"].arrayValue
+        if !suggestions.isEmpty {
+            DisclosureGroup("Closest matches") {
+                ForEach(Array(suggestions.enumerated()), id: \.offset) { _, suggestion in
+                    Button {
+                        mapping.wrappedValue = suggestion["metric_id"].stringValue
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(suggestion["name"].stringValue)
+                            Text([suggestion["standard_unit"].stringValue, matchLabel(suggestion["unit_match"].stringValue),
+                                  suggestion["metric_id"] == observation["payload"]["ocr_metric_candidate"] ? "OCR suggestion" : ""]
+                                .filter { !$0.isEmpty }.joined(separator: " · "))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
-            Button("Review with the full metric list") { choosingMetric = false }
         }
     }
 
-    private func printedRows(editable: Bool) -> some View {
-        let fields = [
-            ("Metric name", $printedName),
-            ("Lab code", text("raw_lab_code")),
-            ("LOINC code", $loincCode),
-            ("Result", text("raw_result")),
-            ("Unit", text("raw_unit")),
-            ("Reference range", text("reference_range")),
-            ("Report flag", text("report_flag")),
-            ("Collection date", text("sampled_at")),
-        ]
-        return ForEach(fields.indices, id: \.self) { index in
-            let (label, value) = fields[index]
-            LabeledContent(label) {
-                if editable {
-                    TextField("—", text: value, axis: .vertical)
-                        .multilineTextAlignment(.trailing)
-                        .autocorrectionDisabled()
-                        .accessibilityLabel(Text(label))
-                } else {
-                    Text(value.wrappedValue.isEmpty ? "—" : value.wrappedValue)
-                        .multilineTextAlignment(.trailing)
-                }
+    @ViewBuilder private func printedRows(editable: Bool) -> some View {
+        // Fixed fields share the form's lazy list with the candidate rows on Android.
+        printedRow("Metric name", value: $printedName, editable: editable)
+        printedRow("Lab code", value: text("raw_lab_code"), editable: editable)
+        printedRow("LOINC code", value: $loincCode, editable: editable)
+        printedRow("Result", value: text("raw_result"), editable: editable)
+        printedRow("Unit", value: text("raw_unit"), editable: editable)
+        printedRow("Reference range", value: text("reference_range"), editable: editable)
+        printedRow("Report flag", value: text("report_flag"), editable: editable)
+        printedRow("Collection date", value: text("sampled_at"), editable: editable)
+    }
+
+    private func printedRow(_ label: String, value: Binding<String>, editable: Bool) -> some View {
+        LabeledContent(label) {
+            if editable {
+                TextField("—", text: value, axis: .vertical)
+                    .multilineTextAlignment(.trailing)
+                    .autocorrectionDisabled()
+                    .accessibilityLabel(Text(label))
+            } else {
+                Text(value.wrappedValue.isEmpty ? "—" : value.wrappedValue)
+                    .multilineTextAlignment(.trailing)
             }
         }
     }
@@ -257,13 +229,11 @@ struct ObservationEditor: View {
                     Text("Recommended name (LOINC)").font(.caption).foregroundStyle(.secondary)
                     Text(name).accessibilityIdentifier("review-result-loinc-name")
                 }.frame(maxWidth: .infinity, alignment: .leading)
-                if !choosingMetric {
-                    Button("Use") { printedName = name }
-                        .buttonStyle(.bordered)
-                        .accessibilityLabel(Text("Use recommended name"))
-                        .accessibilityIdentifier("review-result-use-loinc-name")
-                        .disabled(saving || printedName == name)
-                }
+                Button("Use") { printedName = name }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel(Text("Use recommended name"))
+                    .accessibilityIdentifier("review-result-use-loinc-name")
+                    .disabled(saving || printedName == name)
             }
         }
     }
@@ -310,7 +280,6 @@ struct ObservationEditor: View {
             newMetricName = printedName
         }
         creatingMetric = true
-        choosingMetric = false
     }
 
     private func matchLabel(_ match: String) -> String {

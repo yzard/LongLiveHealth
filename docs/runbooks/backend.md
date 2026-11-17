@@ -79,9 +79,9 @@ docker compose -f docker/docker-compose.yaml exec --user "$PUID:$PGID" backend_a
 
 ## 数据、复制与恢复
 
-SQLite schema v3，启用外键、WAL 和 FULL synchronous。为保留已部署的数据，v1 在启动事务中升级到 v2（增加 must_change_password）；v2 在启动事务中增加有效设备记录的部分索引并升级到 v3；空库直接初始化 v3，未知版本拒绝启动。升级前停止服务并备份完整 data 目录。同一 data 只允许一个服务进程；管理员命令可独立运行。
+SQLite 启用外键、WAL 和 FULL synchronous。空库直接初始化为 schema 9。升级前停止服务并备份完整 data 目录。同一 data 只允许一个服务进程；管理员命令可独立运行。
 
-停服并停止管理员写入后，复制整个 data（包含仍存在的 SQLite sidecar）；根内的 config.toml 已含服务凭据。OCR 的独立根目录也应复制，其密钥也只在 TOML 内。恢复到独立目录/卷，用相同版本启动核对账户、原件、修订与导出。当前只支持 schema 8；服务器启动不执行旧版本升级链。没有在线备份或自动备份机制。
+停服并停止管理员写入后，复制整个 data（包含仍存在的 SQLite sidecar）；根内的 config.toml 已含服务凭据。OCR 的独立根目录也应复制，其密钥也只在 TOML 内。恢复到独立目录/卷，用相同版本启动核对账户、原件、修订与导出。当前使用 schema 9。服务器启动时会自动迁移 schema 8 的报告状态，旧于 schema 8 的数据库需先离线迁移。没有在线备份或自动备份机制。
 
 报告/账户删除先在事务内使内容不可访问并撤销有关任务或会话，再由持久清理队列删除文件。旧上传 ID 和健康删除事件保留最小抑制标记，避免迟到上传复活。用户自己导出的文件、手机分享目的地和独立备份不在服务器删除范围内。
 

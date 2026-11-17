@@ -6,7 +6,7 @@ async fn aliases_are_owned_versioned_exportable_and_do_not_rename_report_sources
     let user = crate::add_user(&state, "alias-owner").await;
     let other = crate::add_user(&state, "alias-other").await;
     let report = crate::archive(&state, "alias-owner").await;
-    state.database.review(&user.user_id, serde_json::from_value(json!({"report_id":report,"expected_revision":1,"context":{"source_name":"Function Health"},"observations":[]})).unwrap()).await.unwrap();
+    state.database.submit_report_changes(&user.user_id, serde_json::from_value(json!({"report_id":report,"expected_revision":1,"context":{"source_name":"Function Health"},"observations":[]})).unwrap()).await.unwrap();
     let key = "report-source:function health";
     let catalog = state
         .database

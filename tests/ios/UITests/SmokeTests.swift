@@ -683,13 +683,13 @@ nonisolated final class SmokeTests: XCTestCase {
         tapButton(app, "Done")
         let info = app.buttons["report-info"]
         let count = app.descendants(matching: .any).matching(identifier: "report-marker-count").firstMatch
-        let confirmAll = app.buttons["confirm-all-results"]
+        let submitAll = app.buttons["submit-all-results"]
         let delete = app.buttons["report-delete"]
         XCTAssertTrue(delete.waitForExistence(timeout: 5))
         XCTAssertTrue(info.label.contains("Report Info"))
         XCTAssertLessThan(info.frame.midY, count.frame.midY)
         XCTAssertLessThan(count.frame.midY, delete.frame.midY)
-        XCTAssertLessThan(delete.frame.midY, confirmAll.frame.midY)
+        XCTAssertLessThan(delete.frame.midY, submitAll.frame.midY)
         info.tap()
         XCTAssertTrue(app.navigationBars["Report Info"].waitForExistence(timeout: 5))
         app.buttons["Cancel"].tap()
@@ -824,14 +824,14 @@ nonisolated final class SmokeTests: XCTestCase {
         app.alerts.buttons["Cancel"].tap()
         XCTAssertEqual(count.value as? String, "1")
 
-        let confirmed = app.staticTexts["Confirmed Results"]
-        XCTAssertTrue(confirmed.exists)
+        let submitted = app.staticTexts["Submitted Results"]
+        XCTAssertTrue(submitted.exists)
         rescan.tap()
         XCTAssertTrue(app.alerts["Rescan report?"].staticTexts.matching(NSPredicate(
             format: "label CONTAINS %@", "deletes all existing results and runs OCR again"
         )).firstMatch.exists)
         app.alerts.buttons["Rescan"].tap()
-        XCTAssertTrue(confirmed.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(submitted.waitForNonExistence(timeout: 10))
         app.swipeUp()
         XCTAssertFalse(app.buttons["report-ocr-output"].exists)
         let data = try await control("reports/get")
@@ -864,9 +864,9 @@ nonisolated final class SmokeTests: XCTestCase {
         let report = app.buttons["report-row-fixture-report"]
         XCTAssertTrue(report.waitForExistence(timeout: 10)); report.tap()
         let possible = app.buttons["report-result-possible-match"]
-        let ready = app.buttons["ready-to-confirm-results"]
+        let ready = app.buttons["ready-to-submit-results"]
         XCTAssertTrue(ready.waitForExistence(timeout: 10))
-        XCTAssertTrue(ready.label.contains("1 result ready to confirm"))
+        XCTAssertTrue(ready.label.contains("1 result ready to submit"))
 
         func checkMatch(_ name: String, printed: String) {
             let title = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
@@ -892,7 +892,7 @@ nonisolated final class SmokeTests: XCTestCase {
         }
 
         ready.tap()
-        let queue = app.navigationBars["Ready to Confirm"]
+        let queue = app.navigationBars["Ready to Submit"]
         XCTAssertTrue(queue.waitForExistence(timeout: 5))
         checkMatch("Glucose", printed: "GLU FAST")
         queue.buttons.firstMatch.tap()
@@ -911,7 +911,7 @@ nonisolated final class SmokeTests: XCTestCase {
         tapButton(app, "Save Draft")
         XCTAssertTrue(app.navigationBars["Review result"].waitForNonExistence(timeout: 5))
         for _ in 0..<3 where !ready.isHittable { app.swipeDown() }
-        XCTAssertTrue(ready.label.contains("2 results ready to confirm"))
+        XCTAssertTrue(ready.label.contains("2 results ready to submit"))
         ready.tap()
         XCTAssertTrue(queue.waitForExistence(timeout: 5))
         XCTAssertTrue(appearance.isHittable)
@@ -921,13 +921,14 @@ nonisolated final class SmokeTests: XCTestCase {
         queue.buttons.firstMatch.tap()
         let newResult = app.buttons["report-result-new"]
         reveal(app, newResult); newResult.tap()
-        XCTAssertTrue(app.navigationBars["Choose a Browse metric"].waitForExistence(timeout: 5))
-        app.buttons["create-browse-metric"].tap()
         XCTAssertTrue(app.navigationBars["Review result"].waitForExistence(timeout: 5))
-        let confirm = app.buttons["confirm-reviewed-result"]
-        reveal(app, confirm)
-        XCTAssertTrue(confirm.isEnabled)
-        confirm.tap()
+        XCTAssertTrue(app.buttons["Save Draft"].exists)
+        app.buttons["mark-as-new-metric"].tap()
+        XCTAssertTrue(app.navigationBars["Review result"].waitForExistence(timeout: 5))
+        let submit = app.buttons["submit-reviewed-result"]
+        reveal(app, submit)
+        XCTAssertTrue(submit.isEnabled)
+        submit.tap()
         XCTAssertTrue(app.navigationBars["Review result"].waitForNonExistence(timeout: 5))
         XCTAssertTrue(newResult.waitForNonExistence(timeout: 5))
     }
@@ -1004,47 +1005,49 @@ nonisolated final class SmokeTests: XCTestCase {
         let data = try await control("test/counts")
         let counts = try JSONSerialization.jsonObject(with: data) as? [String: Int]
         XCTAssertNil(counts?["reports/get"])
-        XCTAssertNil(counts?["reports/review"])
-        let confirm = app.buttons["confirm-all-results"]
-        XCTAssertTrue(confirm.isEnabled)
-        let ready = app.buttons["ready-to-confirm-results"]
-        XCTAssertTrue(ready.label.contains("125 results ready to confirm"))
-        XCTAssertEqual(confirm.label, "Confirm")
-        XCTAssertEqual(ready.frame.midY, confirm.frame.midY, accuracy: 2)
+        XCTAssertNil(counts?["reports/submit"])
+        let submit = app.buttons["submit-all-results"]
+        XCTAssertTrue(submit.isEnabled)
+        let ready = app.buttons["ready-to-submit-results"]
+        XCTAssertTrue(ready.label.contains("125 results ready to submit"))
+        XCTAssertEqual(submit.label, "Submit")
+        XCTAssertEqual(ready.frame.midY, submit.frame.midY, accuracy: 2)
         let needsReview = app.staticTexts["Needs Review"]
         XCTAssertTrue(needsReview.exists)
         XCTAssertGreaterThan(needsReview.frame.minY, ready.frame.maxY)
         ready.tap()
-        let queue = app.navigationBars["Ready to Confirm"]
+        let queue = app.navigationBars["Ready to Submit"]
         XCTAssertTrue(queue.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Marker 1")).firstMatch.waitForExistence(timeout: 5))
+        let rowSubmit = app.buttons["report-result-status-action"].firstMatch
+        XCTAssertTrue(rowSubmit.waitForExistence(timeout: 5))
+        XCTAssertEqual(rowSubmit.label, "Submit")
         queue.buttons.firstMatch.tap()
-        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        XCTAssertTrue(submit.waitForExistence(timeout: 5))
         _ = try await control("test/fail-review")
-        confirm.tap()
-        XCTAssertTrue(confirm.waitForExistence(timeout: 10))
+        submit.tap()
+        XCTAssertTrue(submit.waitForExistence(timeout: 10))
         let retry = NSPredicate(format: "enabled == true")
-        await fulfillment(of: [XCTNSPredicateExpectation(predicate: retry, object: confirm)], timeout: 10)
+        await fulfillment(of: [XCTNSPredicateExpectation(predicate: retry, object: submit)], timeout: 10)
         _ = try await control("test/reset-counts")
-        confirm.tap()
-        let finished = NSPredicate(format: "label CONTAINS %@", "0 results ready to confirm")
+        submit.tap()
+        let finished = NSPredicate(format: "label CONTAINS %@", "0 results ready to submit")
         await fulfillment(of: [XCTNSPredicateExpectation(predicate: finished, object: ready)], timeout: 10)
-        XCTAssertFalse(confirm.isEnabled)
+        XCTAssertFalse(submit.isEnabled)
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "<0.1 mg/dL (Negative mg/dL)")).firstMatch.exists)
         XCTAssertTrue(needsReview.exists)
         let review = app.buttons["report-result-status-action"].firstMatch
         XCTAssertEqual(review.label, "Review")
         review.tap()
         XCTAssertTrue(app.navigationBars["Review result"].waitForExistence(timeout: 5))
-        let approve = app.buttons["confirm-reviewed-result"]
+        let approve = app.buttons["submit-reviewed-result"]
         reveal(app, approve)
         XCTAssertTrue(approve.isEnabled)
         approve.tap()
         XCTAssertTrue(app.navigationBars["Review result"].waitForNonExistence(timeout: 10))
         XCTAssertTrue(needsReview.waitForNonExistence(timeout: 10))
-        let confirmationCounts = try JSONSerialization.jsonObject(with: await control("test/counts")) as? [String: Int]
-        XCTAssertEqual(confirmationCounts?["reports/review"], 2)
-        XCTAssertNil(confirmationCounts?["reports/get"])
+        let submissionCounts = try JSONSerialization.jsonObject(with: await control("test/counts")) as? [String: Int]
+        XCTAssertEqual(submissionCounts?["reports/submit"], 2)
+        XCTAssertNil(submissionCounts?["reports/get"])
         // Traverse the entire long report in both directions, not only its first few rows.
         for _ in 0..<55 {
             if app.buttons["report-ocr-output"].isHittable { break }
@@ -1057,9 +1060,9 @@ nonisolated final class SmokeTests: XCTestCase {
         }
         XCTAssertTrue(source.isHittable)
         for _ in 0..<4 { app.swipeUp() }
-        let marker = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Marker")).allElementsBoundByIndex.first { $0.isHittable && $0.frame.minY > 200 && $0.frame.maxY < 650 }
-        XCTAssertNotNil(marker); marker?.tap()
-        XCTAssertTrue(app.buttons["Cancel"].waitForExistence(timeout: 5))
+        let marker = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Glucose")).allElementsBoundByIndex.first { $0.isHittable && $0.frame.minY > 200 && $0.frame.maxY < 650 }
+        try XCTUnwrap(marker, "Missing visible submitted glucose result").tap()
+        XCTAssertTrue(app.navigationBars["Review result"].waitForExistence(timeout: 5))
         tapButton(app, "Cancel")
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.lifetime = .keepAlways; add(shot)
 

@@ -73,6 +73,6 @@ import Testing
     #expect(ReportReview.defaultMetricID(draft) == "urine_ketones")
     #expect(LaboratoryPresentation.resultTitle(draft, metrics: metrics, renamedMetrics: renamed) == "Urine - Ketones")
     #expect(draft["payload"]["raw_name"] == .string("Ketone, Urine (2514-8)"))
-    draft["status"] = .string("confirmed")
+    draft["status"] = .string("submitted")
     #expect(LaboratoryPresentation.resultTitle(draft, metrics: metrics, renamedMetrics: renamed) == "Urine - Ketones")
 }

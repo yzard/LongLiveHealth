@@ -297,7 +297,7 @@ async fn build_export(state: &AppState, user_id: &str, export_id: &str) -> Resul
     transaction.commit().await?;
     let field_dictionary: Value =
         serde_json::from_str(include_str!("../archive/field_dictionary.json"))?;
-    let manifest = json!({"field_dictionary":field_dictionary,"format":"longlivehealth-export","version":1,"database_schema_version":8,"table_counts":table_counts,"table_columns":table_columns,"data_revision":revision,"user_id":user_id,"created_at":now()?,
+    let manifest = json!({"field_dictionary":field_dictionary,"format":"longlivehealth-export","version":1,"database_schema_version":9,"table_counts":table_counts,"table_columns":table_columns,"data_revision":revision,"user_id":user_id,"created_at":now()?,
         "conversion_version":crate::laboratory::CONVERSION_VERSION,"metrics":crate::laboratory::metrics(),"tables":queries::EXPORT_TABLES.iter().map(|(name,_)|format!("{name}.jsonl")).collect::<Vec<_>>(),"raw_directory":"raw/","csv":"observations.csv",
         "notes":"JSONL is lossless. CSV formula-leading text is prefixed with an apostrophe. No passwords, sessions or provider secrets are exported."});
     tokio::fs::write(

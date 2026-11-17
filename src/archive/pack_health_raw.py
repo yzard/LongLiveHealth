@@ -130,10 +130,10 @@ def pack_locked(root):
     with sqlite3.connect(root / 'database.sqlite') as db:
         db.row_factory = sqlite3.Row
         version = db.execute(queries.VERSION).fetchone()[0]
-        if version == 8:
+        if version in (8, 9):
             return {'status': 'complete', 'removed': clean_originals(root, manifest)}
         if version != 7:
-            raise ValueError('Expected schema 7 or an already converted schema 8')
+            raise ValueError('Expected schema 7 or an already converted schema 8 or 9')
         db.execute(queries.FULL_SYNC)
         db.execute(queries.COPY_CACHE)
         # The server is stopped: let durable WAL commits accumulate and checkpoint

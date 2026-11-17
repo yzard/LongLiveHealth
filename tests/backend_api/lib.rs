@@ -1,4 +1,4 @@
-use longlivehealth::reports::ReviewStatus;
+use longlivehealth::reports::ReportResultStatus;
 mod accounts;
 mod analysis;
 mod app;
@@ -55,7 +55,7 @@ pub async fn archive(state: &AppState, username: &str) -> String {
     response["file"]["file_id"].as_str().unwrap().into()
 }
 
-pub async fn confirm(state: &AppState, user_id: &str, report_id: &str) -> String {
+pub async fn submit(state: &AppState, user_id: &str, report_id: &str) -> String {
     let report = state
         .database
         .report_summary(user_id, report_id)
@@ -63,16 +63,16 @@ pub async fn confirm(state: &AppState, user_id: &str, report_id: &str) -> String
         .unwrap();
     let response = state
         .database
-        .review(
+        .submit_report_changes(
             user_id,
-            longlivehealth::reports::ReviewRequest {
+            longlivehealth::reports::ReportSubmission {
                 report_id: report_id.into(),
                 expected_revision: report.revision,
                 context: None,
-                observations: vec![longlivehealth::reports::ReviewItem {
+                observations: vec![longlivehealth::reports::ReportResultChange {
                     observation_id: None,
                     expected_revision: None,
-                    status: ReviewStatus::Confirmed,
+                    status: ReportResultStatus::Submitted,
                     payload: observation_payload(),
                 }],
             },

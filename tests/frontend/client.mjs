@@ -8,7 +8,7 @@ test('viewer refuses import, review, deletion, arbitrary paths, and invalid orig
   let calls = 0;
   const client = new Client(async () => { calls++; }, () => {});
   client.session = session('test');
-  for (const action of ['files/upload', 'health/connect', 'health/sync', 'reports/review', 'reports/delete', 'user/delete', '../session/login', 'https://other-server.test']) {
+  for (const action of ['files/upload', 'health/connect', 'health/sync', 'reports/submit', 'reports/delete', 'user/delete', '../session/login', 'https://other-server.test']) {
     await assert.rejects(client.post(action, {}, undefined), /unavailable/);
   }
   for (const id of ['../secret', 'abc?token=secret', '']) await assert.rejects(client.original(id, undefined), /Invalid/);

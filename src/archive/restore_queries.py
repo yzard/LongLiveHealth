@@ -4,7 +4,7 @@ CREATE_OWNER = """
 INSERT INTO users (user_id, username, password_hash, is_active, created_at, data_revision)
 VALUES (?, ?, '', 0, ?, ?)
 """
-SET_VERSION = 'PRAGMA user_version = 8'
+SET_VERSION = 'PRAGMA user_version = 9'
 DEFER_KEYS = 'PRAGMA defer_foreign_keys = ON'
 FOREIGN_KEYS = 'PRAGMA foreign_keys = ON'
 CHECK_KEYS = 'PRAGMA foreign_key_check'

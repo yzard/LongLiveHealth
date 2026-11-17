@@ -77,7 +77,7 @@ pub const NAMED_REPORT_METRIC_ORIGINS: &str = r#"
 SELECT o.report_id, o.payload_json, r.context_json
   FROM review_observations o
   JOIN reports r ON r.user_id = o.user_id AND r.report_id = o.report_id
- WHERE o.user_id = ? AND o.status = 'confirmed'
+ WHERE o.user_id = ? AND o.status = 'submitted'
    AND json_extract(o.payload_json, '$.metric_id') IS NULL
  ORDER BY r.created_at, o.observation_id
 "#;
@@ -258,9 +258,9 @@ ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revi
     , payload_json=excluded.payload_json
     , updated_at=excluded.updated_at
 "#;
-pub const CONFIRM_OBSERVATION: &str = r#"
+pub const SUBMIT_OBSERVATION: &str = r#"
 INSERT INTO main.observations (user_id, observation_id, current_revision, status, payload_json, updated_at, report_id, candidate_key)
-VALUES (?1, ?2, ?3, 'confirmed', ?4, ?5, ?6, ?7)
+VALUES (?1, ?2, ?3, 'submitted', ?4, ?5, ?6, ?7)
 ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision
     , status=excluded.status
     , payload_json=excluded.payload_json
@@ -268,7 +268,7 @@ ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revi
 "#;
 pub const UPDATE_REPORT: &str = "UPDATE reports SET revision = revision + 1, context_json = COALESCE(?, context_json) WHERE user_id = ? AND report_id = ? AND revision = ?";
 pub const OBSERVATION_HISTORY: &str = "SELECT observation_id, current_revision AS revision, status, payload_json, updated_at AS created_at FROM review_observations WHERE user_id = ? AND observation_id = ?";
-pub const CONFIRMED_OBSERVATIONS: &str = r#"
+pub const SUBMITTED_OBSERVATIONS: &str = r#"
 SELECT o.observation_id
      , o.report_id
      , o.current_revision AS revision
@@ -278,7 +278,7 @@ SELECT o.observation_id
   FROM review_observations o
   JOIN reports report ON report.user_id = o.user_id AND report.report_id = o.report_id
  WHERE o.user_id = ?
-   AND o.status = 'confirmed'
+   AND o.status = 'submitted'
    AND NOT EXISTS (
        SELECT 1 FROM report_relations r WHERE r.user_id = o.user_id AND r.report_id = o.report_id
    )
@@ -332,7 +332,7 @@ SELECT o.payload_json, json_extract(r.context_json, '$.source_name') AS source_n
   JOIN review_observations o ON o.user_id = r.user_id AND o.report_id = r.report_id
  WHERE r.user_id = ?1 AND r.report_id != current.report_id
    AND lower(trim(json_extract(r.context_json, '$.source_name'))) = lower(trim(?3))
-   AND (o.status = 'confirmed'
+   AND (o.status = 'submitted'
         OR (r.created_at, r.report_id) < (current.created_at, current.report_id)
         OR EXISTS (SELECT 1 FROM draft.observations d WHERE d.observation_id = o.observation_id
                     AND d.current_revision = o.current_revision
@@ -348,7 +348,7 @@ pub const MARK_RESCAN_JOB: &str = "INSERT INTO report_rescan_jobs (job_id) VALUE
 pub const INSERT_PAGE: &str = "INSERT INTO extraction_pages (user_id, report_id, run_id, page_number, status, content, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
 pub const EXTRACTION_PAGES: &str = "SELECT run_id, page_number, status, content, model, created_at FROM extraction_pages WHERE user_id = ? AND report_id = ? ORDER BY created_at DESC, run_id, page_number";
 
-pub const SET_SCHEMA_VERSION: &str = "PRAGMA user_version = 8";
+pub const SET_SCHEMA_VERSION: &str = "PRAGMA user_version = 9";
 
 pub const CREATE_USER: &str = r#"
 INSERT INTO users (user_id
@@ -864,8 +864,16 @@ UNION ALL
 SELECT d.observation_id, d.user_id, d.report_id, d.current_revision, d.status, d.payload_json, d.updated_at, d.candidate_key FROM draft.observations d WHERE EXISTS (SELECT 1 FROM main.reports r WHERE r.user_id=d.user_id AND r.report_id=d.report_id)
 AND NOT EXISTS (SELECT 1 FROM main.observations o WHERE o.observation_id=d.observation_id AND o.current_revision>=d.current_revision);
 "#;
-pub const MIGRATE_REPORT_DRAFTS: &str = "INSERT INTO draft.observations (observation_id,user_id,report_id,current_revision,status,payload_json,updated_at,candidate_key) SELECT observation_id,user_id,report_id,current_revision+CASE WHEN status='rejected' THEN 1 ELSE 0 END,'pending',CASE WHEN status='rejected' THEN json_set(payload_json,'$.ocr_mapping_note','Previously excluded. Review before confirming. ' || coalesce(json_extract(payload_json,'$.ocr_mapping_note'),'')) ELSE payload_json END,updated_at,candidate_key FROM main.observations WHERE status!='confirmed' ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision,status=excluded.status,payload_json=excluded.payload_json,updated_at=excluded.updated_at WHERE excluded.current_revision>observations.current_revision";
-pub const REMOVE_SUPERSEDED_OFFICIAL: &str = "DELETE FROM main.observations WHERE EXISTS (SELECT 1 FROM draft.observations d WHERE d.observation_id=observations.observation_id AND (d.current_revision>observations.current_revision OR (d.current_revision=observations.current_revision AND observations.status!='confirmed')))";
+pub const MIGRATE_REPORT_DRAFTS: &str = r#"
+INSERT INTO draft.observations (observation_id, user_id, report_id, current_revision, status, payload_json, updated_at, candidate_key)
+SELECT observation_id, user_id, report_id, current_revision, status, payload_json, updated_at, candidate_key
+  FROM main.observations WHERE status = 'pending'
+ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision
+    , payload_json=excluded.payload_json
+    , updated_at=excluded.updated_at
+WHERE excluded.current_revision > observations.current_revision
+"#;
+pub const REMOVE_SUPERSEDED_OFFICIAL: &str = "DELETE FROM main.observations WHERE EXISTS (SELECT 1 FROM draft.observations d WHERE d.observation_id=observations.observation_id AND (d.current_revision>observations.current_revision OR (d.current_revision=observations.current_revision AND observations.status!='submitted')))";
 pub const REMOVE_SUPERSEDED_DRAFTS: &str = "DELETE FROM draft.observations WHERE NOT EXISTS (SELECT 1 FROM main.reports r WHERE r.user_id=observations.user_id AND r.report_id=observations.report_id) OR EXISTS (SELECT 1 FROM main.observations o WHERE o.observation_id=observations.observation_id AND o.current_revision>=observations.current_revision)";
 
 pub const HEALTH_ARCHIVE_END: &str = "SELECT raw_offset + 8 + raw_length FROM health_originals WHERE raw_path = ? AND raw_offset IS NOT NULL ORDER BY raw_offset DESC LIMIT 1";

@@ -1,11 +1,11 @@
 use crate::{add_user, archive, fixture};
-use longlivehealth::reports::ReviewStatus;
+use longlivehealth::reports::ReportResultStatus;
 
 #[tokio::test]
-async fn new_confirmed_metric_and_loinc_are_used_for_rescans_and_first_imports() {
+async fn new_submitted_metric_and_loinc_are_used_for_rescans_and_first_imports() {
     use longlivehealth::{
         metric_history::{HistoryRequest, history},
-        reports::{NewMetric, ReviewItem, ReviewRequest, UnmappedChoice},
+        reports::{NewMetric, ReportResultChange, ReportSubmission, UnmappedChoice},
     };
     use serde_json::{Value, json};
     use std::sync::{Arc, Mutex};
@@ -95,15 +95,15 @@ async fn new_confirmed_metric_and_loinc_are_used_for_rescans_and_first_imports()
     assert_ne!(reports[0], reports[1]);
     assert_eq!(*received.lock().unwrap(), [Value::Null, Value::Null]);
 
-    let change = |report_id: &str, document: &Value, status: ReviewStatus, payload| {
+    let change = |report_id: &str, document: &Value, status: ReportResultStatus, payload| {
         let row = &document["observations"][0];
-        state.database.review(
+        state.database.submit_report_changes(
             &user.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report_id.into(),
                 expected_revision: document["report"]["revision"].as_i64().unwrap(),
                 context: None,
-                observations: vec![ReviewItem {
+                observations: vec![ReportResultChange {
                     observation_id: row["observation_id"].as_str().map(str::to_owned),
                     expected_revision: row["revision"].as_i64(),
                     status,
@@ -125,16 +125,21 @@ async fn new_confirmed_metric_and_loinc_are_used_for_rescans_and_first_imports()
         change(
             &reports[0],
             &first,
-            ReviewStatus::Confirmed,
+            ReportResultStatus::Submitted,
             payload.clone()
         )
         .await
         .is_err()
     );
     payload.unmapped_choice = Some(UnmappedChoice::New(payload.ocr_new_metric.clone().unwrap()));
-    let saved = change(&reports[0], &first, ReviewStatus::Pending, payload.clone())
-        .await
-        .unwrap();
+    let saved = change(
+        &reports[0],
+        &first,
+        ReportResultStatus::Pending,
+        payload.clone(),
+    )
+    .await
+    .unwrap();
     assert!(
         state
             .database
@@ -143,10 +148,10 @@ async fn new_confirmed_metric_and_loinc_are_used_for_rescans_and_first_imports()
             .unwrap()
             .is_empty()
     );
-    let confirmed = change(&reports[0], &saved, ReviewStatus::Confirmed, payload)
+    let submitted = change(&reports[0], &saved, ReportResultStatus::Submitted, payload)
         .await
         .unwrap();
-    let id = confirmed["created_metric"]["metric_id"].as_str().unwrap();
+    let id = submitted["created_metric"]["metric_id"].as_str().unwrap();
     assert!(id.starts_with("custom:"));
     let revision = state
         .database
@@ -177,7 +182,7 @@ async fn new_confirmed_metric_and_loinc_are_used_for_rescans_and_first_imports()
     assert!(second["observations"][0]["payload"]["metric_id"].is_null());
     assert_eq!(second["observations"][0]["resolved_metric_id"], id);
     let payload = serde_json::from_value(second["observations"][0]["payload"].clone()).unwrap();
-    let after = change(&reports[1], &second, ReviewStatus::Confirmed, payload)
+    let after = change(&reports[1], &second, ReportResultStatus::Submitted, payload)
         .await
         .unwrap();
     assert_eq!(after["observations"][0]["payload"]["metric_id"], id);
@@ -227,7 +232,7 @@ async fn new_confirmed_metric_and_loinc_are_used_for_rescans_and_first_imports()
 
 #[tokio::test]
 async fn retry_preserves_reviewed_rows_but_rescan_replaces_them_with_fresh_ocr() {
-    use longlivehealth::reports::{ReviewItem, ReviewRequest};
+    use longlivehealth::reports::{ReportResultChange, ReportSubmission};
     use serde_json::{Value, json};
     use sqlx::{Connection, SqliteConnection, sqlite::SqliteConnectOptions};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -293,14 +298,14 @@ async fn retry_preserves_reviewed_rows_but_rescan_replaces_them_with_fresh_ocr()
         .unwrap()
         .revision;
     let edits = [
-        (&original[1], ReviewStatus::Pending),
-        (&original[2], ReviewStatus::Confirmed),
+        (&original[1], ReportResultStatus::Pending),
+        (&original[2], ReportResultStatus::Submitted),
     ];
     state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report.clone(),
                 expected_revision: revision,
                 context: None,
@@ -309,10 +314,10 @@ async fn retry_preserves_reviewed_rows_but_rescan_replaces_them_with_fresh_ocr()
                     .map(|(row, status)| {
                         let mut payload = row.payload.clone();
                         payload.notes = Some("Reviewer annotation".into());
-                        if status == ReviewStatus::Confirmed {
+                        if status == ReportResultStatus::Submitted {
                             payload.metric_id = Some("ldl_cholesterol".into());
                         }
-                        ReviewItem {
+                        ReportResultChange {
                             observation_id: Some(row.observation_id.clone()),
                             expected_revision: Some(row.revision),
                             status,
@@ -351,7 +356,7 @@ async fn retry_preserves_reviewed_rows_but_rescan_replaces_them_with_fresh_ocr()
         rows[0].payload.ocr_mapping_note.as_deref(),
         Some("Refreshed note")
     );
-    for (row, expected_status) in rows[1..=2].iter().zip(["pending", "confirmed"]) {
+    for (row, expected_status) in rows[1..=2].iter().zip(["pending", "submitted"]) {
         assert_eq!(row.status, expected_status);
         assert_eq!(row.payload.notes.as_deref(), Some("Reviewer annotation"));
         assert_eq!(
@@ -528,7 +533,7 @@ async fn actual_http_extraction_creates_pending_candidates_with_provenance() {
     assert!(
         state
             .database
-            .confirmed(&user.user_id)
+            .submitted_observations(&user.user_id)
             .await
             .unwrap()
             .is_empty()
@@ -718,16 +723,16 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
         .revision;
     state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            longlivehealth::reports::ReviewRequest {
+            longlivehealth::reports::ReportSubmission {
                 report_id: report.into(),
                 expected_revision: revision,
                 context: None,
-                observations: vec![longlivehealth::reports::ReviewItem {
+                observations: vec![longlivehealth::reports::ReportResultChange {
                     observation_id: None,
                     expected_revision: None,
-                    status: ReviewStatus::Confirmed,
+                    status: ReportResultStatus::Submitted,
                     payload: manual,
                 }],
             },
@@ -1024,7 +1029,7 @@ async fn long_extraction_renews_lease_and_releases_renewal_on_completion() {
 }
 
 #[tokio::test]
-async fn complete_ocr_with_review_warnings_succeeds_without_confirming_or_losing_evidence() {
+async fn complete_ocr_with_review_warnings_succeeds_without_submitting_or_losing_evidence() {
     let (_directory, mut state) = fixture().await;
     let user = add_user(&state, "alice").await;
     let mut observation = crate::observation_payload();
@@ -1074,7 +1079,7 @@ async fn complete_ocr_with_review_warnings_succeeds_without_confirming_or_losing
     assert!(
         state
             .database
-            .confirmed(&user.user_id)
+            .submitted_observations(&user.user_id)
             .await
             .unwrap()
             .is_empty()
@@ -1313,7 +1318,7 @@ async fn missing_collection_date_fails_job_and_returns_item_reason() {
     assert!(
         state
             .database
-            .confirmed(&user.user_id)
+            .submitted_observations(&user.user_id)
             .await
             .unwrap()
             .is_empty()
@@ -1323,7 +1328,7 @@ async fn missing_collection_date_fails_job_and_returns_item_reason() {
 
 #[tokio::test]
 async fn rescan_removes_only_numeric_overlaps_and_refreshes_ocr_again() {
-    use longlivehealth::reports::{ReviewItem, ReviewRequest};
+    use longlivehealth::reports::{ReportResultChange, ReportSubmission};
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1346,16 +1351,16 @@ async fn rescan_removes_only_numeric_overlaps_and_refreshes_ocr_again() {
         let report = archive(&state, "alice").await;
         state
             .database
-            .review(
+            .submit_report_changes(
                 owner,
-                ReviewRequest {
+                ReportSubmission {
                     report_id: report,
                     expected_revision: 1,
                     context: Some(serde_json::from_value(json!({"source_name": source})).unwrap()),
-                    observations: vec![ReviewItem {
+                    observations: vec![ReportResultChange {
                         observation_id: None,
                         expected_revision: None,
-                        status: ReviewStatus::Confirmed,
+                        status: ReportResultStatus::Submitted,
                         payload: result(name, "120.0", "2026-08-01", "mg/dL"),
                     }],
                 },
@@ -1377,9 +1382,9 @@ async fn rescan_removes_only_numeric_overlaps_and_refreshes_ocr_again() {
     let report = archive(&state, "alice").await;
     state
         .database
-        .review(
+        .submit_report_changes(
             owner,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report.clone(),
                 expected_revision: 1,
                 context: Some(serde_json::from_value(json!({"source_name":"clinic a"})).unwrap()),
@@ -1463,6 +1468,14 @@ async fn rescan_removes_only_numeric_overlaps_and_refreshes_ocr_again() {
         assert_ne!(refreshed.observation_id, previous);
         previous = refreshed.observation_id.clone();
     }
-    assert_eq!(state.database.confirmed(owner).await.unwrap().len(), 2);
+    assert_eq!(
+        state
+            .database
+            .submitted_observations(owner)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
     server.abort();
 }

@@ -1,10 +1,10 @@
-use crate::{add_user, archive, confirm, fixture, observation_payload};
+use crate::{add_user, archive, fixture, observation_payload, submit};
 use longlivehealth::laboratory::normalized;
-use longlivehealth::reports::ReviewStatus;
-use longlivehealth::reports::{ReviewItem, ReviewRequest, TrendRequest, trends};
+use longlivehealth::reports::ReportResultStatus;
+use longlivehealth::reports::{ReportResultChange, ReportSubmission, TrendRequest, trends};
 
 #[tokio::test]
-async fn report_review_api_rejects_retired_status_without_writing_a_revision() {
+async fn report_submission_rejects_retired_status_without_writing_a_revision() {
     use axum::http::StatusCode;
     use serde_json::json;
 
@@ -13,22 +13,24 @@ async fn report_review_api_rejects_retired_status_without_writing_a_revision() {
     let report_id = archive(&state, "alice").await;
     let token = crate::token(&state, "alice").await;
     let router = longlivehealth::app::create_application(state.clone());
-    let (status, response) = crate::request(
-        &router,
-        "/api/v1/reports/review",
-        Some(&token),
-        json!({
-            "report_id": report_id,
-            "expected_revision": 1,
-            "observations": [
-                {"status": "confirmed", "payload": observation_payload()},
-                {"status": "rejected", "payload": observation_payload()}
-            ]
-        }),
-    )
-    .await;
+    for retired in ["rejected", "confirmed"] {
+        let (status, response) = crate::request(
+            &router,
+            "/api/v1/reports/submit",
+            Some(&token),
+            json!({
+                "report_id": report_id,
+                "expected_revision": 1,
+                "observations": [
+                    {"status": "submitted", "payload": observation_payload()},
+                    {"status": retired, "payload": observation_payload()}
+                ]
+            }),
+        )
+        .await;
 
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{response}");
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{response}");
+    }
     let report = state
         .database
         .report(&user.user_id, &report_id)
@@ -44,34 +46,34 @@ async fn partial_review_history_and_conflicts_are_transactional() {
     let alice = add_user(&state, "alice").await;
     let bob = add_user(&state, "bob").await;
     let report = archive(&state, "alice").await;
-    let request = ReviewRequest {
+    let request = ReportSubmission {
         report_id: report.clone(),
         expected_revision: 1,
         context: None,
         observations: vec![
-            ReviewItem {
+            ReportResultChange {
                 observation_id: None,
                 expected_revision: None,
-                status: ReviewStatus::Confirmed,
+                status: ReportResultStatus::Submitted,
                 payload: observation_payload(),
             },
-            ReviewItem {
+            ReportResultChange {
                 observation_id: None,
                 expected_revision: None,
-                status: ReviewStatus::Pending,
+                status: ReportResultStatus::Pending,
                 payload: observation_payload(),
             },
         ],
     };
     state
         .database
-        .review(&alice.user_id, request)
+        .submit_report_changes(&alice.user_id, request)
         .await
         .unwrap();
     assert_eq!(
         state
             .database
-            .confirmed(&alice.user_id)
+            .submitted_observations(&alice.user_id)
             .await
             .unwrap()
             .len(),
@@ -84,7 +86,7 @@ async fn partial_review_history_and_conflicts_are_transactional() {
         .unwrap();
     let id = rows
         .iter()
-        .find(|row| row.status == "confirmed")
+        .find(|row| row.status == "submitted")
         .unwrap()
         .observation_id
         .clone();
@@ -92,16 +94,16 @@ async fn partial_review_history_and_conflicts_are_transactional() {
     edited.raw_result = "130".into();
     state
         .database
-        .review(
+        .submit_report_changes(
             &alice.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report.clone(),
                 expected_revision: 2,
                 context: None,
-                observations: vec![ReviewItem {
+                observations: vec![ReportResultChange {
                     observation_id: Some(id.clone()),
                     expected_revision: Some(1),
-                    status: ReviewStatus::Confirmed,
+                    status: ReportResultStatus::Submitted,
                     payload: edited,
                 }],
             },
@@ -129,9 +131,9 @@ async fn partial_review_history_and_conflicts_are_transactional() {
     assert!(
         state
             .database
-            .review(
+            .submit_report_changes(
                 &alice.user_id,
-                ReviewRequest {
+                ReportSubmission {
                     report_id: report.clone(),
                     expected_revision: 2,
                     context: None,
@@ -170,15 +172,20 @@ async fn duplicate_relations_exclude_points_and_forbid_cycles() {
     let user = add_user(&state, "alice").await;
     let first = archive(&state, "alice").await;
     let second = archive(&state, "alice").await;
-    confirm(&state, &user.user_id, &first).await;
-    confirm(&state, &user.user_id, &second).await;
+    submit(&state, &user.user_id, &first).await;
+    submit(&state, &user.user_id, &second).await;
     state
         .database
         .relate_reports(&user.user_id, &first, Some(&second), "duplicate", 2)
         .await
         .unwrap();
     assert_eq!(
-        state.database.confirmed(&user.user_id).await.unwrap().len(),
+        state
+            .database
+            .submitted_observations(&user.user_id)
+            .await
+            .unwrap()
+            .len(),
         1
     );
     assert!(
@@ -194,7 +201,12 @@ async fn duplicate_relations_exclude_points_and_forbid_cycles() {
         .await
         .unwrap();
     assert_eq!(
-        state.database.confirmed(&user.user_id).await.unwrap().len(),
+        state
+            .database
+            .submitted_observations(&user.user_id)
+            .await
+            .unwrap()
+            .len(),
         2
     );
 }
@@ -218,7 +230,7 @@ fn unit_conversion_never_rewrites_comparators_or_unknown_units() {
 }
 
 #[tokio::test]
-async fn confirmed_units_share_scale_and_unknown_values_report_specific_reasons() {
+async fn submitted_units_share_scale_and_unknown_values_report_specific_reasons() {
     let (_directory, state) = fixture().await;
     let user = add_user(&state, "alice").await;
     let report = archive(&state, "alice").await;
@@ -236,19 +248,19 @@ async fn confirmed_units_share_scale_and_unknown_values_report_specific_reasons(
             payload.raw_result = value.into();
             payload.raw_unit = Some(unit.into());
             payload.reference_range = Some("<2.586 mmol/L".into());
-            ReviewItem {
+            ReportResultChange {
                 observation_id: None,
                 expected_revision: None,
-                status: ReviewStatus::Confirmed,
+                status: ReportResultStatus::Submitted,
                 payload,
             }
         })
         .collect();
     let result = state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report,
                 expected_revision: 1,
                 context: None,
@@ -319,9 +331,9 @@ async fn ocr_identity_autofills_and_relocates_without_overwriting_user_edits() {
     assert!(source_dir.exists());
     state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report.clone(),
                 expected_revision: first["report"]["revision"].as_i64().unwrap(),
                 context: Some(
@@ -389,16 +401,16 @@ async fn reviewing_moves_rows_between_sqlite_databases_and_updates_browse_histor
     let report = archive(&state, "draft-owner").await;
     let mut document = state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report.clone(),
                 expected_revision: 1,
                 context: None,
-                observations: vec![ReviewItem {
+                observations: vec![ReportResultChange {
                     observation_id: None,
                     expected_revision: None,
-                    status: ReviewStatus::Pending,
+                    status: ReportResultStatus::Pending,
                     payload: observation_payload(),
                 }],
             },
@@ -409,7 +421,7 @@ async fn reviewing_moves_rows_between_sqlite_databases_and_updates_browse_histor
     assert!(
         state
             .database
-            .confirmed(&user.user_id)
+            .submitted_observations(&user.user_id)
             .await
             .unwrap()
             .is_empty()
@@ -426,16 +438,16 @@ async fn reviewing_moves_rows_between_sqlite_databases_and_updates_browse_histor
         .unwrap()
         .to_owned();
     for (status, counts) in [
-        (ReviewStatus::Confirmed, (1, 0)),
-        (ReviewStatus::Pending, (0, 1)),
-        (ReviewStatus::Confirmed, (1, 0)),
+        (ReportResultStatus::Submitted, (1, 0)),
+        (ReportResultStatus::Pending, (0, 1)),
+        (ReportResultStatus::Submitted, (1, 0)),
     ] {
         let revision = document["observations"][0]["revision"].as_i64().unwrap();
-        let request = |expected| ReviewRequest {
+        let request = |expected| ReportSubmission {
             report_id: report.clone(),
             expected_revision: document["report"]["revision"].as_i64().unwrap(),
             context: None,
-            observations: vec![ReviewItem {
+            observations: vec![ReportResultChange {
                 observation_id: Some(id.clone()),
                 expected_revision: Some(expected),
                 status,
@@ -446,14 +458,14 @@ async fn reviewing_moves_rows_between_sqlite_databases_and_updates_browse_histor
         assert!(
             state
                 .database
-                .review(&user.user_id, request(revision + 10))
+                .submit_report_changes(&user.user_id, request(revision + 10))
                 .await
                 .is_err()
         );
         assert_eq!(observation_counts(directory.path()).await, before);
         document = state
             .database
-            .review(&user.user_id, request(revision))
+            .submit_report_changes(&user.user_id, request(revision))
             .await
             .unwrap();
         assert_eq!(observation_counts(directory.path()).await, counts);
@@ -465,7 +477,7 @@ async fn reviewing_moves_rows_between_sqlite_databases_and_updates_browse_histor
         assert_eq!(document["observations"][0]["payload"]["raw_result"], "120");
         let history = ldl_history(&state.database, &user.user_id).await;
         let points = history["points"].as_array().unwrap();
-        if status == ReviewStatus::Confirmed {
+        if status == ReportResultStatus::Submitted {
             assert_eq!(points.len(), 1);
             assert_eq!(points[0]["observation_id"], id);
         } else {
@@ -473,8 +485,13 @@ async fn reviewing_moves_rows_between_sqlite_databases_and_updates_browse_histor
             assert!(history["records"].as_array().unwrap().is_empty());
         }
         assert_eq!(
-            state.database.confirmed(&user.user_id).await.unwrap().len(),
-            usize::from(status == ReviewStatus::Confirmed)
+            state
+                .database
+                .submitted_observations(&user.user_id)
+                .await
+                .unwrap()
+                .len(),
+            usize::from(status == ReportResultStatus::Submitted)
         );
     }
 }
@@ -487,15 +504,15 @@ async fn deleting_report_removes_official_and_draft_results() {
     let report = archive(&state, "delete-owner").await;
     let document = state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report.clone(),
                 expected_revision: 1,
                 context: None,
-                observations: [ReviewStatus::Pending, ReviewStatus::Confirmed]
+                observations: [ReportResultStatus::Pending, ReportResultStatus::Submitted]
                     .into_iter()
-                    .map(|status| ReviewItem {
+                    .map(|status| ReportResultChange {
                         observation_id: None,
                         expected_revision: None,
                         status,
@@ -542,7 +559,7 @@ async fn deleting_report_removes_official_and_draft_results() {
     assert!(
         state
             .database
-            .confirmed(&user.user_id)
+            .submitted_observations(&user.user_id)
             .await
             .unwrap()
             .is_empty()
@@ -577,7 +594,7 @@ async fn startup_relocates_old_pending_rows_and_recovers_an_interrupted_draft_cl
     let (directory, state) = fixture().await;
     let user = add_user(&state, "migrate-owner").await;
     let report = archive(&state, "migrate-owner").await;
-    let id = confirm(&state, &user.user_id, &report).await;
+    let id = submit(&state, &user.user_id, &report).await;
     state.database.close().await;
     let mut connection = SqliteConnection::connect_with(
         &SqliteConnectOptions::new().filename(directory.path().join("database.sqlite")),
@@ -610,7 +627,14 @@ async fn startup_relocates_old_pending_rows_and_recovers_an_interrupted_draft_cl
             .len(),
         2
     );
-    assert_eq!(database.confirmed(&user.user_id).await.unwrap().len(), 1);
+    assert_eq!(
+        database
+            .submitted_observations(&user.user_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
     database.close().await;
 }
 
@@ -620,10 +644,10 @@ async fn rescan_clears_all_results_and_rejects_stale_or_active_requests() {
     let alice = add_user(&state, "alice").await;
     let bob = add_user(&state, "bob").await;
     let report = archive(&state, "alice").await;
-    let confirmed = confirm(&state, &alice.user_id, &report).await;
+    let submitted = submit(&state, &alice.user_id, &report).await;
     assert_eq!(
         ldl_history(&state.database, &alice.user_id).await["points"][0]["observation_id"],
-        confirmed
+        submitted
     );
     let original = state.database.file(&alice.user_id, &report).await.unwrap();
     let summary = state
@@ -674,16 +698,16 @@ async fn rescan_clears_all_results_and_rejects_stale_or_active_requests() {
     );
     state
         .database
-        .review(
+        .submit_report_changes(
             &alice.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report.clone(),
                 expected_revision: summary.revision,
                 context: None,
-                observations: vec![ReviewItem {
+                observations: vec![ReportResultChange {
                     observation_id: None,
                     expected_revision: None,
-                    status: ReviewStatus::Pending,
+                    status: ReportResultStatus::Pending,
                     payload: observation_payload(),
                 }],
             },
@@ -710,19 +734,22 @@ async fn rescan_clears_all_results_and_rejects_stale_or_active_requests() {
             .unwrap()
             .is_empty()
     );
-    let edit = ReviewRequest {
+    let edit = ReportSubmission {
         report_id: report.clone(),
         expected_revision: revision + 1,
         context: None,
-        observations: vec![ReviewItem {
+        observations: vec![ReportResultChange {
             observation_id: None,
             expected_revision: None,
-            status: ReviewStatus::Pending,
+            status: ReportResultStatus::Pending,
             payload: observation_payload(),
         }],
     };
     assert!(matches!(
-        state.database.review(&alice.user_id, edit).await,
+        state
+            .database
+            .submit_report_changes(&alice.user_id, edit)
+            .await,
         Err(longlivehealth::error::AppError::Conflict(_))
     ));
     assert_eq!(
@@ -784,18 +811,18 @@ async fn stored_results_display_loinc_long_common_name_without_remapping() {
     unknown.raw_name = "Unknown test (9999999-9)".into();
     state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report.clone(),
                 expected_revision: 1,
                 context: None,
                 observations: vec![polys, unknown]
                     .into_iter()
-                    .map(|payload| ReviewItem {
+                    .map(|payload| ReportResultChange {
                         observation_id: None,
                         expected_revision: None,
-                        status: ReviewStatus::Pending,
+                        status: ReportResultStatus::Pending,
                         payload,
                     })
                     .collect(),
@@ -870,9 +897,9 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
     qualitative.metric_id = None;
     let response = state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report,
                 expected_revision: 1,
                 context: None,
@@ -887,10 +914,10 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
                     qualitative,
                 ]
                 .into_iter()
-                .map(|payload| ReviewItem {
+                .map(|payload| ReportResultChange {
                     observation_id: None,
                     expected_revision: None,
-                    status: ReviewStatus::Pending,
+                    status: ReportResultStatus::Pending,
                     payload,
                 })
                 .collect(),
@@ -966,16 +993,16 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
     corrected.raw_unit = Some("g/dL (calc)".into());
     let fixed = state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: bad["report_id"].as_str().unwrap().into(),
                 expected_revision: 2,
                 context: None,
-                observations: vec![ReviewItem {
+                observations: vec![ReportResultChange {
                     observation_id: Some(bad["observation_id"].as_str().unwrap().into()),
                     expected_revision: Some(1),
-                    status: ReviewStatus::Confirmed,
+                    status: ReportResultStatus::Submitted,
                     payload: corrected,
                 }],
             },
@@ -1002,9 +1029,9 @@ async fn saving_mappings_keeps_ocr_evidence_and_rechecks_independent_report_issu
     let note = "Check the printed identity or scale.";
     let mut snapshot = state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report_id.clone(),
                 expected_revision: 1,
                 context: None,
@@ -1022,10 +1049,10 @@ async fn saving_mappings_keeps_ocr_evidence_and_rechecks_independent_report_issu
                     payload.raw_result = result.into();
                     payload.raw_unit = Some(unit.into());
                     payload.ocr_mapping_note = Some(note.into());
-                    ReviewItem {
+                    ReportResultChange {
                         observation_id: None,
                         expected_revision: None,
-                        status: ReviewStatus::Pending,
+                        status: ReportResultStatus::Pending,
                         payload,
                     }
                 })
@@ -1061,16 +1088,16 @@ async fn saving_mappings_keeps_ocr_evidence_and_rechecks_independent_report_issu
         payload.metric_id = Some(id.into());
         snapshot = state
             .database
-            .review(
+            .submit_report_changes(
                 &user.user_id,
-                ReviewRequest {
+                ReportSubmission {
                     report_id: report_id.clone(),
                     expected_revision: snapshot["report"]["revision"].as_i64().unwrap(),
                     context: None,
-                    observations: vec![ReviewItem {
+                    observations: vec![ReportResultChange {
                         observation_id: Some(observation_id.clone()),
                         expected_revision: row["revision"].as_i64(),
-                        status: ReviewStatus::Pending,
+                        status: ReportResultStatus::Pending,
                         payload,
                     }],
                 },
@@ -1091,7 +1118,7 @@ async fn saving_mappings_keeps_ocr_evidence_and_rechecks_independent_report_issu
     assert!(
         state
             .database
-            .confirmed(&user.user_id)
+            .submitted_observations(&user.user_id)
             .await
             .unwrap()
             .is_empty()
@@ -1117,14 +1144,14 @@ async fn report_summaries_use_collection_evidence_for_the_date_column() {
             .is_none()
     );
     let observations = [
-        (ReviewStatus::Confirmed, "2026-08-15"),
-        (ReviewStatus::Pending, "2026-09-01T23:30:00-05:00"),
+        (ReportResultStatus::Submitted, "2026-08-15"),
+        (ReportResultStatus::Pending, "2026-09-01T23:30:00-05:00"),
     ]
     .into_iter()
     .map(|(status, date)| {
         let mut payload = observation_payload();
         payload.sampled_at = Some(date.into());
-        ReviewItem {
+        ReportResultChange {
             observation_id: None,
             expected_revision: None,
             status,
@@ -1134,9 +1161,9 @@ async fn report_summaries_use_collection_evidence_for_the_date_column() {
     .collect();
     state
         .database
-        .review(
+        .submit_report_changes(
             &alice.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report.clone(),
                 expected_revision: 1,
                 context: None,
@@ -1190,7 +1217,7 @@ async fn report_summaries_use_collection_evidence_for_the_date_column() {
 }
 
 #[tokio::test]
-async fn review_creates_an_owned_metric_and_links_its_confirmed_browse_history() {
+async fn review_creates_an_owned_metric_and_links_its_submitted_browse_history() {
     use longlivehealth::metric_history::{HistoryRequest, history};
     use longlivehealth::reports::{NewMetric, UnmappedChoice};
 
@@ -1206,16 +1233,16 @@ async fn review_creates_an_owned_metric_and_links_its_confirmed_browse_history()
     payload.metric_id = None;
     let drafted = state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report.clone(),
                 expected_revision: 1,
                 context: None,
-                observations: vec![ReviewItem {
+                observations: vec![ReportResultChange {
                     observation_id: None,
                     expected_revision: None,
-                    status: ReviewStatus::Pending,
+                    status: ReportResultStatus::Pending,
                     payload: payload.clone(),
                 }],
             },
@@ -1228,21 +1255,21 @@ async fn review_creates_an_owned_metric_and_links_its_confirmed_browse_history()
         name: payload.raw_name.clone(),
         standard_unit: "ZR".into(),
     }));
-    let request = |observation_revision| ReviewRequest {
+    let request = |observation_revision| ReportSubmission {
         report_id: report.clone(),
         expected_revision: 2,
         context: None,
-        observations: vec![ReviewItem {
+        observations: vec![ReportResultChange {
             observation_id: Some(draft["observation_id"].as_str().unwrap().to_owned()),
             expected_revision: Some(observation_revision),
-            status: ReviewStatus::Confirmed,
+            status: ReportResultStatus::Submitted,
             payload: payload.clone(),
         }],
     };
     assert!(
         state
             .database
-            .review(&user.user_id, request(2))
+            .submit_report_changes(&user.user_id, request(2))
             .await
             .is_err()
     );
@@ -1256,7 +1283,7 @@ async fn review_creates_an_owned_metric_and_links_its_confirmed_browse_history()
     );
     let saved = state
         .database
-        .review(&user.user_id, request(1))
+        .submit_report_changes(&user.user_id, request(1))
         .await
         .unwrap();
     let id = saved["created_metric"]["metric_id"].as_str().unwrap();
@@ -1285,23 +1312,23 @@ async fn review_creates_an_owned_metric_and_links_its_confirmed_browse_history()
 }
 
 #[tokio::test]
-async fn mark_as_new_replaces_a_legacy_confirmed_display_identity_with_a_persisted_metric() {
+async fn mark_as_new_replaces_a_legacy_submitted_display_identity_with_a_persisted_metric() {
     use longlivehealth::reports::{NewMetric, UnmappedChoice};
 
     let (_directory, state) = fixture().await;
     let user = add_user(&state, "alice").await;
     let report_id = archive(&state, "alice").await;
     let review = |revision, observation_id, expected_revision, payload| {
-        state.database.review(
+        state.database.submit_report_changes(
             &user.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report_id.clone(),
                 expected_revision: revision,
                 context: None,
-                observations: vec![ReviewItem {
+                observations: vec![ReportResultChange {
                     observation_id,
                     expected_revision,
-                    status: ReviewStatus::Confirmed,
+                    status: ReportResultStatus::Submitted,
                     payload,
                 }],
             },
@@ -1339,7 +1366,7 @@ async fn mark_as_new_replaces_a_legacy_confirmed_display_identity_with_a_persist
     assert_eq!(row["payload"]["metric_id"], id);
     assert_eq!(row["observation_id"], legacy["observation_id"]);
     assert_eq!(row["payload"]["source"], legacy["payload"]["source"]);
-    assert_eq!(row["status"], "confirmed");
+    assert_eq!(row["status"], "submitted");
     let browse = longlivehealth::metric_history::browse(&state.database, &user.user_id)
         .await
         .unwrap();
@@ -1358,24 +1385,25 @@ async fn mark_as_new_replaces_a_legacy_confirmed_display_identity_with_a_persist
 }
 
 #[tokio::test]
-async fn edited_draft_can_confirm_directly_after_mapping_issues_are_fixed() {
+async fn edited_draft_can_submit_directly_after_mapping_issues_are_fixed() {
     use longlivehealth::reports::{NewMetric, UnmappedChoice};
     use serde_json::Value;
 
     let (directory, state) = fixture().await;
     let user = add_user(&state, "alice").await;
     let report = archive(&state, "alice").await;
-    let request = |revision, row: Option<&Value>, status: ReviewStatus, payload| ReviewRequest {
-        report_id: report.clone(),
-        expected_revision: revision,
-        context: None,
-        observations: vec![ReviewItem {
-            observation_id: row.map(|row| row["observation_id"].as_str().unwrap().to_owned()),
-            expected_revision: row.and_then(|row| row["revision"].as_i64()),
-            status,
-            payload,
-        }],
-    };
+    let request =
+        |revision, row: Option<&Value>, status: ReportResultStatus, payload| ReportSubmission {
+            report_id: report.clone(),
+            expected_revision: revision,
+            context: None,
+            observations: vec![ReportResultChange {
+                observation_id: row.map(|row| row["observation_id"].as_str().unwrap().to_owned()),
+                expected_revision: row.and_then(|row| row["revision"].as_i64()),
+                status,
+                payload,
+            }],
+        };
     let mut payload = observation_payload();
     payload.raw_name = "Zyphorin activity".into();
     payload.raw_unit = Some("ZR".into());
@@ -1384,9 +1412,9 @@ async fn edited_draft_can_confirm_directly_after_mapping_issues_are_fixed() {
     payload.metric_id = None;
     let initial = state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            request(1, None, ReviewStatus::Pending, payload.clone()),
+            request(1, None, ReportResultStatus::Pending, payload.clone()),
         )
         .await
         .unwrap();
@@ -1401,9 +1429,14 @@ async fn edited_draft_can_confirm_directly_after_mapping_issues_are_fixed() {
     payload.raw_unit = Some("wrong unit".into());
     let saved = state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            request(2, Some(initial), ReviewStatus::Pending, payload.clone()),
+            request(
+                2,
+                Some(initial),
+                ReportResultStatus::Pending,
+                payload.clone(),
+            ),
         )
         .await
         .unwrap();
@@ -1427,9 +1460,14 @@ async fn edited_draft_can_confirm_directly_after_mapping_issues_are_fixed() {
     assert!(
         state
             .database
-            .review(
+            .submit_report_changes(
                 &user.user_id,
-                request(3, Some(wrong), ReviewStatus::Confirmed, payload.clone())
+                request(
+                    3,
+                    Some(wrong),
+                    ReportResultStatus::Submitted,
+                    payload.clone()
+                )
             )
             .await
             .is_err()
@@ -1445,23 +1483,23 @@ async fn edited_draft_can_confirm_directly_after_mapping_issues_are_fixed() {
 
     payload.raw_name = "Zyphorin activity".into();
     payload.raw_unit = Some("ZR".into());
-    let confirmed = state
+    let submitted = state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            request(3, Some(wrong), ReviewStatus::Confirmed, payload),
+            request(3, Some(wrong), ReportResultStatus::Submitted, payload),
         )
         .await
         .unwrap();
-    let row = &confirmed["observations"][0];
-    assert_eq!(row["status"], "confirmed");
+    let row = &submitted["observations"][0];
+    assert_eq!(row["status"], "submitted");
     assert_eq!(row["observation_id"], initial["observation_id"]);
     assert_eq!(row["revision"], 3);
     assert_eq!(observation_counts(directory.path()).await, (1, 0));
     assert_eq!(row["display_name"], "Zyphorin enzyme activity");
     assert_eq!(
         row["payload"]["metric_id"],
-        confirmed["created_metrics"][0]["metric_id"]
+        submitted["created_metrics"][0]["metric_id"]
     );
     assert!(row["payload"]["unmapped_choice"].is_null());
     assert_eq!(
@@ -1487,16 +1525,16 @@ async fn explicitly_unmapped_manual_result_keeps_its_printed_identity() {
     payload.unmapped_choice = Some(UnmappedChoice::Unmapped);
     let document = state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id,
                 expected_revision: 1,
                 context: None,
-                observations: vec![ReviewItem {
+                observations: vec![ReportResultChange {
                     observation_id: None,
                     expected_revision: None,
-                    status: ReviewStatus::Confirmed,
+                    status: ReportResultStatus::Submitted,
                     payload,
                 }],
             },
@@ -1509,7 +1547,7 @@ async fn explicitly_unmapped_manual_result_keeps_its_printed_identity() {
 }
 
 #[tokio::test]
-async fn a_saved_new_metric_can_confirm_a_qualitative_result_with_a_compatible_unit() {
+async fn a_saved_new_metric_can_submit_a_qualitative_result_with_a_compatible_unit() {
     use longlivehealth::metric_history::{HistoryRequest, history};
     use longlivehealth::reports::{NewMetric, UnmappedChoice};
     use serde_json::Value;
@@ -1517,17 +1555,18 @@ async fn a_saved_new_metric_can_confirm_a_qualitative_result_with_a_compatible_u
     let (_directory, state) = fixture().await;
     let user = add_user(&state, "alice").await;
     let report = archive(&state, "alice").await;
-    let request = |revision, row: Option<&Value>, status: ReviewStatus, payload| ReviewRequest {
-        report_id: report.clone(),
-        expected_revision: revision,
-        context: None,
-        observations: vec![ReviewItem {
-            observation_id: row.map(|row| row["observation_id"].as_str().unwrap().to_owned()),
-            expected_revision: row.and_then(|row| row["revision"].as_i64()),
-            status,
-            payload,
-        }],
-    };
+    let request =
+        |revision, row: Option<&Value>, status: ReportResultStatus, payload| ReportSubmission {
+            report_id: report.clone(),
+            expected_revision: revision,
+            context: None,
+            observations: vec![ReportResultChange {
+                observation_id: row.map(|row| row["observation_id"].as_str().unwrap().to_owned()),
+                expected_revision: row.and_then(|row| row["revision"].as_i64()),
+                status,
+                payload,
+            }],
+        };
     let mut payload = observation_payload();
     payload.raw_name = "Urobilinogen (50563-6)".into();
     payload.raw_result = "Negative".into();
@@ -1541,9 +1580,9 @@ async fn a_saved_new_metric_can_confirm_a_qualitative_result_with_a_compatible_u
     }));
     let saved = state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            request(1, None, ReviewStatus::Pending, payload.clone()),
+            request(1, None, ReportResultStatus::Pending, payload.clone()),
         )
         .await
         .unwrap();
@@ -1558,9 +1597,14 @@ async fn a_saved_new_metric_can_confirm_a_qualitative_result_with_a_compatible_u
     assert!(
         state
             .database
-            .review(
+            .submit_report_changes(
                 &user.user_id,
-                request(2, Some(wrong), ReviewStatus::Confirmed, payload.clone())
+                request(
+                    2,
+                    Some(wrong),
+                    ReportResultStatus::Submitted,
+                    payload.clone()
+                )
             )
             .await
             .is_err()
@@ -1580,9 +1624,9 @@ async fn a_saved_new_metric_can_confirm_a_qualitative_result_with_a_compatible_u
     }));
     let saved = state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            request(2, Some(wrong), ReviewStatus::Pending, payload.clone()),
+            request(2, Some(wrong), ReportResultStatus::Pending, payload.clone()),
         )
         .await
         .unwrap();
@@ -1590,16 +1634,16 @@ async fn a_saved_new_metric_can_confirm_a_qualitative_result_with_a_compatible_u
     assert_eq!(pending["status"], "pending");
     assert_eq!(pending["browse_issues"].as_array().unwrap().len(), 1);
     assert_eq!(pending["browse_issues"][0]["code"], "negative_with_unit");
-    let confirmed = state
+    let submitted = state
         .database
-        .review(
+        .submit_report_changes(
             &user.user_id,
-            request(3, Some(pending), ReviewStatus::Confirmed, payload),
+            request(3, Some(pending), ReportResultStatus::Submitted, payload),
         )
         .await
         .unwrap();
-    let row = &confirmed["observations"][0];
-    assert_eq!(row["status"], "confirmed");
+    let row = &submitted["observations"][0];
+    assert_eq!(row["status"], "submitted");
     assert_eq!(row["payload"]["raw_result"], "Negative");
     assert_eq!(row["payload"]["raw_unit"], "mg/dL");
     assert!(row.get("reported_negative_bound").is_none());
@@ -1612,7 +1656,7 @@ async fn a_saved_new_metric_can_confirm_a_qualitative_result_with_a_compatible_u
 }
 
 #[tokio::test]
-async fn confirming_multiple_new_results_creates_each_distinct_saved_definition_once() {
+async fn submitting_multiple_new_results_creates_each_distinct_saved_definition_once() {
     use longlivehealth::reports::{NewMetric, UnmappedChoice};
 
     let (_directory, state) = fixture().await;
@@ -1634,18 +1678,18 @@ async fn confirming_multiple_new_results_creates_each_distinct_saved_definition_
             name: name.into(),
             standard_unit: "ZR".into(),
         }));
-        ReviewItem {
+        ReportResultChange {
             observation_id: None,
             expected_revision: None,
-            status: ReviewStatus::Pending,
+            status: ReportResultStatus::Pending,
             payload,
         }
     })
     .collect();
     let save = |expected_revision, observations| {
-        state.database.review(
+        state.database.submit_report_changes(
             &user.user_id,
-            ReviewRequest {
+            ReportSubmission {
                 report_id: report_id.clone(),
                 expected_revision,
                 context: None,
@@ -1658,18 +1702,18 @@ async fn confirming_multiple_new_results_creates_each_distinct_saved_definition_
         .as_array()
         .unwrap()
         .iter()
-        .map(|row| ReviewItem {
+        .map(|row| ReportResultChange {
             observation_id: row["observation_id"].as_str().map(str::to_owned),
             expected_revision: row["revision"].as_i64(),
-            status: ReviewStatus::Confirmed,
+            status: ReportResultStatus::Submitted,
             payload: serde_json::from_value(row["payload"].clone()).unwrap(),
         })
         .collect();
-    let confirmed = save(2, changes).await.unwrap();
-    assert_eq!(confirmed["created_metrics"].as_array().unwrap().len(), 2);
-    let rows = confirmed["observations"].as_array().unwrap();
+    let submitted = save(2, changes).await.unwrap();
+    assert_eq!(submitted["created_metrics"].as_array().unwrap().len(), 2);
+    let rows = submitted["observations"].as_array().unwrap();
     for (name, count) in [("Zyphorin activity", 2), ("Vivorel fraction", 1)] {
-        let created = confirmed["created_metrics"]
+        let created = submitted["created_metrics"]
             .as_array()
             .unwrap()
             .iter()
@@ -1677,7 +1721,7 @@ async fn confirming_multiple_new_results_creates_each_distinct_saved_definition_
             .unwrap();
         assert_eq!(
             rows.iter()
-                .filter(|row| row["status"] == "confirmed"
+                .filter(|row| row["status"] == "submitted"
                     && row["payload"]["raw_name"] == name
                     && row["payload"]["metric_id"] == created["metric_id"])
                 .count(),
@@ -1718,4 +1762,67 @@ fn count_exponent_units_use_a_verified_conversion_and_keep_the_printed_unit() {
     }
     payload.raw_unit = Some("unknown".into());
     assert!(interpret(&payload).result.display.is_none());
+}
+
+#[tokio::test]
+async fn schema_eight_report_results_migrate_to_submitted_without_changing_their_data() {
+    use longlivehealth::database::Database;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+    let directory = tempfile::tempdir().unwrap();
+    let pool = SqlitePoolOptions::new()
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(directory.path().join("database.sqlite"))
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+    let schema = include_str!("../../src/backend_api/database/schema.sql")
+        .replace("'submitted'", "'confirmed'");
+    sqlx::raw_sql(&schema).execute(&pool).await.unwrap();
+    sqlx::raw_sql(r#"
+        INSERT INTO users(user_id, username, password_hash, created_at) VALUES ('user', 'alice', '', 0);
+        INSERT INTO raw_files(file_id, user_id, upload_id, original_name, relative_path,
+            content_type, sha256, byte_count, page_count, created_at)
+        VALUES ('file', 'user', 'upload', 'original.pdf', 'raw/original.pdf', 'application/pdf', 'hash', 1, 1, 0);
+        INSERT INTO reports(report_id, user_id, file_id, revision, created_at) VALUES ('report', 'user', 'file', 7, 0);
+        INSERT INTO observations(observation_id, user_id, report_id, current_revision,
+            status, payload_json, updated_at, candidate_key)
+        VALUES ('result', 'user', 'report', 4, 'confirmed', '{"raw_name":"Glucose","raw_result":"42","source":{"page":1,"quote":""}}', 12, 'candidate'),
+               ('draft', 'user', 'report', 2, 'pending', '{"raw_name":"Glucose","raw_result":"43","source":{"page":1,"quote":""}}', 13, 'draft-candidate');
+        PRAGMA user_version = 8;
+    "#).execute(&pool).await.unwrap();
+    pool.close().await;
+
+    for _ in 0..2 {
+        let database = Database::open(directory.path()).await.unwrap();
+        let rows = database.observations("user", "report").await.unwrap();
+        let submitted = rows
+            .iter()
+            .find(|row| row.observation_id == "result")
+            .unwrap();
+        assert_eq!(
+            (
+                &*submitted.status,
+                submitted.revision,
+                &*submitted.payload.raw_result
+            ),
+            ("submitted", 4, "42")
+        );
+        let pending = rows
+            .iter()
+            .find(|row| row.observation_id == "draft")
+            .unwrap();
+        assert_eq!(
+            (
+                &*pending.status,
+                pending.revision,
+                &*pending.payload.raw_result
+            ),
+            ("pending", 2, "43")
+        );
+        assert_eq!(observation_counts(directory.path()).await, (1, 1));
+        database.close().await;
+    }
 }
