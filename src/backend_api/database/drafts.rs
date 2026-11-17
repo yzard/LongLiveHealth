@@ -28,8 +28,8 @@ pub(super) async fn initialize(path: &Path) -> Result<(), AppError> {
         1 | 2 => {
             if version == 1 {
                 sqlx::raw_sql(include_str!("draft_ocr_revision.sql"))
-                .execute(&mut *transaction)
-                .await?;
+                    .execute(&mut *transaction)
+                    .await?;
             }
             sqlx::raw_sql(include_str!("draft_pending_migration.sql"))
                 .execute(&mut *transaction)
