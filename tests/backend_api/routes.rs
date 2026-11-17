@@ -293,7 +293,14 @@ async fn rescan_route_enforces_owner_and_revision_and_returns_queued_job() {
         .await
         .unwrap();
     let router = create_application(state);
-    let body = json!({"report_id":report,"expected_revision":1});
+    let old_body = json!({"report_id":report,"expected_revision":1});
+    assert_eq!(
+        request(&router, "/api/v1/reports/rescan", Some(&alice), old_body)
+            .await
+            .0,
+        StatusCode::BAD_REQUEST
+    );
+    let body = json!({"report_id":report,"expected_revision":1,"replace_results":true});
     assert_eq!(
         request(&router, "/api/v1/reports/rescan", None, body.clone())
             .await

@@ -96,11 +96,13 @@ pub struct ExtractionResponse {
 pub struct MetricCatalog {
     pub metrics: Vec<CustomMetric>,
     pub loinc_codes: BTreeMap<String, BTreeSet<String>>,
+    pub browse_metric_index: BTreeMap<String, BTreeSet<String>>,
 }
 
 pub(crate) async fn database_metrics(
     database: &crate::database::Database,
     user_id: &str,
+    include_browse: bool,
 ) -> Result<Arc<MetricCatalog>, AppError> {
     // A confirmation writes the definition and its LOINC link together.
     let mut snapshot = database.pool.begin().await?;
@@ -139,9 +141,44 @@ pub(crate) async fn database_metrics(
             );
         }
     }
+    let mut browse_metric_index = BTreeMap::<String, BTreeSet<String>>::new();
+    if include_browse {
+        let catalog = crate::browse_catalog::get(database, user_id).await?;
+        for entry in catalog["entries"].as_array().ok_or(AppError::Internal)? {
+            let name = entry["title"].as_str().ok_or(AppError::Internal)?;
+            let codes = browse_metric_index.entry(name.to_owned()).or_default();
+            let definition = &entry["definition"];
+            codes.extend(
+                definition["loinc_codes"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned),
+            );
+            codes.extend(
+                definition["loinc"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|loinc| loinc["code"].as_str())
+                    .map(str::to_owned),
+            );
+            if let Some(id) = definition["metric_id"].as_str() {
+                codes.extend(loinc_codes.get(id).into_iter().flatten().cloned());
+                codes.extend(
+                    crate::laboratory::LOINC_METRICS
+                        .iter()
+                        .filter(|&&(_, metric)| metric == id)
+                        .map(|&(code, _)| code.to_owned()),
+                );
+            }
+        }
+    }
     Ok(Arc::new(MetricCatalog {
         metrics: metrics.into_values().collect(),
         loinc_codes,
+        browse_metric_index,
     }))
 }
 
@@ -253,6 +290,7 @@ pub fn prepare_messages(
         "printed_loinc_names": printed_loinc_names,
         "source_qualified_aliases": crate::laboratory_names::SOURCE_QUALIFIED_ALIASES,
         "laboratory_metric_catalog": crate::laboratory::ocr_metric_catalog(&catalog.metrics, &catalog.loinc_codes),
+        "browse_metric_index": catalog.browse_metric_index,
     });
     Ok(json!([
         {"role":"system","content":include_str!("prompts/laboratory.txt")},
@@ -269,7 +307,7 @@ pub fn wrap_completion(
     let parsed = serde_json::from_str::<serde_json::Value>(&reply.response_body).ok();
     let choice = parsed.as_ref().and_then(|v| v["choices"].get(0));
     let content = choice.and_then(|v| v["message"]["content"].as_str());
-    let mut envelope = json!({"model":model,"engine":"strata","prompt_version":"laboratory-page-v18","content":content,"raw_response_body":reply.response_body});
+    let mut envelope = json!({"model":model,"engine":"strata","prompt_version":"laboratory-page-v19","content":content,"raw_response_body":reply.response_body});
     let mut status = reply.status_code;
     if (200..300).contains(&status) {
         let rows = content.and_then(ModelPage::parse);

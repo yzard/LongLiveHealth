@@ -823,22 +823,21 @@ impl Database {
             .bind(&job_id)
             .execute(&mut *transaction)
             .await?;
-        let returned_to_pending = sqlx::query(queries::RETURN_RESCAN_RESULTS_TO_PENDING)
-            .bind(user_id)
-            .bind(report_id)
-            .bind(now()?)
-            .execute(&mut *transaction)
-            .await?
-            .rows_affected();
-        if returned_to_pending != 0 {
-            invalidate_report_projections(&mut transaction, user_id).await?;
+        for query in [
+            queries::DELETE_REPORT_DRAFTS,
+            queries::DELETE_REPORT_RESULTS,
+            queries::DELETE_REPORT_EXTRACTION_PAGES,
+            queries::DELETE_REPORT_EXTRACTION_OUTPUTS,
+            queries::DELETE_REPORT_EXTRACTION_INPUTS,
+        ] {
+            sqlx::query(query)
+                .bind(user_id)
+                .bind(report_id)
+                .execute(&mut *transaction)
+                .await?;
         }
+        invalidate_report_projections(&mut transaction, user_id).await?;
         transaction.commit().await?;
-        if returned_to_pending != 0
-            && let Err(error) = self.reconcile_report_drafts().await
-        {
-            tracing::warn!(code=%error, "rescan queued; draft reconciliation failed");
-        }
         self.job(user_id, &job_id).await
     }
 
@@ -1178,10 +1177,7 @@ impl Database {
         };
         let native_links = lab_metric_metadata::clinical_links(&clinical);
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        if request
-            .observations
-            .iter()
-            .any(|row| row.status == ReviewStatus::Confirmed)
+        if !request.observations.is_empty()
             && sqlx::query_scalar::<_, bool>(queries::REPORT_ACTIVE_RESCAN)
                 .bind(user_id)
                 .bind(&request.report_id)
@@ -1189,7 +1185,7 @@ impl Database {
                 .await?
         {
             return Err(AppError::Conflict(
-                "Wait for the rescan to finish before confirming",
+                "Wait for the rescan to finish before editing results",
             ));
         }
         let updated = sqlx::query(queries::UPDATE_REPORT)

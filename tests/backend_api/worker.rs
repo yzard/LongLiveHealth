@@ -31,6 +31,18 @@ async fn new_confirmed_metric_and_loinc_are_used_in_the_next_report_rescan() {
                     .iter()
                     .find(|entry| entry[1] == "pH of Urine")
                     .cloned();
+                if let Some(metric) = metric.as_ref() {
+                    assert_eq!(
+                        evidence["browse_metric_index"][metric[1].as_str().unwrap()],
+                        json!(["50560-2"])
+                    );
+                    assert!(
+                        request["messages"][1]["content"][1]["image_url"]["url"]
+                            .as_str()
+                            .unwrap()
+                            .starts_with("data:image/png;base64,")
+                    );
+                }
                 let mut requests = requests.lock().unwrap();
                 let first = requests.is_empty();
                 requests.push(metric.clone().unwrap_or(Value::Null));
@@ -196,7 +208,7 @@ async fn new_confirmed_metric_and_loinc_are_used_in_the_next_report_rescan() {
 }
 
 #[tokio::test]
-async fn extraction_replay_refreshes_untouched_drafts_and_preserves_reviewed_rows() {
+async fn retry_preserves_reviewed_rows_but_rescan_replaces_them_with_fresh_ocr() {
     use longlivehealth::reports::{ReviewItem, ReviewRequest};
     use serde_json::{Value, json};
     use sqlx::{Connection, SqliteConnection, sqlite::SqliteConnectOptions};
@@ -350,21 +362,130 @@ async fn extraction_replay_refreshes_untouched_drafts_and_preserves_reviewed_row
         .await
         .unwrap();
     assert_eq!(rescanned.len(), rows.len());
-    for before in &rows[1..=2] {
-        let after = rescanned
-            .iter()
-            .find(|row| row.observation_id == before.observation_id)
+    assert!(rescanned.iter().all(|row| {
+        row.status == "pending"
+            && row.payload.notes.is_none()
+            && row.payload.metric_id.is_none()
+            && row.payload.ocr_mapping_note.as_deref() == Some("Refreshed note")
+            && rows
+                .iter()
+                .all(|before| before.observation_id != row.observation_id)
+    }));
+    server.abort();
+}
+
+#[tokio::test]
+async fn rescan_submits_every_original_page_and_publishes_only_after_a_complete_run() {
+    use serde_json::{Value, json};
+    use std::sync::{Arc, Mutex};
+
+    let (_directory, mut state) = fixture().await;
+    let user = add_user(&state, "alice").await;
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let received = calls.clone();
+    let provider = axum::Router::new().route(
+        "/v1/chat/completions",
+        axum::routing::post(move |axum::Json(request): axum::Json<Value>| {
+            let received = received.clone();
+            async move {
+                let evidence: Value = serde_json::from_str(
+                    request["messages"][1]["content"][0]["text"]
+                        .as_str()
+                        .unwrap(),
+                )
+                .unwrap();
+                let page = evidence["page"].as_i64().unwrap();
+                assert!(
+                    request["messages"][1]["content"][1]["image_url"]["url"]
+                        .as_str()
+                        .unwrap()
+                        .starts_with("data:image/png;base64,")
+                );
+                let mut calls = received.lock().unwrap();
+                calls.push(page);
+                if calls.len() == 4 {
+                    return axum::Json(super::provider::completion(
+                        json!({"observations": [{"raw_name": "Glucose"}], "warnings": []}),
+                    ));
+                }
+                let mut row = crate::observation_payload();
+                row.raw_name = format!("Glucose page {page}");
+                row.source.page = page;
+                row.raw_result = calls.len().to_string();
+                row.source.quote = format!("Glucose page {page}");
+                axum::Json(super::provider::completion(
+                    json!({"observations": [row], "warnings": []}),
+                ))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    Arc::make_mut(&mut state.config).llm.base_url =
+        format!("http://{}/v1", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, provider).await.unwrap() });
+    let app = longlivehealth::app::create_application(state.clone());
+    let token = crate::token(&state, "alice").await;
+    let (_, response) = crate::upload(
+        &app,
+        &token,
+        &uuid::Uuid::new_v4().to_string(),
+        &super::documents::text_pdf(&[&["Glucose page 1"], &["Glucose page 2"]]),
+    )
+    .await;
+    let report = response["file"]["file_id"].as_str().unwrap();
+    let owner = &user.user_id;
+    let run = || longlivehealth::worker::extract_next(&state);
+    assert!(run().await.unwrap());
+    assert_eq!(
+        state
+            .database
+            .observations(owner, report)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    for (expected_status, expected_count) in [("failed", 0), ("succeeded", 2)] {
+        let revision = state
+            .database
+            .report_summary(owner, report)
+            .await
+            .unwrap()
+            .revision;
+        state
+            .database
+            .rescan_report(owner, report, revision)
+            .await
             .unwrap();
-        assert_eq!(after.status, "pending");
-        assert_eq!(
-            after.revision,
-            before.revision + i64::from(before.status == "confirmed")
+        assert!(
+            state
+                .database
+                .observations(owner, report)
+                .await
+                .unwrap()
+                .is_empty()
         );
+        assert!(run().await.unwrap());
         assert_eq!(
-            serde_json::to_value(&after.payload).unwrap(),
-            serde_json::to_value(&before.payload).unwrap()
+            state
+                .database
+                .job_by_file(owner, report)
+                .await
+                .unwrap()
+                .status,
+            expected_status
         );
+        let rows = state.database.observations(owner, report).await.unwrap();
+        assert_eq!(rows.len(), expected_count);
+        for row in rows {
+            assert_eq!(row.status, "pending");
+            assert_eq!(
+                row.payload.raw_result,
+                (4 + row.payload.source.page).to_string()
+            );
+        }
     }
+    assert_eq!(*calls.lock().unwrap(), [1, 2, 1, 2, 1, 2]);
     server.abort();
 }
 
@@ -620,7 +741,7 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
         .observations(&user.user_id, report)
         .await
         .unwrap();
-    assert_eq!(rows.len(), 2);
+    assert_eq!(rows.len(), 1);
     assert!(rows.iter().all(|row| row.status == "pending"));
     assert_eq!(
         state
@@ -1281,10 +1402,12 @@ async fn rescan_removes_only_numeric_overlaps_and_refreshes_ocr_again() {
     assert!(longlivehealth::worker::extract_next(&state).await.unwrap());
     let initial = state.database.observations(owner, &report).await.unwrap();
     assert_eq!(initial.len(), 7);
-    let original = initial
+    let mut previous = initial
         .iter()
         .find(|row| row.payload.raw_name == "Glucose")
-        .unwrap();
+        .unwrap()
+        .observation_id
+        .clone();
 
     for iteration in 1..=2 {
         let revision = state
@@ -1313,13 +1436,14 @@ async fn rescan_removes_only_numeric_overlaps_and_refreshes_ocr_again() {
         );
         let refreshed = rows
             .iter()
-            .find(|row| row.observation_id == original.observation_id)
+            .find(|row| row.payload.raw_name == "Glucose")
             .unwrap();
         assert_eq!(
             refreshed.payload.notes.as_deref(),
             Some(format!("OCR run {iteration}").as_str())
         );
-        assert_eq!(refreshed.revision, original.revision + iteration);
+        assert_ne!(refreshed.observation_id, previous);
+        previous = refreshed.observation_id.clone();
     }
     assert_eq!(state.database.confirmed(owner).await.unwrap().len(), 2);
     server.abort();

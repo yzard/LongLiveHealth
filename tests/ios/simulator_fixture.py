@@ -197,10 +197,10 @@ class Handler(BaseHTTPRequestHandler):
             row['reported_negative_bound'] = '<0.1 mg/dL'
             row['browse_issues'] = [{'code': 'negative_with_unit', 'scope': 'review',
                                      'message': 'Reported negative threshold: <0.1 mg/dL.'}]
-        if route == 'reports/rescan':
-            for row in observations:
-                if row['report_id'] == body.get('report_id') and row['status'] == 'confirmed':
-                    row.update(status='pending', revision=row['revision'] + 1)
+        if route == 'reports/rescan' and body.get('replace_results') is not True:
+            status = 400
+        if route == 'reports/rescan' and status == 200:
+            observations[:] = [row for row in observations if row['report_id'] != body.get('report_id')]
             reports[0]['revision'] += 1
         if route == 'reports/delete':
             reports[:] = [item for item in reports if item['report_id'] != body.get('report_id')]

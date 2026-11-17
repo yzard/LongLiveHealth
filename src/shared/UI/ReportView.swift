@@ -47,7 +47,7 @@ struct ReportView: View {
         .alert("Rescan report?", isPresented: $rescanConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Rescan", role: .destructive) { Task { await rescan() } }
-        } message: { Text("Rescan returns every result in this report to Pending. Results are removed from Browse and charts until confirmed again.") }
+        } message: { Text("Rescan deletes all existing results and runs OCR again on the original report. New results will be pending review.") }
         .alert("Delete report?", isPresented: $deleting) {
             Button("Cancel", role: .cancel) {}
             Button("Delete report", role: .destructive) { Task { await model.perform {
@@ -410,7 +410,10 @@ struct ReportView: View {
         rescanning = true
         defer { rescanning = false }
         await model.perform {
-            let response = try await model.request("reports/rescan", body: .object(["report_id": .string(reportID), "expected_revision": document["report"]["revision"]]))
+            let response = try await model.request("reports/rescan", body: .object([
+                "report_id": .string(reportID), "expected_revision": document["report"]["revision"],
+                "replace_results": .bool(true)
+            ]))
             model.jobs.removeAll { $0["file_id"].stringValue == reportID }
             model.jobs.insert(response["job"], at: 0)
             try model.archive?.remove(name: "report-\(reportID).json")

@@ -273,11 +273,16 @@ UPDATE draft.observations
  WHERE user_id = ? AND report_id = ? AND observation_id = ?
    AND status = 'pending' AND current_revision = ocr_revision AND candidate_key IS NOT NULL
 "#;
-pub const DELETE_REDUNDANT_OCR_CANDIDATE: &str = r#"
-DELETE FROM draft.observations
- WHERE user_id = ? AND report_id = ? AND observation_id = ?
-   AND status = 'pending' AND current_revision = ocr_revision AND candidate_key IS NOT NULL
-"#;
+pub const DELETE_REPORT_DRAFTS: &str =
+    "DELETE FROM draft.observations WHERE user_id = ? AND report_id = ?";
+pub const DELETE_REPORT_RESULTS: &str =
+    "DELETE FROM main.observations WHERE user_id = ? AND report_id = ?";
+pub const DELETE_REPORT_EXTRACTION_PAGES: &str =
+    "DELETE FROM extraction_pages WHERE user_id = ? AND report_id = ?";
+pub const DELETE_REPORT_EXTRACTION_OUTPUTS: &str =
+    "DELETE FROM extraction_outputs WHERE user_id = ? AND report_id = ?";
+pub const DELETE_REPORT_EXTRACTION_INPUTS: &str =
+    "DELETE FROM extraction_inputs WHERE user_id = ? AND report_id = ?";
 pub const RESCAN_SOURCE: &str = "SELECT json_extract(context_json, '$.source_name') FROM reports WHERE user_id = ? AND report_id = ?";
 pub const RESCAN_OVERLAPS: &str = r#"
 SELECT o.payload_json, json_extract(r.context_json, '$.source_name') AS source_name,
@@ -295,18 +300,6 @@ SELECT o.payload_json, json_extract(r.context_json, '$.source_name') AS source_n
         OR EXISTS (SELECT 1 FROM draft.observations d WHERE d.observation_id = o.observation_id
                     AND d.current_revision = o.current_revision
                     AND (d.candidate_key IS NULL OR d.ocr_revision != d.current_revision)))
-"#;
-pub const RETURN_RESCAN_RESULTS_TO_PENDING: &str = r#"
-INSERT INTO draft.observations (
-    observation_id, user_id, report_id, current_revision, status, payload_json, updated_at, candidate_key
-)
-SELECT observation_id, user_id, report_id, current_revision + 1, 'pending', payload_json, ?3, candidate_key
-  FROM review_observations
- WHERE user_id = ?1 AND report_id = ?2 AND status = 'confirmed'
-ON CONFLICT(observation_id) DO UPDATE SET
-    current_revision = excluded.current_revision,
-    payload_json = excluded.payload_json,
-    updated_at = excluded.updated_at
 "#;
 pub const REPORT_ACTIVE_RESCAN: &str = r#"
 SELECT EXISTS (

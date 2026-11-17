@@ -168,9 +168,11 @@ async fn extract(state: &AppState, job: &ClaimedJob) -> Result<(), AppError> {
         )
         .await?;
     }
-    let database_metrics = crate::ocr::database_metrics(&state.database, &job.user_id).await?;
+    let database_metrics =
+        crate::ocr::database_metrics(&state.database, &job.user_id, job.is_rescan).await?;
     let run_id = uuid::Uuid::new_v4().to_string();
     let mut failed = false;
+    let mut rescan_pages = Vec::new();
     let pdf = file.content_type == "application/pdf";
     let mut first_evidence = if pdf {
         Some(crate::documents::pdf_evidence(&state.database.cpu, &source, 1).await?)
@@ -337,17 +339,11 @@ async fn extract(state: &AppState, job: &ClaimedJob) -> Result<(), AppError> {
         if active != 1 {
             return Err(AppError::Conflict("Task was canceled or lease expired"));
         }
-        reconcile_page(
-            &mut transaction,
-            job,
-            page,
-            identity.1.as_deref(),
-            report_collection_date
-                .as_ref()
-                .map(|collection| collection.date.as_str()),
-            candidates,
-        )
-        .await?;
+        if job.is_rescan {
+            rescan_pages.push((page, identity.1.clone(), candidates));
+        } else {
+            reconcile_page(&mut transaction, job, page, candidates).await?;
+        }
         sqlx::query(queries::INSERT_PAGE)
             .bind(&job.user_id)
             .bind(&job.file_id)
@@ -383,43 +379,75 @@ async fn extract(state: &AppState, job: &ClaimedJob) -> Result<(), AppError> {
             "Some pages or fields could not be extracted",
         ));
     }
+    if job.is_rescan {
+        // The archived outputs above are useful on failure, but the review list
+        // should represent a complete extraction, not a partial mixture of runs.
+        let mut transaction = state.database.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let active: i64 = sqlx::query_scalar(queries::VERIFY_JOB_LEASE)
+            .bind(&job.user_id)
+            .bind(&job.job_id)
+            .bind(&job.lease_token)
+            .bind(now()?)
+            .fetch_one(&mut *transaction)
+            .await?;
+        if active != 1 {
+            return Err(AppError::Conflict("Task was canceled or lease expired"));
+        }
+        sqlx::query(queries::DELETE_REPORT_DRAFTS)
+            .bind(&job.user_id)
+            .bind(&job.file_id)
+            .execute(&mut *transaction)
+            .await?;
+        let source: Option<String> = sqlx::query_scalar(queries::RESCAN_SOURCE)
+            .bind(&job.user_id)
+            .bind(&job.file_id)
+            .fetch_one(&mut *transaction)
+            .await?;
+        let metadata =
+            crate::lab_metric_metadata::Metadata::load(&mut transaction, &job.user_id).await?;
+        for (page, detected_source, candidates) in rescan_pages {
+            let source = source
+                .as_deref()
+                .filter(|name| !name.trim().is_empty())
+                .or(detected_source.as_deref());
+            let candidates = rescan_unique_candidates(
+                &mut transaction,
+                job,
+                source,
+                report_collection_date
+                    .as_ref()
+                    .map(|collection| collection.date.as_str()),
+                &metadata,
+                candidates,
+            )
+            .await?;
+            reconcile_page(&mut transaction, job, page, candidates).await?;
+        }
+        sqlx::query(queries::BUMP_REPORT)
+            .bind(&job.user_id)
+            .bind(&job.file_id)
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
+    }
     Ok(())
 }
 
-async fn reconcile_page(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+async fn rescan_unique_candidates(
+    transaction: &mut sqlx::SqliteTransaction<'_>,
     job: &ClaimedJob,
-    page: i64,
-    detected_source: Option<&str>,
+    source: Option<&str>,
     document_date: Option<&str>,
+    metadata: &crate::lab_metric_metadata::Metadata,
     candidates: Vec<ObservationPayload>,
-) -> Result<(), AppError> {
-    let source: Option<String> = if job.is_rescan {
-        sqlx::query_scalar(queries::RESCAN_SOURCE)
-            .bind(&job.user_id)
-            .bind(&job.file_id)
-            .fetch_one(&mut **transaction)
-            .await?
-    } else {
-        None
-    };
-    let source = source
-        .as_deref()
-        .filter(|name| !name.trim().is_empty())
-        .or(detected_source);
-    let metadata = if job.is_rescan {
-        crate::lab_metric_metadata::Metadata::load(transaction, &job.user_id).await?
-    } else {
-        Default::default()
-    };
+) -> Result<Vec<ObservationPayload>, AppError> {
     let key_for = |payload: &ObservationPayload, source: Option<&str>, date: Option<&str>| {
-        let metric = crate::reports::learned_for_pending(payload, &metadata)
+        let metric = crate::reports::learned_for_pending(payload, metadata)
             .or_else(|| crate::laboratory::resolved_report_metric(payload, source));
         crate::report_dedup::result_key(payload, metric, date)
     };
-    let mut overlaps = HashSet::new();
-    if job.is_rescan
-        && !candidates.is_empty()
+    let mut seen = HashSet::new();
+    if !candidates.is_empty()
         && let Some(source) = source.filter(|name| !name.trim().is_empty())
     {
         type Overlap = (String, String, Option<String>);
@@ -432,10 +460,24 @@ async fn reconcile_page(
         for (payload, source, date) in rows {
             let payload = serde_json::from_str(&payload)?;
             if let Some(key) = key_for(&payload, Some(&source), date.as_deref()) {
-                overlaps.insert(key);
+                seen.insert(key);
             }
         }
     }
+    Ok(candidates
+        .into_iter()
+        .filter(|candidate| {
+            key_for(candidate, source, document_date).is_none_or(|key| seen.insert(key))
+        })
+        .collect())
+}
+
+async fn reconcile_page(
+    transaction: &mut sqlx::SqliteTransaction<'_>,
+    job: &ClaimedJob,
+    page: i64,
+    candidates: Vec<ObservationPayload>,
+) -> Result<(), AppError> {
     let stored: Vec<StoredCandidate> = sqlx::query_as(queries::REPORT_CANDIDATES)
         .bind(&job.user_id)
         .bind(&job.file_id)
@@ -445,16 +487,11 @@ async fn reconcile_page(
         .into_iter()
         .map(|row| {
             let payload: ObservationPayload = serde_json::from_str(&row.payload_json)?;
-            let key = job
-                .is_rescan
-                .then(|| key_for(&payload, source, document_date))
-                .flatten();
-            Ok((row, payload, key))
+            Ok((row, payload))
         })
         .collect::<Result<Vec<_>, AppError>>()?;
     let mut occurrences = HashMap::new();
     let mut used = HashSet::new();
-    let mut scanned = HashSet::new();
     for candidate in &candidates {
         let occurrence = occurrences
             .entry((candidate.raw_name.clone(), candidate.source.quote.clone()))
@@ -467,82 +504,30 @@ async fn reconcile_page(
             )
             .as_bytes(),
         );
-        let key = job
-            .is_rescan
-            .then(|| key_for(candidate, source, document_date))
-            .flatten();
-        if let Some(key) = &key
-            && (!scanned.insert(key.clone()) || overlaps.contains(key))
-        {
-            continue;
-        }
         let exact = stored
             .iter()
-            .find(|(row, _, _)| row.candidate_key.as_ref() == Some(&anchor));
-        if exact.is_some_and(|(row, _, _)| used.contains(&row.observation_id)) {
+            .find(|(row, _)| row.candidate_key.as_ref() == Some(&anchor));
+        if exact.is_some_and(|(row, _)| used.contains(&row.observation_id)) {
             continue;
         }
-        let available = || {
-            stored
-                .iter()
-                .filter(|(row, _, _)| !used.contains(&row.observation_id))
-        };
-        let existing = if job.is_rescan {
-            // A protected row wins over an unedited copy of the same measurement.
-            available()
-                .find(|(row, _, stored_key)| !row.editable && key.is_some() && stored_key == &key)
-        } else {
-            None
-        }
-        .or(exact)
-        .or_else(|| {
-            let mut matches =
-                available().filter(|(_, previous, _)| same_printed_result(previous, candidate));
-            let first = matches.next()?;
-            matches.next().is_none().then_some(first)
-        })
-        .or_else(|| {
-            if !job.is_rescan {
-                return None;
-            }
-            if let Some(found) =
-                available().find(|(_, _, stored_key)| key.is_some() && stored_key == &key)
-            {
-                return Some(found);
-            }
-            // A changed value can still refer to the same printed row. Only replace it
-            // when name, unit, date and page identify a single previous result.
-            if candidates
-                .iter()
-                .filter(|other| same_printed_identity(other, candidate))
-                .take(2)
-                .count()
-                != 1
-            {
-                return None;
-            }
-            let mut matches = available().filter(|(row, previous, _)| {
-                row.editable && same_printed_identity(previous, candidate)
+        let existing = exact.or_else(|| {
+            let mut matches = stored.iter().filter(|(row, previous)| {
+                !used.contains(&row.observation_id) && same_printed_result(previous, candidate)
             });
             let first = matches.next()?;
             matches.next().is_none().then_some(first)
         });
-        if let Some((row, previous, _)) = existing {
+        if let Some((row, previous)) = existing {
             used.insert(row.observation_id.clone());
             if row.editable && previous.source.page == page {
-                let updated = if job.is_rescan {
-                    candidate.clone()
-                } else {
-                    let mut updated = previous.clone();
-                    if same_printed_result(previous, candidate) {
-                        updated.ocr_normalization = candidate.ocr_normalization.clone();
-                    }
-                    updated.ocr_mapping_note = candidate.ocr_mapping_note.clone();
-                    updated.ocr_metric_candidate = candidate.ocr_metric_candidate.clone();
-                    updated.ocr_section_heading = candidate.ocr_section_heading.clone();
-                    updated.ocr_new_metric = candidate.ocr_new_metric.clone();
-                    updated
-                };
+                let mut updated = previous.clone();
+                if same_printed_result(previous, candidate) {
+                    updated.ocr_normalization = candidate.ocr_normalization.clone();
+                }
+                updated.ocr_mapping_note = candidate.ocr_mapping_note.clone();
+                updated.ocr_metric_candidate = candidate.ocr_metric_candidate.clone();
+                updated.ocr_section_heading = candidate.ocr_section_heading.clone();
+                updated.ocr_new_metric = candidate.ocr_new_metric.clone();
                 let payload = serde_json::to_string(&updated)?;
                 if payload != row.payload_json {
                     sqlx::query(queries::REFRESH_OCR_CANDIDATE)
@@ -573,19 +558,6 @@ async fn reconcile_page(
             .bind(now()?)
             .execute(&mut **transaction)
             .await?;
-    }
-    for (row, _, key) in &stored {
-        if row.editable
-            && !used.contains(&row.observation_id)
-            && key.as_ref().is_some_and(|key| scanned.contains(key))
-        {
-            sqlx::query(queries::DELETE_REDUNDANT_OCR_CANDIDATE)
-                .bind(&job.user_id)
-                .bind(&job.file_id)
-                .bind(&row.observation_id)
-                .execute(&mut **transaction)
-                .await?;
-        }
     }
     Ok(())
 }

@@ -828,15 +828,14 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(confirmed.exists)
         rescan.tap()
         XCTAssertTrue(app.alerts["Rescan report?"].staticTexts.matching(NSPredicate(
-            format: "label CONTAINS %@", "returns every result in this report to Pending"
+            format: "label CONTAINS %@", "deletes all existing results and runs OCR again"
         )).firstMatch.exists)
         app.alerts.buttons["Rescan"].tap()
         XCTAssertTrue(confirmed.waitForNonExistence(timeout: 10))
         let data = try await control("reports/get")
         let document = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let rows = try XCTUnwrap(document["observations"] as? [[String: Any]])
-        XCTAssertEqual(rows.count, 1)
-        XCTAssertEqual(rows.first?["status"] as? String, "pending")
+        XCTAssertTrue(rows.isEmpty)
     }
 
     @MainActor func testLargeReportCountAndSourceEditing() async throws {

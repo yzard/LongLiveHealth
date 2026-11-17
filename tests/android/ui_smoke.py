@@ -413,7 +413,7 @@ def rescan_confirmation():
     assert all(bounds[i][0] < bounds[i + 1][0] for i in range(3)), bounds
     assert max(b[1] for b in bounds) - min(b[1] for b in bounds) <= 4, bounds
     tap("Rescan report"); wait_for("Rescan report?")
-    wait_for("Rescan returns every result in this report to Pending. Results are removed from Browse and charts until confirmed again.")
+    wait_for("Rescan deletes all existing results and runs OCR again on the original report. New results will be pending review.")
     tap("Cancel"); wait_for("Report Info")
     assert adb("shell", "pidof", "dev.longlivehealth.android").strip()
     print("PASS: four report actions in order on one row, Rescan confirmation and cancel")

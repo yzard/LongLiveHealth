@@ -623,7 +623,7 @@ async fn startup_relocates_old_pending_rows_and_recovers_an_interrupted_draft_cl
 }
 
 #[tokio::test]
-async fn rescan_returns_confirmed_results_to_pending_and_rejects_stale_or_active_requests() {
+async fn rescan_clears_all_results_and_rejects_stale_or_active_requests() {
     let (directory, state) = fixture().await;
     let alice = add_user(&state, "alice").await;
     let bob = add_user(&state, "bob").await;
@@ -711,35 +711,28 @@ async fn rescan_returns_confirmed_results_to_pending_and_rejects_stale_or_active
         .observations(&alice.user_id, &report)
         .await
         .unwrap();
-    assert_eq!(rows.len(), 2);
-    assert!(rows.iter().all(|row| row.status == "pending"));
-    assert_eq!(observation_counts(directory.path()).await, (0, 2));
+    assert!(rows.is_empty());
+    assert_eq!(observation_counts(directory.path()).await, (0, 0));
     assert!(
         ldl_history(&state.database, &alice.user_id).await["points"]
             .as_array()
             .unwrap()
             .is_empty()
     );
-    let demoted = rows
-        .iter()
-        .find(|row| row.observation_id == confirmed)
-        .unwrap();
-    assert_eq!(demoted.revision, 2);
-    assert!(demoted.payload == observation_payload());
-    let reconfirm = || ReviewRequest {
+    let edit = ReviewRequest {
         new_metric: None,
         report_id: report.clone(),
         expected_revision: revision + 1,
         context: None,
         observations: vec![ReviewItem {
-            observation_id: Some(confirmed.clone()),
-            expected_revision: Some(demoted.revision),
-            status: ReviewStatus::Confirmed,
-            payload: demoted.payload.clone(),
+            observation_id: None,
+            expected_revision: None,
+            status: ReviewStatus::Pending,
+            payload: observation_payload(),
         }],
     };
     assert!(matches!(
-        state.database.review(&alice.user_id, reconfirm()).await,
+        state.database.review(&alice.user_id, edit).await,
         Err(longlivehealth::error::AppError::Conflict(_))
     ));
     assert_eq!(
@@ -785,13 +778,7 @@ async fn rescan_returns_confirmed_results_to_pending_and_rejects_stale_or_active
         .finish_job(&job, 2_000_000_003, Some("test_failure"))
         .await
         .unwrap();
-    assert_eq!(observation_counts(directory.path()).await, (0, 2));
-    state
-        .database
-        .review(&alice.user_id, reconfirm())
-        .await
-        .unwrap();
-    assert_eq!(observation_counts(directory.path()).await, (1, 1));
+    assert_eq!(observation_counts(directory.path()).await, (0, 0));
 }
 
 #[tokio::test]

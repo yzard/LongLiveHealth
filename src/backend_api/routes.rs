@@ -236,11 +236,23 @@ struct FeedbackRequest {
     run_id: String,
     note: String,
 }
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RescanReportRequest {
+    report_id: String,
+    expected_revision: i64,
+    replace_results: Option<bool>,
+}
 async fn rescan_report(
     State(state): State<AppState>,
     current: CurrentUser,
-    Json(request): Json<DeleteReportRequest>,
+    Json(request): Json<RescanReportRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    if request.replace_results != Some(true) {
+        return Err(AppError::Invalid(
+            "Update the app to confirm that rescanning deletes all existing results",
+        ));
+    }
     let _guard = state.file_mutation.lock().await;
     let job = state
         .database
