@@ -440,6 +440,10 @@ Laboratory history returns all confirmed report results in `records`, including 
 
 OCR completion requires a nonempty printed name, a valid collection date and a nonempty result for every nonadministrative result row. Text results such as Negative and Positive are valid. Missing or invalid required fields fail the extraction job; valid draft candidates and the complete provider output remain available for review. `reports/get.validation_issues` lists `page`, one-based `item_index`, `item_name`, `field` and `reason` for the latest OCR run. The iOS report shows these issues directly. This extraction check does not remove previously confirmed incomplete records from historical values.
 
+First imports and rescans both build the OCR prompt from the current Browse metric names and available LOINC codes, including account-specific laboratory mappings and names.
+
+OCR preserves a separately printed local lab code as `payload.raw_lab_code`. It remains independent of LOINC and is optional for existing records. Subcount warnings compare rows from the same page, collection time and panel. When a unique percentage is available, the warning includes the calculated expected count, the difference and whether rounding could explain it.
+
 
 ## Unified mobile API surface
 

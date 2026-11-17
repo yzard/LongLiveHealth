@@ -95,7 +95,7 @@ import Testing
     #expect(ReportReview.defaultMetricID(newMetric) == nil)
     #expect(ReportReview.suggestedMetricID(newMetric) == nil)
     #expect(ReportReview.canBulkConfirm(newMetric))
-    #expect(ReportReview.suggestionNote(newMetric) == "Check the measurement identity")
+    #expect(ReportReview.suggestionNote(newMetric, includeMetricName: true) == "Check the measurement identity")
     let advisory: JSONValue = .object(["code": .string("negative_with_unit")])
     newMetric["payload"]["raw_result"] = .string("Negative")
     newMetric["browse_issues"] = .array([advisory])

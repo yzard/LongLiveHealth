@@ -119,6 +119,7 @@ pub(crate) fn groups(records: &[Value]) -> BTreeMap<String, Group> {
                         })
                 } else {
                     crate::laboratory::normalized(&crate::reports::ObservationPayload {
+                        raw_lab_code: None,
                         raw_name: name.clone(),
                         raw_result: value.to_string(),
                         raw_unit: Some(unit.into()),

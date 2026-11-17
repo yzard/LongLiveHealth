@@ -2,7 +2,7 @@ use crate::{add_user, archive, fixture};
 use longlivehealth::reports::ReviewStatus;
 
 #[tokio::test]
-async fn new_confirmed_metric_and_loinc_are_used_in_the_next_report_rescan() {
+async fn new_confirmed_metric_and_loinc_are_used_for_rescans_and_first_imports() {
     use longlivehealth::{
         metric_history::{HistoryRequest, history},
         reports::{NewMetric, ReviewItem, ReviewRequest, UnmappedChoice},
@@ -194,6 +194,25 @@ async fn new_confirmed_metric_and_loinc_are_used_in_the_next_report_rescan() {
     for (point, report) in history["points"].as_array().unwrap().iter().zip(&reports) {
         assert_eq!(point["report_id"], *report);
     }
+    let (status, uploaded) = crate::upload(
+        &app,
+        &token,
+        &uuid::Uuid::new_v4().to_string(),
+        &super::documents::text_pdf(&[&["Urine pH 6.5 2019-06-01", "New original"]]),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK);
+    let third_id = uploaded["file"]["file_id"].as_str().unwrap();
+    assert!(reports.iter().all(|report| report != third_id));
+    assert!(longlivehealth::worker::extract_next(&state).await.unwrap());
+    assert_eq!(received.lock().unwrap()[3], entry);
+    let third = state
+        .database
+        .report(&user.user_id, third_id)
+        .await
+        .unwrap();
+    assert_eq!(third["observations"][0]["status"], "pending");
+    assert_eq!(third["observations"][0]["resolved_metric_id"], id);
     assert_eq!(
         state
             .database

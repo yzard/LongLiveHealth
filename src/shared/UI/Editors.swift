@@ -144,19 +144,15 @@ struct ObservationEditor: View {
                     choosingMetric = true
                 }.font(.caption)
             }
-            let suggestion = ReportReview.suggestionNote(observation)
+            let suggestion = ReportReview.suggestionNote(observation, includeMetricName: true)
             if !suggestion.isEmpty {
                 Text("OCR suggestion: \(suggestion)").font(.caption).foregroundStyle(.secondary)
             }
             mappingIssues
         }
         Section("As printed on the report") {
-            TextField("Name", text: $printedName, axis: .vertical).autocorrectionDisabled()
-            TextField("LOINC code", text: $loincCode).autocorrectionDisabled()
+            printedRows(editable: true)
             if !validLOINC { Text("Enter a LOINC code such as 50560-2.").font(.caption).foregroundStyle(.red) }
-            field("Result, including < or >", "raw_result"); field("Unit", "raw_unit")
-            field("Reference range", "reference_range"); field("Report flag", "report_flag")
-            field("Collection date: YYYY-MM-DD or ISO timestamp", "sampled_at")
         }
         if status == "pending" {
             Section {
@@ -187,16 +183,11 @@ struct ObservationEditor: View {
 
     @ViewBuilder private var metricOptions: some View {
         Section("As printed on the report") {
-            Text(printedName)
-            if !loincCode.isEmpty {
-                Text("LOINC \(loincCode)").font(.caption).foregroundStyle(.secondary)
-            }
-            recommendedName
-            Text([payload["raw_result"].stringValue, payload["raw_unit"].stringValue]
-                .filter { !$0.isEmpty }.joined(separator: " "))
-            mappingIssues
+            printedRows(editable: false)
         }
         Section {
+            recommendedName
+            mappingIssues
             Button("Mark as New", action: markAsNew)
                 .accessibilityIdentifier("create-browse-metric")
                 .disabled(!canMarkAsNew)
@@ -228,6 +219,33 @@ struct ObservationEditor: View {
                 }
             }
             Button("Review with the full metric list") { choosingMetric = false }
+        }
+    }
+
+    private func printedRows(editable: Bool) -> some View {
+        let fields = [
+            ("Metric name", $printedName),
+            ("Lab code", text("raw_lab_code")),
+            ("LOINC code", $loincCode),
+            ("Result", text("raw_result")),
+            ("Unit", text("raw_unit")),
+            ("Reference range", text("reference_range")),
+            ("Report flag", text("report_flag")),
+            ("Collection date", text("sampled_at")),
+        ]
+        return ForEach(fields.indices, id: \.self) { index in
+            let (label, value) = fields[index]
+            LabeledContent(label) {
+                if editable {
+                    TextField("—", text: value, axis: .vertical)
+                        .multilineTextAlignment(.trailing)
+                        .autocorrectionDisabled()
+                        .accessibilityLabel(Text(label))
+                } else {
+                    Text(value.wrappedValue.isEmpty ? "—" : value.wrappedValue)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
         }
     }
 

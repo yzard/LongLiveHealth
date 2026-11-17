@@ -168,8 +168,7 @@ async fn extract(state: &AppState, job: &ClaimedJob) -> Result<(), AppError> {
         )
         .await?;
     }
-    let database_metrics =
-        crate::ocr::database_metrics(&state.database, &job.user_id, job.is_rescan).await?;
+    let database_metrics = crate::ocr::database_metrics(&state.database, &job.user_id).await?;
     let run_id = uuid::Uuid::new_v4().to_string();
     let mut failed = false;
     let mut rescan_pages = Vec::new();

@@ -186,12 +186,9 @@ pub(crate) fn incompatible_unitless_candidate(
             })
 }
 
-pub(crate) const INCONSISTENT_SUBCOUNT_MESSAGE: &str =
-    "The printed subcount exceeds its total. Verify the unit and scale.";
-
-pub(crate) fn inconsistent_subcounts<'a>(
+pub(crate) fn subcount_warnings<'a>(
     rows: impl Iterator<Item = &'a ObservationPayload>,
-) -> Vec<bool> {
+) -> Vec<Option<String>> {
     use std::collections::BTreeMap;
 
     let counts: Vec<_> = rows
@@ -204,33 +201,131 @@ pub(crate) fn inconsistent_subcounts<'a>(
                 .ocr_section_heading
                 .as_deref()
                 .map(crate::laboratory_names::key);
-            Some((id, (row.source.page, date, section, quantity.unit?), value))
+            Some((
+                id,
+                (row.source.page, date, section),
+                quantity.unit?,
+                value,
+                row,
+            ))
         })
         .collect();
-    let mut inconsistent = vec![false; counts.len()];
+    let mut evidence = BTreeMap::new();
+    for (id, sample, unit, value, row) in counts.iter().flatten() {
+        evidence
+            .entry((sample, *id, unit.as_str()))
+            .and_modify(|previous| *previous = None)
+            .or_insert(Some((*value, *row)));
+    }
+    let mut warnings = vec![None; counts.len()];
     for &(parent, children) in crate::laboratory_names::COUNT_HIERARCHIES {
-        let mut totals = BTreeMap::new();
-        for (id, sample, value) in counts.iter().flatten() {
-            if *id == parent {
-                totals
-                    .entry(sample)
-                    .and_modify(|previous| *previous = None)
-                    .or_insert(Some(*value));
-            }
-        }
-        for (flag, count) in inconsistent.iter_mut().zip(&counts) {
-            if let Some((id, sample, value)) = count
-                && children.contains(id)
-                && totals
-                    .get(sample)
-                    .and_then(|total| *total)
-                    .is_some_and(|total| *value > total)
+        for (warning, count) in warnings.iter_mut().zip(&counts) {
+            if let Some((id, sample, unit, value, row)) = count
+                && let Some((_, percent_id)) = children.iter().find(|(child, _)| child == id)
+                && let Some(Some((total, total_row))) =
+                    evidence.get(&(sample, parent, unit.as_str()))
+                && *total >= Decimal::ZERO
+                && value > total
             {
-                *flag = true;
+                let percent = evidence
+                    .get(&(sample, *percent_id, "%"))
+                    .and_then(|entry| *entry)
+                    .filter(|(percent, _)| {
+                        (Decimal::ZERO..=Decimal::ONE_HUNDRED).contains(percent)
+                    });
+                *warning = Some(subcount_warning(
+                    parent, unit, *value, *total, row, total_row, percent,
+                ));
             }
         }
     }
-    inconsistent
+    warnings
+}
+
+fn subcount_warning(
+    parent: &str,
+    unit: &str,
+    count: Decimal,
+    total: Decimal,
+    row: &ObservationPayload,
+    total_row: &ObservationPayload,
+    percent: Option<(Decimal, &ObservationPayload)>,
+) -> String {
+    let parent_label = if parent == "wbc" {
+        "WBC"
+    } else {
+        DEFINITIONS[parent].name
+    };
+    let difference = (count - total).normalize();
+    let comparison = format!(
+        "The printed subcount ({count} {unit}) exceeds {parent_label} ({total} {unit}) by {difference} {unit} after unit conversion."
+    );
+    if unit == "10^9/L"
+        && let Some((percent, percent_row)) = percent
+        && let Some(total_cells) = total.checked_mul(Decimal::ONE_THOUSAND)
+        && let Some(expected) = total_cells
+            .checked_div(Decimal::ONE_HUNDRED)
+            .and_then(|value| value.checked_mul(percent))
+        && let Ok(printed) = Decimal::from_str(row.raw_result.trim())
+        && printed >= Decimal::ZERO
+    {
+        let printed_unit = row.raw_unit.as_deref().unwrap_or(unit);
+        let printed_difference = (expected - printed).abs().normalize();
+        let comparison_context = if canonical_unit(printed_unit) == Some("10^9/L") {
+            "If the printed number is already in cells/µL"
+        } else {
+            "Using the printed unit"
+        };
+        let mut message = format!(
+            "{parent_label} {} cells/µL × {}% = {} cells/µL. The report lists {} {}. {comparison_context}, it differs from the estimate by {printed_difference} cells/µL.",
+            total_cells.normalize(),
+            percent.normalize(),
+            expected.normalize(),
+            printed.normalize(),
+            printed_unit,
+        );
+        if !printed_difference.is_zero()
+            && printed_rounding_margin(total_row, total_cells, percent_row, percent)
+                .is_some_and(|margin| printed_difference <= margin)
+        {
+            message.push_str(
+                " Rounding of the printed total and percentage could explain that difference.",
+            );
+        }
+        message.push_str(" The printed units make the subcount exceed the total.");
+        message.push_str(" Verify the printed unit and scale.");
+        if message.len() <= 512 {
+            return message;
+        }
+    }
+    format!("{comparison} Verify the printed unit and scale.")
+}
+
+fn printed_rounding_margin(
+    total: &ObservationPayload,
+    total_cells: Decimal,
+    percent: &ObservationPayload,
+    percentage: Decimal,
+) -> Option<Decimal> {
+    let half_step = |text: &str| {
+        let scale = Decimal::from_str(text.trim()).ok()?.scale();
+        Decimal::try_new(5, scale + 1).ok()
+    };
+    let scale = match total.raw_unit.as_deref().and_then(canonical_unit)? {
+        "cells/µL" => Decimal::ONE,
+        "10^9/L" => Decimal::ONE_THOUSAND,
+        _ => return None,
+    };
+    let total_step = half_step(&total.raw_result)?.checked_mul(scale)?;
+    let percent_step = half_step(&percent.raw_result)?;
+    total_step
+        .checked_mul(percentage)?
+        .checked_add(
+            total_cells
+                .checked_add(total_step)?
+                .checked_mul(percent_step)?,
+        )?
+        .checked_div(Decimal::ONE_HUNDRED)
 }
 
 pub(crate) fn verified_custom_candidate<'a>(

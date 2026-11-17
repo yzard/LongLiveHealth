@@ -869,7 +869,7 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(ready.label.contains("1 result ready to confirm"))
 
         func checkMatch(_ name: String, printed: String) {
-            let title = app.buttons[name]
+            let title = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
             reveal(app, title)
             XCTAssertTrue(title.isHittable)
             XCTAssertTrue(possible.exists)
@@ -881,6 +881,12 @@ nonisolated final class SmokeTests: XCTestCase {
                 .matching(NSPredicate(format: "value == %@", printed)).firstMatch
             reveal(app, field)
             XCTAssertTrue(field.exists)
+            for label in ["Metric name", "Lab code", "LOINC code", "Result", "Unit",
+                          "Reference range", "Report flag", "Collection date"] {
+                let caption = app.staticTexts[label].firstMatch
+                reveal(app, caption)
+                XCTAssertTrue(caption.exists, "Missing printed-field label: \(label)")
+            }
             tapButton(app, "Cancel")
             XCTAssertTrue(title.waitForExistence(timeout: 5))
         }
@@ -898,7 +904,7 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertEqual(app.buttons["report-result-new"].label, "New")
 
         app.swipeDown()
-        let appearance = app.buttons["Appearance - urine"]
+        let appearance = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Appearance - urine")).firstMatch
         reveal(app, appearance)
         appearance.tap()
         XCTAssertTrue(app.navigationBars["Review result"].waitForExistence(timeout: 5))

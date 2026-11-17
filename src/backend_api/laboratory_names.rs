@@ -15,15 +15,15 @@ pub(crate) const CODE_QUALIFIED_ALIASES: &[(&str, &str)] = &[
     ("urine_clarity", "clarity"),
 ];
 
-pub(crate) const COUNT_HIERARCHIES: &[(&str, &[&str])] = &[(
+pub(crate) const COUNT_HIERARCHIES: &[(&str, &[(&str, &str)])] = &[(
     "wbc",
     &[
-        "neutrophil_count",
-        "lymphocyte_count",
-        "monocyte_count",
-        "eosinophil_count",
-        "basophil_count",
-        "immature_granulocyte_count",
+        ("neutrophil_count", "neutrophil_percent"),
+        ("lymphocyte_count", "lymphocyte_percent"),
+        ("monocyte_count", "monocyte_percent"),
+        ("eosinophil_count", "eosinophil_percent"),
+        ("basophil_count", "basophil_percent"),
+        ("immature_granulocyte_count", "immature_granulocyte_percent"),
     ],
 )];
 

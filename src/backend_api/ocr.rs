@@ -103,7 +103,6 @@ pub struct MetricCatalog {
 pub(crate) async fn database_metrics(
     database: &crate::database::Database,
     user_id: &str,
-    include_browse: bool,
 ) -> Result<Arc<MetricCatalog>, AppError> {
     // A confirmation writes the definition and its LOINC link together.
     let mut snapshot = database.pool.begin().await?;
@@ -161,37 +160,35 @@ pub(crate) async fn database_metrics(
         }
     }
     let mut browse_metric_index = BTreeMap::<String, BTreeSet<String>>::new();
-    if include_browse {
-        let catalog = crate::browse_catalog::get(database, user_id).await?;
-        for entry in catalog["entries"].as_array().ok_or(AppError::Internal)? {
-            let name = entry["title"].as_str().ok_or(AppError::Internal)?;
-            let codes = browse_metric_index.entry(name.to_owned()).or_default();
-            let definition = &entry["definition"];
+    let catalog = crate::browse_catalog::get(database, user_id).await?;
+    for entry in catalog["entries"].as_array().ok_or(AppError::Internal)? {
+        let name = entry["title"].as_str().ok_or(AppError::Internal)?;
+        let codes = browse_metric_index.entry(name.to_owned()).or_default();
+        let definition = &entry["definition"];
+        codes.extend(
+            definition["loinc_codes"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_owned),
+        );
+        codes.extend(
+            definition["loinc"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|loinc| loinc["code"].as_str())
+                .map(str::to_owned),
+        );
+        if let Some(id) = definition["metric_id"].as_str() {
+            codes.extend(loinc_codes.get(id).into_iter().flatten().cloned());
             codes.extend(
-                definition["loinc_codes"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .map(str::to_owned),
+                crate::laboratory::LOINC_METRICS
+                    .iter()
+                    .filter(|&&(_, metric)| metric == id)
+                    .map(|&(code, _)| code.to_owned()),
             );
-            codes.extend(
-                definition["loinc"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|loinc| loinc["code"].as_str())
-                    .map(str::to_owned),
-            );
-            if let Some(id) = definition["metric_id"].as_str() {
-                codes.extend(loinc_codes.get(id).into_iter().flatten().cloned());
-                codes.extend(
-                    crate::laboratory::LOINC_METRICS
-                        .iter()
-                        .filter(|&&(_, metric)| metric == id)
-                        .map(|&(code, _)| code.to_owned()),
-                );
-            }
         }
     }
     Ok(Arc::new(MetricCatalog {
@@ -410,12 +407,11 @@ pub fn wrap_completion(
                     observation.ocr_normalization = Some(proposal);
                 }
             }
-            let inconsistent = crate::laboratory::inconsistent_subcounts(rows.observations.iter());
-            for (observation, inconsistent) in rows.observations.iter_mut().zip(inconsistent) {
-                if inconsistent {
+            let warnings = crate::laboratory::subcount_warnings(rows.observations.iter());
+            for (observation, warning) in rows.observations.iter_mut().zip(warnings) {
+                if let Some(warning) = warning {
                     observation.ocr_normalization = None;
-                    observation.ocr_mapping_note =
-                        Some(crate::laboratory::INCONSISTENT_SUBCOUNT_MESSAGE.into());
+                    observation.ocr_mapping_note = Some(warning);
                 }
             }
             envelope["report_title"] = json!(rows.report_title);

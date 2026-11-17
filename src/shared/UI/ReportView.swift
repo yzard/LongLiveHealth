@@ -735,9 +735,7 @@ struct ReportObservationRow: View {
                     .disabled(model.isBusy)
                 }
             }
-            let suggestion = hasPossibleMatch
-                ? observation["payload"]["ocr_mapping_note"].stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                : ReportReview.suggestionNote(observation)
+            let suggestion = ReportReview.suggestionNote(observation, includeMetricName: !hasPossibleMatch)
             if !suggestion.isEmpty {
                 Text("OCR suggestion: \(suggestion)").font(.caption).foregroundStyle(.secondary)
             }

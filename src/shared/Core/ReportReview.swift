@@ -60,8 +60,15 @@ public nonisolated enum ReportReview {
         return resolved.isEmpty ? suggestedMetricID(observation) : resolved
     }
 
-    public static func suggestionNote(_ observation: JSONValue) -> String {
+    public static func suggestionNote(_ observation: JSONValue, includeMetricName: Bool) -> String {
         let note = observation["payload"]["ocr_mapping_note"].stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if observation["browse_issues"].arrayValue.contains(where: {
+            $0["code"] == .string("inconsistent_subcount")
+                && ($0["message"] == .string(note) || note == "The printed subcount exceeds its total. Verify the unit and scale.")
+        }) {
+            return ""
+        }
+        if !includeMetricName { return note }
         return note.isEmpty ? observation["ocr_suggestion_name"].stringValue : note
     }
 

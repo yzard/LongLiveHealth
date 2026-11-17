@@ -25,6 +25,8 @@ pub struct Source {
 #[serde(deny_unknown_fields)]
 pub struct ObservationPayload {
     pub raw_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_lab_code: Option<String>,
     pub raw_result: String,
     pub raw_unit: Option<String>,
     pub reference_range: Option<String>,
@@ -75,6 +77,10 @@ impl ObservationPayload {
         }
         if self.raw_name.trim().is_empty()
             || self.raw_name.len() > 256
+            || self
+                .raw_lab_code
+                .as_ref()
+                .is_some_and(|code| code.len() > 128 || code.chars().any(char::is_control))
             || self.raw_result.trim().is_empty()
             || self.raw_result.len() > 4096
             || self.source.page < 1
@@ -1286,13 +1292,12 @@ impl Database {
                     ))
                 })
                 .collect::<Result<Vec<_>, AppError>>()?;
-            let flags = crate::laboratory::inconsistent_subcounts(
-                active.iter().map(|(_, payload)| payload),
-            );
+            let warnings =
+                crate::laboratory::subcount_warnings(active.iter().map(|(_, payload)| payload));
             active
                 .into_iter()
-                .zip(flags)
-                .filter_map(|((id, _), flag)| flag.then_some(id))
+                .zip(warnings)
+                .filter_map(|((id, _), warning)| warning.map(|_| id))
                 .collect::<HashSet<_>>()
         } else {
             HashSet::new()
@@ -1839,15 +1844,14 @@ impl Database {
                     .collect::<Result<Vec<_>, AppError>>()?;
                 if include_suggestions {
                     let active: Vec<_> = observations.iter_mut().collect();
-                    let inconsistent = crate::laboratory::inconsistent_subcounts(
-                        active.iter().map(|row| &row.payload),
-                    );
-                    for (row, inconsistent) in active.into_iter().zip(inconsistent) {
-                        if inconsistent {
+                    let warnings =
+                        crate::laboratory::subcount_warnings(active.iter().map(|row| &row.payload));
+                    for (row, warning) in active.into_iter().zip(warnings) {
+                        if let Some(message) = warning {
                             row.browse_issues.push(BrowseIssue {
                                 code: "inconsistent_subcount",
                                 scope: "review",
-                                message: crate::laboratory::INCONSISTENT_SUBCOUNT_MESSAGE.into(),
+                                message,
                             });
                         }
                     }

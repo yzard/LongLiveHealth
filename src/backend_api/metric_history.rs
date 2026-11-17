@@ -393,6 +393,7 @@ fn append_value(
         return;
     };
     let payload = ObservationPayload {
+        raw_lab_code: None,
         raw_name: metric.into(),
         raw_result,
         raw_unit: unit.map(str::to_owned),

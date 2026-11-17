@@ -383,6 +383,21 @@ fn subcounts_are_checked_against_their_own_sample_and_panel() {
             "Other panel",
             "2018-10-20",
         ),
+        ("WBC (6690-2)", "4.2", "10E3/uL", "CBC", "2019-10-26"),
+        (
+            "Lymphocytes (736-9)",
+            "36.0",
+            "Percent",
+            "CBC",
+            "2019-10-26",
+        ),
+        (
+            "Lymphocytes, Absolute (731-0)",
+            "1510",
+            "10E3/uL",
+            "CBC",
+            "2019-10-26",
+        ),
     ]
     .into_iter()
     .map(|(name, value, unit, heading, date)| {
@@ -393,6 +408,9 @@ fn subcounts_are_checked_against_their_own_sample_and_panel() {
         row.raw_unit = Some(unit.into());
         row.sampled_at = Some(date.into());
         row.ocr_section_heading = Some(heading.into());
+        if name.ends_with("(731-0)") {
+            row.raw_lab_code = Some("1113".into());
+        }
         row
     })
     .collect();
@@ -412,10 +430,22 @@ fn subcounts_are_checked_against_their_own_sample_and_panel() {
     for (index, (row, original)) in actual.iter().zip(rows).enumerate() {
         assert_eq!(row["raw_result"], original.raw_result);
         assert_eq!(row["raw_unit"].as_str(), original.raw_unit.as_deref());
-        assert_eq!(row["ocr_mapping_note"].is_string(), index == 1);
+        assert_eq!(row["ocr_mapping_note"].is_string(), [1, 7].contains(&index));
     }
     assert_eq!(actual[1]["ocr_metric_candidate"], "neutrophil_count");
     assert!(actual[1]["ocr_normalization"].is_null());
+    assert!(
+        actual[1]["ocr_mapping_note"]
+            .as_str()
+            .unwrap()
+            .contains("by 3655.5 10^9/L")
+    );
+    let note = actual[7]["ocr_mapping_note"].as_str().unwrap();
+    assert!(note.contains("WBC 4200 cells/µL × 36% = 1512 cells/µL"));
+    assert!(note.contains("The report lists 1510 10E3/uL"));
+    assert!(note.contains("differs from the estimate by 2 cells/µL"));
+    assert!(note.contains("Rounding of the printed total and percentage could explain"));
+    assert_eq!(actual[7]["raw_lab_code"], "1113");
 }
 
 #[test]
