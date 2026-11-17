@@ -47,7 +47,6 @@ async fn renamed_report_metrics_are_suggested_by_loinc_or_original_identity_and_
         expected_revision: 1,
         context: Some(serde_json::from_value(json!({"source_name":"Fixture Laboratory"})).unwrap()),
         observations,
-        new_metric: None,
     };
     state
         .database
@@ -156,7 +155,6 @@ async fn renamed_report_metrics_are_suggested_by_loinc_or_original_identity_and_
         .review(
             &alice.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: second,
                 expected_revision: second_report["report"]["revision"].as_i64().unwrap(),
                 context: None,
@@ -278,7 +276,6 @@ async fn conflicting_history_units_disable_the_chart_and_list_all_reported_units
                 ReviewRequest {
                     report_id: archive(&state, "alice").await,
                     expected_revision: 1,
-                    new_metric: None,
                     context: None,
                     observations: vec![ReviewItem {
                         observation_id: None,
@@ -324,7 +321,6 @@ async fn metric_history_preserves_three_sources_normalizes_and_isolates_users() 
             .review(
                 &alice.user_id,
                 ReviewRequest {
-                    new_metric: None,
                     report_id: report,
                     expected_revision: 1,
                     context: Some(serde_json::from_value(json!({"source_name":name})).unwrap()),
@@ -471,7 +467,6 @@ async fn report_source_rejects_empty_or_reserved_names_without_changing_revision
             .review(
                 &alice.user_id,
                 ReviewRequest {
-                    new_metric: None,
                     report_id: report.clone(),
                     expected_revision: 1,
                     observations: vec![],
@@ -510,7 +505,6 @@ async fn quantity_glucose_and_clinical_component_share_report_units_and_dates() 
         .review(
             &alice.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: 1,
                 context: Some(serde_json::from_value(json!({"source_name":"Clinic"})).unwrap()),
@@ -577,7 +571,6 @@ async fn quantity_glucose_and_clinical_component_share_report_units_and_dates() 
         .review(
             &alice.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report,
                 expected_revision: 2,
                 observations: vec![],
@@ -1047,7 +1040,6 @@ async fn report_aliases_share_history_and_browse_without_rewriting_stored_eviden
             .review(
                 &user.user_id,
                 ReviewRequest {
-                    new_metric: None,
                     report_id: report,
                     expected_revision: 1,
                     context: Some(serde_json::from_value(json!({"source_name":source})).unwrap()),
@@ -1114,7 +1106,6 @@ async fn browse_unifies_sodium_sources_and_excludes_workflow_fields() {
         .review(
             &user.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report,
                 expected_revision: 1,
                 context: None,
@@ -1248,7 +1239,6 @@ async fn report_history_keeps_undated_and_non_numeric_results() {
         .review(
             &alice.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report,
                 expected_revision: 1,
                 context: Some(
@@ -1318,7 +1308,6 @@ async fn every_function_health_marker_is_available_in_browse_after_confirmation(
         .review(
             &user.user_id,
             longlivehealth::reports::ReviewRequest {
-                new_metric: None,
                 report_id: report,
                 expected_revision: 1,
                 context: None,
@@ -1374,7 +1363,6 @@ async fn pdf_lab_codes_and_names_share_history_without_rewriting_evidence() {
             .review(
                 &alice.user_id,
                 ReviewRequest {
-                    new_metric: None,
                     report_id: report,
                     expected_revision: 1,
                     context: Some(serde_json::from_value(json!({"source_name": source})).unwrap()),
@@ -1466,7 +1454,6 @@ async fn browse_keeps_confirmed_unmapped_results_searchable_with_original_histor
             .review(
                 &alice.user_id,
                 ReviewRequest {
-                    new_metric: None,
                     report_id: report_id.clone(),
                     expected_revision: 1,
                     context: Some(serde_json::from_value(json!({"source_name":source})).unwrap()),
@@ -1569,7 +1556,6 @@ async fn browse_hides_drafts_but_reports_keep_review_issues() {
         .review(
             &alice.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: 1,
                 context: None,
@@ -1641,7 +1627,6 @@ async fn browse_hides_drafts_but_reports_keep_review_issues() {
         .review(
             &alice.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: response["report"]["revision"].as_i64().unwrap(),
                 context: None,
@@ -1684,7 +1669,6 @@ async fn browse_hides_drafts_but_reports_keep_review_issues() {
         .review(
             &alice.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report,
                 expected_revision: confirmed["report"]["revision"].as_i64().unwrap(),
                 context: None,
@@ -1822,7 +1806,6 @@ async fn browse_unifies_total_vitamin_d_without_combining_its_fractions() {
             .review(
                 &user.user_id,
                 ReviewRequest {
-                    new_metric: None,
                     report_id: report,
                     expected_revision: 1,
                     context: Some(serde_json::from_value(json!({"source_name":source})).unwrap()),
@@ -2065,7 +2048,6 @@ async fn blood_count_aliases_join_pdf_and_clinical_history() {
         .review(
             &user.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report,
                 expected_revision: 1,
                 context: None,
@@ -2172,7 +2154,6 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
         .review(
             &alice.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report_id.clone(),
                 expected_revision: 1,
                 context: None,
@@ -2274,7 +2255,6 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
         .review(
             &alice.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report_id.clone(),
                 expected_revision: 2,
                 context: None,
@@ -2298,7 +2278,6 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
     assert_eq!(pending.display_name, "Alternate printed name");
 
     let update = |status: ReviewStatus, revision, payload| ReviewRequest {
-        new_metric: None,
         report_id: report_id.clone(),
         expected_revision: revision,
         context: None,
@@ -2367,7 +2346,6 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
         .review(
             &bob.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: bob_report.clone(),
                 expected_revision: 1,
                 context: None,
@@ -2412,7 +2390,6 @@ async fn rename_updates_saved_pending_title_and_preserves_unsaved_pdf_title() {
                 report_id: report_id.clone(),
                 expected_revision: 1,
                 context: None,
-                new_metric: None,
                 observations: [
                     (ReviewStatus::Confirmed, mapped.clone()),
                     (ReviewStatus::Pending, mapped),

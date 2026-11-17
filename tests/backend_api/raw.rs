@@ -192,7 +192,6 @@ async fn report_source_groups_originals_and_source_changes_preserve_bytes() {
             .review(
                 &user.user_id,
                 longlivehealth::reports::ReviewRequest {
-                    new_metric: None,
                     report_id: file_id.clone(),
                     expected_revision: report.revision,
                     context: Some(serde_json::from_value(json!({"source_name":source})).unwrap()),

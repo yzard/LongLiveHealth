@@ -33,17 +33,6 @@ public nonisolated enum ReportReview {
             || payload["unmapped_choice"]["kind"] == .string("new")
     }
 
-    public static func canConfirmIndividually(_ observation: JSONValue) -> Bool {
-        if canBulkConfirm(observation) { return true }
-        let payload = observation["payload"]
-        let choice = payload["unmapped_choice"]
-        if choice == .null { return hasSavedMapping(observation) }
-        return observation["status"] == .string("pending")
-            && choice["kind"] == .string("new")
-            && hasRequiredEvidence(payload)
-            && observation["browse_issues"].arrayValue.allSatisfy { $0["code"] == .string("negative_with_unit") }
-    }
-
     public static func suggestedMetricID(_ observation: JSONValue) -> String? {
         guard observation["payload"]["metric_id"].stringValue.isEmpty,
               observation["payload"]["unmapped_choice"] == .null,
@@ -65,7 +54,8 @@ public nonisolated enum ReportReview {
 
     public static func defaultMetricID(_ observation: JSONValue) -> String? {
         guard observation["payload"]["unmapped_choice"] == .null else { return nil }
-        if let saved = savedMetricID(observation) { return saved }
+        let selected = observation["payload"]["metric_id"].stringValue
+        if !selected.isEmpty { return selected }
         let resolved = observation["resolved_metric_id"].stringValue
         return resolved.isEmpty ? suggestedMetricID(observation) : resolved
     }

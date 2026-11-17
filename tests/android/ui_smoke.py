@@ -521,14 +521,15 @@ def report_metric_review():
         if scenario != "test/report-no-metric-suggestions":
             negative = scenario == "test/report-negative-suggestion"
             wait_for("Negative mg/dL" if negative else "99.1 mg/dL (5.5 mmol/L)")
-            tap("Suggested match")
+            wait_for("Appearance - urine" if negative else "Glucose")
+            tap("Possible match")
             wait_for("Review result")
             wait_for("Metric maps to")
             wait_for("Appearance - urine" if negative else "Glucose")
             assert "Unmapped" not in labels()
             assert "No matching Browse metric. Review this result." not in labels()
             if not negative:
-                tap("Suggested match")
+                tap("Possible match")
                 wait_for("Mark as New")
                 tap("Review with the full metric list")
                 wait_for("Glucose")
@@ -542,7 +543,7 @@ def report_metric_review():
                 wait_for("Glucose")
                 tap("Cancel")
                 assert control("reports/get")["observations"][0]["payload"]["metric_id"] is None
-                tap("Suggested match")
+                tap("Possible match")
                 wait_for("Appearance - urine")
                 size = adb("shell", "wm", "size")
                 width, height = map(int, re.findall(r"(\d+)x(\d+)", size)[-1])
@@ -571,10 +572,12 @@ def report_metric_review():
                 assert saved["payload"]["raw_unit"] == "mg/L"
             else:
                 tap("1 result ready to confirm")
+                wait_for("Glucose")
                 wait_for("5.5 mmol/L")
         else:
             issue = "New"
             wait_for("5.5 mmol/L")
+            wait_for("Zyphorin activity")
             tap(issue)
             wait_for("Mark as New")
             wait_for("No similar Browse metrics found.")
@@ -592,7 +595,8 @@ def report_metric_review():
             tap("Save Draft")
             wait_for("1 result ready to confirm")
             tap("1 result ready to confirm")
-            wait_for("Zyphorin panel activity")
+            wait_for("Zyphorin activity")
+            wait_for("New")
             saved = control("reports/get")["observations"][0]
             assert saved["status"] == "pending"
             assert saved["payload"]["metric_id"] is None
@@ -758,7 +762,7 @@ def report_settings():
     wait_for("Insights"); tap("Data"); tap("Blood Work"); wait_for("Example Laboratory"); tap("Example Laboratory")
     wait_for("Cannot appear in Browse: unit invalid-unit is not supported for this test.")
     assert "PAGE PROCESSING" not in labels()
-    tap("Detail"); wait_for("PAGE PROCESSING"); wait_for("ORIGINAL OCR OUTPUT")
+    tap("Raw OCR Output"); wait_for("PAGE PROCESSING"); wait_for("ORIGINAL OCR OUTPUT")
     adb("shell", "input", "keyevent", "KEYCODE_BACK")
     tap("Data"); adb("shell", "input", "keyevent", "KEYCODE_BACK"); wait_for("gearshape"); tap("gearshape"); wait_for("Sleep Goal")
     assert not {"Server processing", "App unlock", "Your server", "Full data export", "Clear this device"}.intersection(labels())
@@ -778,7 +782,7 @@ def report_settings():
     tap("chevron.left"); wait_for("7 hr 5 min")
     tap("Sleep Goal"); wait_for("5 min"); tap("chevron.left")
     assert control("wellness/preferences/get")["preferences"]["sleep_target_minutes"] == 425
-    print("PASS: report diagnostics/Detail, Settings layout, automatic favorites and sleep goal persistence, failed-write rollback, Back/reopen")
+    print("PASS: report diagnostics/Raw OCR Output, Settings layout, automatic favorites and sleep goal persistence, failed-write rollback, Back/reopen")
 
 
 def edge_scroll():

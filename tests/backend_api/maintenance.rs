@@ -13,7 +13,6 @@ async fn export_contains_raw_and_revisions_without_credentials_and_delete_cleans
         .review(
             &user.user_id,
             longlivehealth::reports::ReviewRequest {
-                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: 2,
                 context: None,

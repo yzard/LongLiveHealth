@@ -7,23 +7,24 @@ public nonisolated enum LaboratoryPresentation {
         return order == .orderedSame ? id < otherID : order == .orderedAscending
     }
 
-    public static func resultTitle(_ observation: JSONValue, renamedMetrics: [String: String]) -> String {
+    public static func resultTitle(_ observation: JSONValue, metrics: [JSONValue], renamedMetrics: [String: String]) -> String {
         let payload = observation["payload"]
         let code = observation["lab_test_code"].stringValue
         let printed = printedName(payload["raw_name"].stringValue, code: code)
-        let display = observation["display_name"].stringValue
-        let metricID = ReportReview.savedMetricID(observation)
-        if let metricID {
-            if let name = renamedMetrics[metricID] { return name }
-            if !display.isEmpty {
-                return printedName(display, code: code)
-            }
-        } else if payload["unmapped_choice"]["kind"] == .string("new") {
-            let name = payload["unmapped_choice"]["definition"]["name"].stringValue
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let metricID = ReportReview.defaultMetricID(observation) else { return printed }
+        if let name = renamedMetrics[metricID] { return name }
+        let matchingMetric: (JSONValue) -> Bool = {
+            $0["metric_id"] == .string(metricID) && !$0["name"].stringValue.isEmpty
+        }
+        if let metric = metrics.first(where: matchingMetric)
+            ?? observation["metric_suggestions"].arrayValue.first(where: matchingMetric) {
+            return metric["name"].stringValue
+        }
+        if payload["ocr_metric_candidate"] == .string(metricID) {
+            let name = observation["ocr_suggestion_name"].stringValue
             if !name.isEmpty { return name }
         }
-        return printed.isEmpty ? printedName(display, code: code) : printed
+        return printed
     }
 
     public static func printedName(_ rawName: String, code: String) -> String {

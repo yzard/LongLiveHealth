@@ -251,9 +251,21 @@ pub const REPORTS: &str =
     report_summary_query!("(? IS NULL OR r.report_id > ?) ORDER BY r.report_id LIMIT ?");
 pub const OBSERVATIONS: &str = "SELECT o.observation_id, o.report_id, o.current_revision AS revision, o.status, o.payload_json, r.context_json FROM review_observations o JOIN reports r ON r.user_id = o.user_id AND r.report_id = o.report_id WHERE o.user_id = ? AND o.report_id = ? ORDER BY o.observation_id";
 pub const OBSERVATION: &str = "SELECT o.current_revision, o.status, o.payload_json, o.candidate_key FROM review_observations o WHERE o.user_id = ? AND o.report_id = ? AND o.observation_id = ?";
-pub const INSERT_OBSERVATION: &str = "INSERT INTO draft.observations (observation_id, user_id, report_id, current_revision, candidate_key) VALUES (?, ?, ?, 1, ?)";
-pub const SAVE_PENDING_OBSERVATION: &str = "INSERT INTO draft.observations (user_id,observation_id,current_revision,status,payload_json,updated_at,report_id,candidate_key) SELECT ?1,?2,?3,'pending',?4,?5,report_id,candidate_key FROM review_observations WHERE user_id=?1 AND observation_id=?2 ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision,payload_json=excluded.payload_json,updated_at=excluded.updated_at";
-pub const CONFIRM_OBSERVATION: &str = "INSERT INTO main.observations (user_id,observation_id,current_revision,status,payload_json,updated_at,report_id,candidate_key) SELECT ?1,?2,?3,'confirmed',?4,?5,report_id,candidate_key FROM review_observations WHERE user_id=?1 AND observation_id=?2 ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision,payload_json=excluded.payload_json,updated_at=excluded.updated_at";
+pub const SAVE_PENDING_OBSERVATION: &str = r#"
+INSERT INTO draft.observations (user_id, observation_id, current_revision, status, payload_json, updated_at, report_id, candidate_key)
+VALUES (?1, ?2, ?3, 'pending', ?4, ?5, ?6, ?7)
+ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision
+    , payload_json=excluded.payload_json
+    , updated_at=excluded.updated_at
+"#;
+pub const CONFIRM_OBSERVATION: &str = r#"
+INSERT INTO main.observations (user_id, observation_id, current_revision, status, payload_json, updated_at, report_id, candidate_key)
+VALUES (?1, ?2, ?3, 'confirmed', ?4, ?5, ?6, ?7)
+ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision
+    , status=excluded.status
+    , payload_json=excluded.payload_json
+    , updated_at=excluded.updated_at
+"#;
 pub const UPDATE_REPORT: &str = "UPDATE reports SET revision = revision + 1, context_json = COALESCE(?, context_json) WHERE user_id = ? AND report_id = ? AND revision = ?";
 pub const OBSERVATION_HISTORY: &str = "SELECT observation_id, current_revision AS revision, status, payload_json, updated_at AS created_at FROM review_observations WHERE user_id = ? AND observation_id = ?";
 pub const CONFIRMED_OBSERVATIONS: &str = r#"

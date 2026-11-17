@@ -62,7 +62,7 @@ struct ReportView: View {
         } message: { Text("This deletes the report, its confirmed and draft results, and related analysis from your archive. The server then removes stored files. Offline backups you made are separate.") }
     }
     private enum ReportRow: Identifiable {
-        case info, markerCount, actions, retry, relationship, unlink, review, error, empty, detail
+        case info, markerCount, actions, retry, relationship, unlink, review, error, empty, ocrOutput
         case validation(IndexedValue)
         case observation(JSONValue)
 
@@ -77,7 +77,7 @@ struct ReportView: View {
             case .review: "review-actions"
             case .error: "confirmation-error"
             case .empty: "empty-results"
-            case .detail: "report-detail"
+            case .ocrOutput: "report-ocr-output"
             case .validation(let issue): issue.id
             case .observation(let value): "observation-\(value.identifier)"
             }
@@ -118,7 +118,9 @@ struct ReportView: View {
         if !confirmed.isEmpty {
             result.append(ReportSection(id: "confirmed", title: "Confirmed Results", rows: confirmed))
         }
-        result.append(ReportSection(id: "detail", title: nil, rows: [.detail]))
+        if ["pages", "extraction_inputs", "extraction_outputs"].contains(where: { !document[$0].arrayValue.isEmpty }) {
+            result.append(ReportSection(id: "ocr-output", title: nil, rows: [.ocrOutput]))
+        }
         return result
     }
 
@@ -240,20 +242,20 @@ struct ReportView: View {
             validationRow(entry.value)
         case .observation(let observation):
             observationRow(observation)
-        case .detail:
+        case .ocrOutput:
             NavigationLink {
-                List { reportDetails }.mobileNavigationTitle("Detail")
+                List { ocrDiagnostics }.mobileNavigationTitle("Raw OCR Output")
             } label: {
                 #if os(Android)
                 HStack {
-                    Text("Detail")
+                    Text("Raw OCR Output")
                     Spacer()
                     Image(systemName: MobileSymbol.name("chevron.right")).font(.caption).foregroundStyle(.secondary)
                 }
                 #else
-                Text("Detail")
+                Text("Raw OCR Output")
                 #endif
-            }.accessibilityIdentifier("report-detail")
+            }.accessibilityIdentifier("report-ocr-output")
         }
     }
 
@@ -362,8 +364,7 @@ struct ReportView: View {
             .id("\(id.stringValue)-\(revision)-\(renderedStatus)")
     }
 
-    @ViewBuilder private var reportDetails: some View {
-
+    @ViewBuilder private var ocrDiagnostics: some View {
         if !document["pages"].arrayValue.isEmpty {
             Section("Page processing") {
                 ForEach(indexedValues("pages")) { entry in
@@ -665,11 +666,17 @@ struct ReportObservationRow: View {
     private var sourcePage: Int { Int(observation["payload"]["source"]["page"].numberValue ?? 1) }
 
     var body: some View {
+        let status = observation["status"].stringValue
+        let mappedMetricID = ReportReview.defaultMetricID(observation)
+        let hasPossibleMatch = status == "pending" && mappedMetricID != nil
+        let proposedNew = observation["payload"]["unmapped_choice"]["kind"] == .string("new")
+        let isNew = mappedMetricID == nil
+            && (proposedNew || observation["browse_issues"].arrayValue.contains { $0["code"] == .string("unmapped_metric") })
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 8) {
                 Button { edit() } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(LaboratoryPresentation.resultTitle(observation, renamedMetrics: model.renamedLabMetrics))
+                        Text(LaboratoryPresentation.resultTitle(observation, metrics: model.metrics, renamedMetrics: model.renamedLabMetrics))
                             .font(.headline)
                             .fixedSize(horizontal: false, vertical: true)
                         let code = observation["lab_test_code"].stringValue
@@ -683,10 +690,9 @@ struct ReportObservationRow: View {
                     }
                 }.buttonStyle(.plain)
                 Spacer(minLength: 0)
-                let hasSuggestion = ReportReview.suggestedMetricID(observation) != nil
-                if hasSuggestion || observation["browse_issues"].arrayValue.contains(where: { $0["code"] == .string("unmapped_metric") }) {
-                    Button(action: hasSuggestion ? edit : chooseMetric) {
-                        Text(hasSuggestion ? "Suggested match" : "New")
+                if hasPossibleMatch || isNew {
+                    Button(action: hasPossibleMatch || proposedNew ? edit : chooseMetric) {
+                        Text(hasPossibleMatch ? "Possible match" : "New")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(Color.yellow)
                             .padding(.horizontal, 8)
@@ -694,7 +700,7 @@ struct ReportObservationRow: View {
                             .background(Color.yellow.opacity(0.12), in: Capsule())
                             .frame(minHeight: 44)
                     }
-                    .accessibilityIdentifier(hasSuggestion ? "report-result-suggested" : "report-result-new")
+                    .accessibilityIdentifier(hasPossibleMatch ? "report-result-possible-match" : "report-result-new")
                     .disabled(model.isBusy)
                 }
             }.frame(minHeight: 44)
@@ -715,7 +721,6 @@ struct ReportObservationRow: View {
                 #if !os(Android)
                 .accessibilityHint("Opens the original report page")
                 #endif
-                let status = observation["status"].stringValue
                 if let changeStatus, status == "pending" {
                     Button(action: changeStatus) {
                         Text(needsManualConfirmation ? "Review" : "Confirm")
@@ -730,7 +735,9 @@ struct ReportObservationRow: View {
                     .disabled(model.isBusy)
                 }
             }
-            let suggestion = ReportReview.suggestionNote(observation)
+            let suggestion = hasPossibleMatch
+                ? observation["payload"]["ocr_mapping_note"].stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                : ReportReview.suggestionNote(observation)
             if !suggestion.isEmpty {
                 Text("OCR suggestion: \(suggestion)").font(.caption).foregroundStyle(.secondary)
             }
@@ -741,6 +748,7 @@ struct ReportObservationRow: View {
             }
             ForEach(Array(observation["browse_issues"].arrayValue.enumerated()), id: \.offset) { _, issue in
                 if issue["code"] == .string("ocr_mapping_uncertain")
+                    || (hasPossibleMatch && issue["code"] == .string("metric_identity_uncertain"))
                     || issue["code"] == .string("unmapped_metric") {
                     EmptyView()
                 } else if issue["scope"] == .string("browse") {

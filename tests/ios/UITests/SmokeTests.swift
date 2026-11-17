@@ -743,9 +743,9 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Page processing"].exists)
         XCTAssertFalse(app.staticTexts["Document evidence"].exists)
         XCTAssertFalse(app.staticTexts["Original OCR output"].exists)
-        let detail = app.buttons["report-detail"]
-        reveal(app, detail); detail.tap()
-        XCTAssertTrue(app.navigationBars["Detail"].waitForExistence(timeout: 5))
+        let output = app.buttons["report-ocr-output"]
+        reveal(app, output); output.tap()
+        XCTAssertTrue(app.navigationBars["Raw OCR Output"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Page processing"].exists)
         XCTAssertTrue(app.staticTexts["Original OCR output"].exists)
         app.navigationBars.buttons.firstMatch.tap()
@@ -832,10 +832,98 @@ nonisolated final class SmokeTests: XCTestCase {
         )).firstMatch.exists)
         app.alerts.buttons["Rescan"].tap()
         XCTAssertTrue(confirmed.waitForNonExistence(timeout: 10))
+        app.swipeUp()
+        XCTAssertFalse(app.buttons["report-ocr-output"].exists)
         let data = try await control("reports/get")
         let document = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let rows = try XCTUnwrap(document["observations"] as? [[String: Any]])
         XCTAssertTrue(rows.isEmpty)
+    }
+
+    @MainActor func testReportReviewShowsCurrentMetricNames() async throws {
+        for path in ["test/reset", "test/seed-report", "test/report-review-names"] {
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:18765/api/v1/\(path)")!)
+            request.httpMethod = "POST"
+            let (_, response) = try await URLSession.shared.data(for: request)
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        }
+        let app = XCUIApplication()
+        app.launch(); dismissPasswordPrompts(app)
+        if app.buttons["Sign in"].exists {
+            let server = app.textFields["http://192.168.1.20:8080"]
+            server.tap()
+            let old = server.value as? String ?? ""
+            if old != "http://192.168.1.20:8080" { server.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count)) }
+            server.typeText("http://127.0.0.1:18765")
+            app.textFields["Username"].tap(); app.textFields["Username"].typeText("simulator")
+            app.secureTextFields["Password"].tap(); app.secureTextFields["Password"].typeText("test-password")
+            app.buttons["Sign in"].tap(); dismissPasswordPrompts(app)
+        }
+        XCTAssertTrue(app.tabBars.buttons["Data"].waitForExistence(timeout: 10))
+        tapTab(app, "Archive")
+        let report = app.buttons["report-row-fixture-report"]
+        XCTAssertTrue(report.waitForExistence(timeout: 10)); report.tap()
+        let possible = app.buttons["report-result-possible-match"]
+        let ready = app.buttons["ready-to-confirm-results"]
+        XCTAssertTrue(ready.waitForExistence(timeout: 10))
+        XCTAssertTrue(ready.label.contains("1 result ready to confirm"))
+
+        func checkMatch(_ name: String, printed: String) {
+            let title = app.buttons[name]
+            reveal(app, title)
+            XCTAssertTrue(title.isHittable)
+            XCTAssertTrue(possible.exists)
+            XCTAssertEqual(possible.label, "Possible match")
+            XCTAssertFalse(app.buttons[printed].exists)
+            title.tap()
+            XCTAssertTrue(app.navigationBars["Review result"].waitForExistence(timeout: 5))
+            let field = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "value == %@", printed)).firstMatch
+            reveal(app, field)
+            XCTAssertTrue(field.exists)
+            tapButton(app, "Cancel")
+            XCTAssertTrue(title.waitForExistence(timeout: 5))
+        }
+
+        ready.tap()
+        let queue = app.navigationBars["Ready to Confirm"]
+        XCTAssertTrue(queue.waitForExistence(timeout: 5))
+        checkMatch("Glucose", printed: "GLU FAST")
+        queue.buttons.firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Needs Review"].waitForExistence(timeout: 5))
+        checkMatch("Appearance - urine", printed: "URINE APPR")
+        let printed = app.buttons["Zyphorin activity"]
+        reveal(app, printed)
+        XCTAssertTrue(printed.isHittable)
+        XCTAssertEqual(app.buttons["report-result-new"].label, "New")
+
+        app.swipeDown()
+        let appearance = app.buttons["Appearance - urine"]
+        reveal(app, appearance)
+        appearance.tap()
+        XCTAssertTrue(app.navigationBars["Review result"].waitForExistence(timeout: 5))
+        tapButton(app, "Save Draft")
+        XCTAssertTrue(app.navigationBars["Review result"].waitForNonExistence(timeout: 5))
+        for _ in 0..<3 where !ready.isHittable { app.swipeDown() }
+        XCTAssertTrue(ready.label.contains("2 results ready to confirm"))
+        ready.tap()
+        XCTAssertTrue(queue.waitForExistence(timeout: 5))
+        XCTAssertTrue(appearance.isHittable)
+        XCTAssertFalse(app.buttons["URINE APPR"].exists)
+        XCTAssertEqual(app.buttons.matching(identifier: "report-result-possible-match").count, 2)
+
+        queue.buttons.firstMatch.tap()
+        let newResult = app.buttons["report-result-new"]
+        reveal(app, newResult); newResult.tap()
+        XCTAssertTrue(app.navigationBars["Choose a Browse metric"].waitForExistence(timeout: 5))
+        app.buttons["create-browse-metric"].tap()
+        XCTAssertTrue(app.navigationBars["Review result"].waitForExistence(timeout: 5))
+        let confirm = app.buttons["confirm-reviewed-result"]
+        reveal(app, confirm)
+        XCTAssertTrue(confirm.isEnabled)
+        confirm.tap()
+        XCTAssertTrue(app.navigationBars["Review result"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(newResult.waitForNonExistence(timeout: 5))
     }
 
     @MainActor func testLargeReportCountAndSourceEditing() async throws {
@@ -953,10 +1041,10 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertNil(confirmationCounts?["reports/get"])
         // Traverse the entire long report in both directions, not only its first few rows.
         for _ in 0..<55 {
-            if app.buttons["report-detail"].isHittable { break }
+            if app.buttons["report-ocr-output"].isHittable { break }
             app.swipeUp(velocity: .fast)
         }
-        XCTAssertTrue(app.buttons["report-detail"].isHittable)
+        XCTAssertTrue(app.buttons["report-ocr-output"].isHittable)
         for _ in 0..<55 {
             if source.isHittable { break }
             app.swipeDown(velocity: .fast)
@@ -1342,8 +1430,8 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Add result"].waitForNonExistence(timeout: 10))
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Manual fixture result")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons.matching(identifier: "Revision history").firstMatch.exists)
-        reveal(app, app.buttons["report-detail"])
-        app.buttons["report-detail"].tap()
+        reveal(app, app.buttons["report-ocr-output"])
+        app.buttons["report-ocr-output"].tap()
         let evidence = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "text layer:")).firstMatch
         reveal(app, evidence)
         evidence.tap()

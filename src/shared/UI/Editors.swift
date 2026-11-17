@@ -80,17 +80,6 @@ struct ObservationEditor: View {
             || (creatingMetric && (newMetricName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
     }
 
-    private var hasSavedNewDefinition: Bool {
-        let choice = observation["payload"]["unmapped_choice"]
-        return choice["kind"] == .string("new")
-            && choice["definition"]["name"] == .string(newMetricName)
-            && choice["definition"]["standard_unit"] == .string(newMetricUnit)
-            && printedName == LaboratoryPresentation.printedName(
-                observation["payload"]["raw_name"].stringValue, code: observation["lab_test_code"].stringValue)
-            && loincCode == observation["lab_test_code"].stringValue
-            && payload == observation["payload"]
-    }
-
     private var validLOINC: Bool {
         let code = loincCode.trimmingCharacters(in: .whitespacesAndNewlines)
         if code.isEmpty { return true }
@@ -114,7 +103,7 @@ struct ObservationEditor: View {
                     "definition": .object(["name": .string(newMetricName), "standard_unit": .string(newMetricUnit)]),
                 ])
             } else {
-                reviewedPayload["unmapped_choice"] = metricSelection.isEmpty && nextStatus == "pending"
+                reviewedPayload["unmapped_choice"] = metricSelection.isEmpty
                     ? .object(["kind": .string("unmapped")]) : .null
             }
             if printedName != originalName || loincCode != originalCode {
@@ -151,7 +140,7 @@ struct ObservationEditor: View {
                 TextField("Standard unit", text: $newMetricUnit)
                 Button("Keep unmapped") { creatingMetric = false }
             } else if !observation["metric_suggestions"].arrayValue.isEmpty {
-                Button(suggestedMetricID == nil ? "Closest matches" : "Suggested match") {
+                Button(suggestedMetricID == nil ? "Closest matches" : "Possible match") {
                     choosingMetric = true
                 }.font(.caption)
             }
@@ -178,10 +167,7 @@ struct ObservationEditor: View {
                     else { Task { await submit(as: "confirmed") } }
                 }
                     .accessibilityIdentifier("confirm-reviewed-result")
-                    .disabled(saveDisabled || (creatingMetric && !hasSavedNewDefinition))
-                if creatingMetric && !hasSavedNewDefinition {
-                    Text("Save the new metric as a draft before confirming.").font(.caption)
-                }
+                    .disabled(saveDisabled)
             }
         }
         Section("Source") {

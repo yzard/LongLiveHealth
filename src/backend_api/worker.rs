@@ -542,20 +542,14 @@ async fn reconcile_page(
             }
             continue;
         }
-        let id = uuid::Uuid::new_v4().to_string();
-        sqlx::query(queries::INSERT_OBSERVATION)
-            .bind(&id)
-            .bind(&job.user_id)
-            .bind(&job.file_id)
-            .bind(&anchor)
-            .execute(&mut **transaction)
-            .await?;
         sqlx::query(queries::SAVE_PENDING_OBSERVATION)
             .bind(&job.user_id)
-            .bind(id)
+            .bind(uuid::Uuid::new_v4().to_string())
             .bind(1)
             .bind(serde_json::to_string(candidate)?)
             .bind(now()?)
+            .bind(&job.file_id)
+            .bind(&anchor)
             .execute(&mut **transaction)
             .await?;
     }

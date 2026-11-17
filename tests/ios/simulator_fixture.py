@@ -22,6 +22,7 @@ fail_upload = False
 upload_delay = 0
 fail_review = False
 report_status_chart = False
+report_diagnostics_available = True
 observations = []
 context = {}
 relation = {}
@@ -63,7 +64,7 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_POST(self):
-        global fail_upload, upload_delay, fail_review, context, relation, admin_password_changed, refresh_failure, source_preferences, fail_preferences, report_status_chart
+        global fail_upload, upload_delay, fail_review, context, relation, admin_password_changed, refresh_failure, source_preferences, fail_preferences, report_status_chart, report_diagnostics_available
         length = int(self.headers.get('Content-Length', 0))
         raw = self.rfile.read(length)
         body = json.loads(raw) if self.headers.get('Content-Type') == 'application/json' else {}
@@ -98,6 +99,7 @@ class Handler(BaseHTTPRequestHandler):
             upload_delay = 0
             fail_review = False
             report_status_chart = False
+            report_diagnostics_available = True
         if route == 'test/enable-report-status-chart':
             report_status_chart = True
         if route in ('test/seed-report', 'test/seed-multipage-report'):
@@ -152,6 +154,7 @@ class Handler(BaseHTTPRequestHandler):
             row = observations[0]
             row['status'] = 'pending'
             row['payload']['metric_id'] = None
+            row['payload']['ocr_metric_candidate'] = 'glucose'
             row['resolved_metric_id'] = None
             row['browse_issues'] = [{
                 'code': 'unmapped_metric', 'scope': 'browse',
@@ -162,7 +165,8 @@ class Handler(BaseHTTPRequestHandler):
                 'unit_match': 'convertible',
             }]
             if route == 'test/report-negative-suggestion':
-                row['payload'].update(raw_name='Appearance', raw_result='Negative', raw_unit='mg/dL')
+                row['payload'].update(raw_name='Appearance', raw_result='Negative', raw_unit='mg/dL',
+                                      ocr_metric_candidate='urine_appearance')
                 row['interpretation'] = {}
                 row['metric_suggestions'] = [{
                     'metric_id': 'urine_appearance', 'name': 'Appearance - urine',
@@ -176,9 +180,25 @@ class Handler(BaseHTTPRequestHandler):
                     {'code': 'negative_with_unit', 'scope': 'review', 'message': 'Verify the assay threshold.'},
                 ]
             if route == 'test/report-no-metric-suggestions':
+                row['payload'].pop('ocr_metric_candidate')
                 row['payload']['raw_name'] = 'Zyphorin activity'
                 row['payload']['ocr_new_metric'] = {'name': 'Zyphorin panel activity', 'standard_unit': 'mmol/L'}
                 row['interpretation'] = {}
+        if route == 'test/report-review-names':
+            template = observations[0]
+            unresolved = {'code': 'unmapped_metric', 'scope': 'browse', 'message': 'No existing metric matches.'}
+            observations[:] = [
+                dict(template, observation_id='fixture-ready-name', status='pending',
+                     payload=dict(template['payload'], metric_id=None, raw_name='GLU FAST')),
+                dict(template, observation_id='fixture-possible-name', status='pending', resolved_metric_id=None,
+                     payload=dict(template['payload'], metric_id=None, raw_name='URINE APPR',
+                                  ocr_metric_candidate='urine_appearance'),
+                     browse_issues=[{'code': 'unsupported_unit', 'scope': 'browse', 'message': 'Unit mismatch'}],
+                     metric_suggestions=[{'metric_id': 'urine_appearance', 'name': 'Previous urine appearance name'}]),
+                dict(template, observation_id='fixture-new-name', status='pending', resolved_metric_id=None,
+                     payload=dict(template['payload'], metric_id=None, raw_name='Zyphorin activity'),
+                     browse_issues=[unresolved]),
+            ]
         if route == 'test/expand-report':
             template = observations[0]
             observations[:] = [
@@ -200,6 +220,7 @@ class Handler(BaseHTTPRequestHandler):
         if route == 'reports/rescan' and body.get('replace_results') is not True:
             status = 400
         if route == 'reports/rescan' and status == 200:
+            report_diagnostics_available = False
             observations[:] = [row for row in observations if row['report_id'] != body.get('report_id')]
             reports[0]['revision'] += 1
         if route == 'reports/delete':
@@ -225,8 +246,6 @@ class Handler(BaseHTTPRequestHandler):
             if review_conflict:
                 status = 409
         if route == 'reports/review' and status == 200:
-            if body.get('new_metric'):
-                created_metric = dict(body['new_metric'], metric_id='custom:fixture')
             if body.get('context') is not None:
                 context = body['context']
             for change in body.get('observations', []):
@@ -296,6 +315,11 @@ class Handler(BaseHTTPRequestHandler):
                 )
         if route == 'reports/get' and not reports:
             status = 404
+        report_diagnostics = {
+            'pages': [{'page': 1, 'status': 'ready', 'content': 'Glucose 5.5 mmol/L'}],
+            'extraction_inputs': [{'page': 1, 'text_status': 'available', 'run_id': 'fixture-ocr'}],
+            'extraction_outputs': [{'page': 1, 'stage': 'ocr', 'run_id': 'fixture-ocr', 'model': 'synthetic'}],
+        } if report_diagnostics_available else {'pages': [], 'extraction_inputs': [], 'extraction_outputs': []}
         response = {
             'session/login': {
                 'token': 'synthetic-token',
@@ -374,9 +398,7 @@ class Handler(BaseHTTPRequestHandler):
                 'observations': observations,
                 'context': context,
                 'relation': relation,
-                'pages': [{'page': 1, 'status': 'ready', 'content': 'Glucose 5.5 mmol/L'}],
-                'extraction_inputs': [{'page': 1, 'text_status': 'available', 'run_id': 'fixture-ocr'}],
-                'extraction_outputs': [{'page': 1, 'stage': 'ocr', 'run_id': 'fixture-ocr', 'model': 'synthetic'}],
+                **report_diagnostics,
             },
             'reports/review': {
                 'created_metric': created_metric,
@@ -385,9 +407,7 @@ class Handler(BaseHTTPRequestHandler):
                 'observations': observations,
                 'context': context,
                 'relation': relation,
-                'pages': [{'page': 1, 'status': 'ready', 'content': 'Glucose 5.5 mmol/L'}],
-                'extraction_inputs': [{'page': 1, 'text_status': 'available', 'run_id': 'fixture-ocr'}],
-                'extraction_outputs': [{'page': 1, 'stage': 'ocr', 'run_id': 'fixture-ocr', 'model': 'synthetic'}],
+                **report_diagnostics,
             },
             'observations/history': {'history': observations},
             'reports/input/get': {'text_layer': {'status': 'available', 'text': 'Synthetic page text', 'words': []}},

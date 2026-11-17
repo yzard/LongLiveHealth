@@ -45,7 +45,6 @@ async fn partial_review_history_and_conflicts_are_transactional() {
     let bob = add_user(&state, "bob").await;
     let report = archive(&state, "alice").await;
     let request = ReviewRequest {
-        new_metric: None,
         report_id: report.clone(),
         expected_revision: 1,
         context: None,
@@ -96,7 +95,6 @@ async fn partial_review_history_and_conflicts_are_transactional() {
         .review(
             &alice.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: 2,
                 context: None,
@@ -134,7 +132,6 @@ async fn partial_review_history_and_conflicts_are_transactional() {
             .review(
                 &alice.user_id,
                 ReviewRequest {
-                    new_metric: None,
                     report_id: report.clone(),
                     expected_revision: 2,
                     context: None,
@@ -252,7 +249,6 @@ async fn confirmed_units_share_scale_and_unknown_values_report_specific_reasons(
         .review(
             &user.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report,
                 expected_revision: 1,
                 context: None,
@@ -326,7 +322,6 @@ async fn ocr_identity_autofills_and_relocates_without_overwriting_user_edits() {
         .review(
             &user.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: first["report"]["revision"].as_i64().unwrap(),
                 context: Some(
@@ -397,7 +392,6 @@ async fn reviewing_moves_rows_between_sqlite_databases_and_updates_browse_histor
         .review(
             &user.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: 1,
                 context: None,
@@ -438,7 +432,6 @@ async fn reviewing_moves_rows_between_sqlite_databases_and_updates_browse_histor
     ] {
         let revision = document["observations"][0]["revision"].as_i64().unwrap();
         let request = |expected| ReviewRequest {
-            new_metric: None,
             report_id: report.clone(),
             expected_revision: document["report"]["revision"].as_i64().unwrap(),
             context: None,
@@ -497,7 +490,6 @@ async fn deleting_report_removes_official_and_draft_results() {
         .review(
             &user.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: 1,
                 context: None,
@@ -685,7 +677,6 @@ async fn rescan_clears_all_results_and_rejects_stale_or_active_requests() {
         .review(
             &alice.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: summary.revision,
                 context: None,
@@ -720,7 +711,6 @@ async fn rescan_clears_all_results_and_rejects_stale_or_active_requests() {
             .is_empty()
     );
     let edit = ReviewRequest {
-        new_metric: None,
         report_id: report.clone(),
         expected_revision: revision + 1,
         context: None,
@@ -797,7 +787,6 @@ async fn stored_results_display_loinc_long_common_name_without_remapping() {
         .review(
             &user.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: 1,
                 context: None,
@@ -884,7 +873,6 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
         .review(
             &user.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report,
                 expected_revision: 1,
                 context: None,
@@ -981,7 +969,6 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
         .review(
             &user.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: bad["report_id"].as_str().unwrap().into(),
                 expected_revision: 2,
                 context: None,
@@ -1018,7 +1005,6 @@ async fn saving_mappings_keeps_ocr_evidence_and_rechecks_independent_report_issu
         .review(
             &user.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report_id.clone(),
                 expected_revision: 1,
                 context: None,
@@ -1078,7 +1064,6 @@ async fn saving_mappings_keeps_ocr_evidence_and_rechecks_independent_report_issu
             .review(
                 &user.user_id,
                 ReviewRequest {
-                    new_metric: None,
                     report_id: report_id.clone(),
                     expected_revision: snapshot["report"]["revision"].as_i64().unwrap(),
                     context: None,
@@ -1152,7 +1137,6 @@ async fn report_summaries_use_collection_evidence_for_the_date_column() {
         .review(
             &alice.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: 1,
                 context: None,
@@ -1208,7 +1192,7 @@ async fn report_summaries_use_collection_evidence_for_the_date_column() {
 #[tokio::test]
 async fn review_creates_an_owned_metric_and_links_its_confirmed_browse_history() {
     use longlivehealth::metric_history::{HistoryRequest, history};
-    use longlivehealth::reports::NewMetric;
+    use longlivehealth::reports::{NewMetric, UnmappedChoice};
 
     let (_directory, state) = fixture().await;
     let user = add_user(&state, "alice").await;
@@ -1234,13 +1218,16 @@ async fn review_creates_an_owned_metric_and_links_its_confirmed_browse_history()
                     status: ReviewStatus::Pending,
                     payload: payload.clone(),
                 }],
-                new_metric: None,
             },
         )
         .await
         .unwrap();
     let draft = &drafted["observations"][0];
     assert_eq!(draft["metric_suggestions"], serde_json::json!([]));
+    payload.unmapped_choice = Some(UnmappedChoice::New(NewMetric {
+        name: payload.raw_name.clone(),
+        standard_unit: "ZR".into(),
+    }));
     let request = |observation_revision| ReviewRequest {
         report_id: report.clone(),
         expected_revision: 2,
@@ -1251,10 +1238,6 @@ async fn review_creates_an_owned_metric_and_links_its_confirmed_browse_history()
             status: ReviewStatus::Confirmed,
             payload: payload.clone(),
         }],
-        new_metric: Some(NewMetric {
-            name: payload.raw_name.clone(),
-            standard_unit: "ZR".into(),
-        }),
     };
     assert!(
         state
@@ -1315,7 +1298,6 @@ async fn mark_as_new_replaces_a_legacy_confirmed_display_identity_with_a_persist
                 report_id: report_id.clone(),
                 expected_revision: revision,
                 context: None,
-                new_metric: None,
                 observations: vec![ReviewItem {
                     observation_id,
                     expected_revision,
@@ -1376,18 +1358,17 @@ async fn mark_as_new_replaces_a_legacy_confirmed_display_identity_with_a_persist
 }
 
 #[tokio::test]
-async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
+async fn edited_draft_can_confirm_directly_after_mapping_issues_are_fixed() {
     use longlivehealth::reports::{NewMetric, UnmappedChoice};
     use serde_json::Value;
 
-    let (_directory, state) = fixture().await;
+    let (directory, state) = fixture().await;
     let user = add_user(&state, "alice").await;
     let report = archive(&state, "alice").await;
     let request = |revision, row: Option<&Value>, status: ReviewStatus, payload| ReviewRequest {
         report_id: report.clone(),
         expected_revision: revision,
         context: None,
-        new_metric: None,
         observations: vec![ReviewItem {
             observation_id: row.map(|row| row["observation_id"].as_str().unwrap().to_owned()),
             expected_revision: row.and_then(|row| row["revision"].as_i64()),
@@ -1411,21 +1392,11 @@ async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
         .unwrap();
     let initial = &initial["observations"][0];
     assert_eq!(initial["display_name"], "Zyphorin activity");
+    assert_eq!(observation_counts(directory.path()).await, (0, 1));
     payload.unmapped_choice = Some(UnmappedChoice::New(NewMetric {
         name: "Zyphorin enzyme activity".into(),
         standard_unit: "ZR".into(),
     }));
-    assert!(
-        state
-            .database
-            .review(
-                &user.user_id,
-                request(2, Some(initial), ReviewStatus::Confirmed, payload.clone())
-            )
-            .await
-            .is_err()
-    );
-
     payload.raw_name = "Zyphorin activity (2093-3)".into();
     payload.raw_unit = Some("wrong unit".into());
     let saved = state
@@ -1438,6 +1409,9 @@ async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
         .unwrap();
     let wrong = &saved["observations"][0];
     assert_eq!(wrong["status"], "pending");
+    assert_eq!(wrong["observation_id"], initial["observation_id"]);
+    assert_eq!(wrong["revision"], 2);
+    assert_eq!(observation_counts(directory.path()).await, (0, 1));
     assert_eq!(wrong["display_name"], "Zyphorin enzyme activity");
     assert_eq!(wrong["payload"]["raw_name"], "Zyphorin activity (2093-3)");
     assert_eq!(wrong["payload"]["unmapped_choice"]["kind"], "new");
@@ -1471,40 +1445,19 @@ async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
 
     payload.raw_name = "Zyphorin activity".into();
     payload.raw_unit = Some("ZR".into());
-    let corrected = state
-        .database
-        .review(
-            &user.user_id,
-            request(3, Some(wrong), ReviewStatus::Pending, payload.clone()),
-        )
-        .await
-        .unwrap();
-    let corrected = &corrected["observations"][0];
-    assert!(corrected["browse_issues"].as_array().unwrap().is_empty());
-    let reopened = state.database.report(&user.user_id, &report).await.unwrap();
-    assert_eq!(
-        reopened["observations"][0]["display_name"],
-        "Zyphorin enzyme activity"
-    );
-    assert_eq!(reopened["observations"][0]["status"], "pending");
-    assert!(
-        state
-            .database
-            .custom_metrics(&user.user_id)
-            .await
-            .unwrap()
-            .is_empty()
-    );
     let confirmed = state
         .database
         .review(
             &user.user_id,
-            request(4, Some(corrected), ReviewStatus::Confirmed, payload),
+            request(3, Some(wrong), ReviewStatus::Confirmed, payload),
         )
         .await
         .unwrap();
     let row = &confirmed["observations"][0];
     assert_eq!(row["status"], "confirmed");
+    assert_eq!(row["observation_id"], initial["observation_id"]);
+    assert_eq!(row["revision"], 3);
+    assert_eq!(observation_counts(directory.path()).await, (1, 0));
     assert_eq!(row["display_name"], "Zyphorin enzyme activity");
     assert_eq!(
         row["payload"]["metric_id"],
@@ -1523,6 +1476,39 @@ async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
 }
 
 #[tokio::test]
+async fn explicitly_unmapped_manual_result_keeps_its_printed_identity() {
+    use longlivehealth::reports::UnmappedChoice;
+
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "alice").await;
+    let report_id = archive(&state, "alice").await;
+    let mut payload = observation_payload();
+    payload.metric_id = None;
+    payload.unmapped_choice = Some(UnmappedChoice::Unmapped);
+    let document = state
+        .database
+        .review(
+            &user.user_id,
+            ReviewRequest {
+                report_id,
+                expected_revision: 1,
+                context: None,
+                observations: vec![ReviewItem {
+                    observation_id: None,
+                    expected_revision: None,
+                    status: ReviewStatus::Confirmed,
+                    payload,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    let row = &document["observations"][0];
+    assert_eq!(row["payload"]["unmapped_choice"]["kind"], "unmapped");
+    assert!(row["resolved_metric_id"].is_null());
+}
+
+#[tokio::test]
 async fn a_saved_new_metric_can_confirm_a_qualitative_result_with_a_compatible_unit() {
     use longlivehealth::metric_history::{HistoryRequest, history};
     use longlivehealth::reports::{NewMetric, UnmappedChoice};
@@ -1535,7 +1521,6 @@ async fn a_saved_new_metric_can_confirm_a_qualitative_result_with_a_compatible_u
         report_id: report.clone(),
         expected_revision: revision,
         context: None,
-        new_metric: None,
         observations: vec![ReviewItem {
             observation_id: row.map(|row| row["observation_id"].as_str().unwrap().to_owned()),
             expected_revision: row.and_then(|row| row["revision"].as_i64()),
@@ -1664,7 +1649,6 @@ async fn confirming_multiple_new_results_creates_each_distinct_saved_definition_
                 report_id: report_id.clone(),
                 expected_revision,
                 context: None,
-                new_metric: None,
                 observations,
             },
         )

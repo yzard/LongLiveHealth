@@ -50,7 +50,6 @@ import Testing
     mismatched["payload"]["metric_id"] = .string("another")
     let rows = [resolved, suggestion, blocked, deliberatelyUnmapped, mismatched]
     #expect(rows.filter(ReportReview.canBulkConfirm) == [resolved])
-    #expect(rows.filter(ReportReview.canConfirmIndividually) == [resolved])
     #expect(ReportReview.change(resolved, to: "confirmed")["payload"] == resolved["payload"])
     #expect(resolved["status"] == .string("pending"))
 }
@@ -75,7 +74,6 @@ import Testing
     var withoutCandidate = observations[0]
     withoutCandidate["payload"]["ocr_metric_candidate"] = .null
     #expect(ReportReview.defaultMetricID(withoutCandidate) == nil)
-    #expect(!ReportReview.canConfirmIndividually(withoutCandidate))
     for index in report.indices {
         let id = ReportReview.defaultMetricID(report[index])
         #expect(id == "example")
@@ -101,12 +99,8 @@ import Testing
     let advisory: JSONValue = .object(["code": .string("negative_with_unit")])
     newMetric["payload"]["raw_result"] = .string("Negative")
     newMetric["browse_issues"] = .array([advisory])
-    #expect(ReportReview.canConfirmIndividually(newMetric))
     #expect(!ReportReview.canBulkConfirm(newMetric))
-    newMetric["browse_issues"] = .array([advisory, .object(["code": .string("unsupported_unit")])])
-    #expect(!ReportReview.canConfirmIndividually(newMetric))
     newMetric["browse_issues"] = .array([])
     newMetric["payload"]["unmapped_choice"] = .object(["kind": .string("unmapped")])
     #expect(!ReportReview.canBulkConfirm(newMetric))
-    #expect(!ReportReview.canConfirmIndividually(newMetric))
 }

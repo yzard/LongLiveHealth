@@ -103,7 +103,6 @@ async fn new_confirmed_metric_and_loinc_are_used_in_the_next_report_rescan() {
                 report_id: report_id.into(),
                 expected_revision: document["report"]["revision"].as_i64().unwrap(),
                 context: None,
-                new_metric: None,
                 observations: vec![ReviewItem {
                     observation_id: row["observation_id"].as_str().map(str::to_owned),
                     expected_revision: row["revision"].as_i64(),
@@ -283,7 +282,6 @@ async fn retry_preserves_reviewed_rows_but_rescan_replaces_them_with_fresh_ocr()
         .review(
             &user.user_id,
             ReviewRequest {
-                new_metric: None,
                 report_id: report.clone(),
                 expected_revision: revision,
                 context: None,
@@ -706,7 +704,6 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
             longlivehealth::reports::ReviewRequest {
                 report_id: report.into(),
                 expected_revision: revision,
-                new_metric: None,
                 context: None,
                 observations: vec![longlivehealth::reports::ReviewItem {
                     observation_id: None,
@@ -1342,7 +1339,6 @@ async fn rescan_removes_only_numeric_overlaps_and_refreshes_ocr_again() {
                         status: ReviewStatus::Confirmed,
                         payload: result(name, "120.0", "2026-08-01", "mg/dL"),
                     }],
-                    new_metric: None,
                 },
             )
             .await
@@ -1369,7 +1365,6 @@ async fn rescan_removes_only_numeric_overlaps_and_refreshes_ocr_again() {
                 expected_revision: 1,
                 context: Some(serde_json::from_value(json!({"source_name":"clinic a"})).unwrap()),
                 observations: vec![],
-                new_metric: None,
             },
         )
         .await

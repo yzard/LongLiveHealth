@@ -402,7 +402,8 @@ The iOS report review header displays the total observation count and a direct R
 
 ### Report draft storage
 
-Pending report observations are persisted in
+OCR creates the first pending revision. Saving edits updates the same observation
+ID and keeps it pending. Pending report observations are persisted in
 `draft.sqlite`, separate from `database.sqlite`. Report metadata, raw-file indexes,
 OCR evidence and job progress remain in the main database. `reports/get` and
 `observations/history` combine the current records from both stores, preserving
@@ -417,8 +418,8 @@ Existing unconfirmed rows are moved into the draft store without re-running OCR.
 A pending result saves an existing metric in `payload.metric_id`. With that ID
 unset, `payload.unmapped_choice` can be `{"kind":"unmapped"}` or
 `{"kind":"new","definition":{"name":"Example assay","standard_unit":"U/L"}}`.
-Both choices suppress automatic mapping. Confirming a saved new definition
-creates its metric and confirms the result in the same transaction. The response
+Both choices suppress automatic mapping. Confirming a valid new definition in
+the detail view creates its metric and confirms the result in the same transaction. The response
 includes `created_metrics` for any metrics created by the operation. OCR
 suggestions remain in the evidence fields during review.
 
