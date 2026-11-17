@@ -1,4 +1,5 @@
 use crate::{add_user, archive, confirm, fixture};
+use longlivehealth::reports::ReviewStatus;
 
 #[tokio::test]
 async fn analysis_uses_confirmed_snapshot_and_becomes_stale_after_correction() {
@@ -62,7 +63,7 @@ async fn analysis_uses_confirmed_snapshot_and_becomes_stale_after_correction() {
                 observations: vec![longlivehealth::reports::ReviewItem {
                     observation_id: Some(observation),
                     expected_revision: Some(1),
-                    status: "confirmed".into(),
+                    status: ReviewStatus::Confirmed,
                     payload: changed,
                 }],
             },

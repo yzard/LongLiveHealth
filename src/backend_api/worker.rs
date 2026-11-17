@@ -565,11 +565,10 @@ async fn reconcile_page(
             .bind(&anchor)
             .execute(&mut **transaction)
             .await?;
-        sqlx::query(queries::SAVE_OBSERVATION)
+        sqlx::query(queries::SAVE_PENDING_OBSERVATION)
             .bind(&job.user_id)
             .bind(id)
             .bind(1)
-            .bind("pending")
             .bind(serde_json::to_string(candidate)?)
             .bind(now()?)
             .execute(&mut **transaction)

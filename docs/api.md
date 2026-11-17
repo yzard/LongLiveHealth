@@ -67,7 +67,7 @@ Android 安装包通过公开的 `GET /longlivehealth.apk` 下载（旧路径 `/
 }
 ```
 
-新项 ID/修订为空；修改项必须带 observation_id 和 expected_revision。状态为 pending/confirmed/rejected。context=null 表示不改背景；对象中的空值可以清除背景。一个请求事务执行，可只提交部分行；报告或行版本过期返回 409。bounding_box 是归一化 left/top/right/bottom；无法定位时为空，不伪造位置。
+新项 ID/修订为空；修改项必须带 observation_id 和 expected_revision。状态为 pending 或 confirmed。context=null 表示不改背景；对象中的空值可以清除背景。一个请求事务执行，可只提交部分行；报告或行版本过期返回 409。bounding_box 是归一化 left/top/right/bottom；无法定位时为空，不伪造位置。
 
 OCR 候选始终 pending、metric_id=null，不能自行确认。有效结构携带 warnings 时，任务成功且相关页为 needs_review；完整提醒随回复保留。网络、结构或字段校验失败仍是任务失败；成功完成提取不代表已经人工审核。原单位和文本结果都保留；仅已确认、已映射、可比较且有采样日期的结果进入数值趋势。当前字典 17 项见 metrics/list（含 accepted_units、conversion_version）。API 使用 lab-units-v3 的指标专属注册表，支持常见质量浓度、血脂/血糖/肌酐摩尔浓度及 HbA1c IFCC→NGSP 的明确规则；不会让 OCR 换算。受控空格/大小写/微符号别名不改变原单位，未知单位不做模糊纠正。
 
@@ -402,7 +402,7 @@ The iOS report review header displays the total observation count and a direct R
 
 ### Report draft storage
 
-Unconfirmed (`pending` or `rejected`) report observations are persisted in
+Pending report observations are persisted in
 `draft.sqlite`, separate from `database.sqlite`. Report metadata, raw-file indexes,
 OCR evidence and job progress remain in the main database. `reports/get` and
 `observations/history` combine the current records from both stores, preserving
@@ -410,13 +410,9 @@ observation IDs, candidate keys and optimistic revision checks. Charts and analy
 consume confirmed observations only.
 
 `reports/review` with `status=confirmed` commits the reviewed payload to the main
-observation table. Mobile Confirm all sends pending results with a saved mapping
-and no current review issues through this endpoint, up to 2,000 per request. After
-that commit, matching older drafts are
-removed. Reverting a result to pending/rejected first persists the draft, then removes
-the old official row. Cleanup is repeatable and runs at startup as well: a process
+observation table. The Ready to Confirm batch sends only pending results with a verified mapping and no current review issues, up to 2,000 per request. Needs Review results are confirmed individually from their detail view. After commit, matching older drafts are removed. Reverting a result to pending first persists the draft, then removes the old official row. Cleanup is repeatable and runs at startup as well: a process
 interruption between copying and cleanup cannot delete the sole durable copy.
-Existing unconfirmed rows are moved into the draft store without re-running OCR.
+Existing unconfirmed rows are moved into the draft store without re-running OCR. Previously rejected observations become pending, retain their payload and ID, and open in Needs Review.
 
 A pending result saves an existing metric in `payload.metric_id`. With that ID
 unset, `payload.unmapped_choice` can be `{"kind":"unmapped"}` or

@@ -1,5 +1,6 @@
 use chrono::TimeZone;
 use longlivehealth::insights::{Context, Request, prevent_cvd, recovery, snapshot};
+use longlivehealth::reports::ReviewStatus;
 use serde_json::json;
 
 fn context() -> Context {
@@ -171,7 +172,7 @@ async fn integrated_snapshot_uses_confirmed_labs_paired_pressure_and_report_rang
             "<10",
             "nmol/L",
             "<75",
-            "confirmed",
+            ReviewStatus::Confirmed,
         ),
         (
             "total_cholesterol",
@@ -179,7 +180,7 @@ async fn integrated_snapshot_uses_confirmed_labs_paired_pressure_and_report_rang
             "200",
             "mg/dL",
             "<200",
-            "confirmed",
+            ReviewStatus::Confirmed,
         ),
         (
             "hdl_cholesterol",
@@ -187,7 +188,7 @@ async fn integrated_snapshot_uses_confirmed_labs_paired_pressure_and_report_rang
             "50",
             "mg/dL",
             ">40",
-            "confirmed",
+            ReviewStatus::Confirmed,
         ),
         (
             "egfr_creatinine_unspecified",
@@ -195,7 +196,7 @@ async fn integrated_snapshot_uses_confirmed_labs_paired_pressure_and_report_rang
             "90",
             "mL/min/1.73m2",
             ">60",
-            "confirmed",
+            ReviewStatus::Confirmed,
         ),
         (
             "apob",
@@ -203,7 +204,7 @@ async fn integrated_snapshot_uses_confirmed_labs_paired_pressure_and_report_rang
             "130",
             "mg/dL",
             "<90",
-            "confirmed",
+            ReviewStatus::Confirmed,
         ),
         (
             "total_cholesterol",
@@ -211,7 +212,7 @@ async fn integrated_snapshot_uses_confirmed_labs_paired_pressure_and_report_rang
             "310",
             "mg/dL",
             "<200",
-            "pending",
+            ReviewStatus::Pending,
         ),
     ] {
         let mut payload = crate::observation_payload();
@@ -229,7 +230,7 @@ async fn integrated_snapshot_uses_confirmed_labs_paired_pressure_and_report_rang
         observations.push(ReviewItem {
             observation_id: None,
             expected_revision: None,
-            status: status.into(),
+            status,
             payload,
         });
     }

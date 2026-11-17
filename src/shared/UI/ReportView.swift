@@ -281,7 +281,7 @@ struct ReportView: View {
         return HStack {
             NavigationLink {
                 ReadyToConfirmView(model: model, reportID: reportID, document: $document,
-                    reviewEditor: reviewEditor, toggleStatus: toggleStatus)
+                    reviewEditor: reviewEditor, confirmReadyResult: confirmReadyResult)
             } label: {
                 Text(observations.count == 1 ? "1 result ready to confirm" : "\(observations.count) results ready to confirm")
                     .foregroundStyle(.primary).frame(maxWidth: .infinity, alignment: .leading)
@@ -324,7 +324,9 @@ struct ReportView: View {
 
     private func reviewEditor(_ target: EditTarget) -> ObservationEditor {
         ObservationEditor(observation: target.observation, metrics: model.metrics,
-            pageCount: Int(document["report"]["page_count"].numberValue ?? 1), choosingMetric: target.choosingMetric) { change in
+            pageCount: Int(document["report"]["page_count"].numberValue ?? 1), choosingMetric: target.choosingMetric, source: { page in
+                DocumentLocation(url: try await model.source(reportID), page: page)
+            }) { change in
                 do {
                     try await save(observations: [change], context: .null)
                 } catch APIError.status(409, let message)
@@ -340,12 +342,19 @@ struct ReportView: View {
         }
     }
 
-    private func observationRow(_ observation: JSONValue, canConfirm: Bool = true) -> some View {
+    private func observationRow(_ observation: JSONValue) -> some View {
         let id = observation["observation_id"]
         let renderedStatus = observation["status"].stringValue
         let revision = observation["revision"].numberValue ?? 0
         return ReportObservationRow(model: model, observation: observation,
-            changeStatus: canConfirm ? { _ = Task { await toggleStatus(id, renderedStatus: renderedStatus) } } : nil,
+            changeStatus: {
+                if ReportReview.canBulkConfirm(observation) {
+                    Task { await confirmReadyResult(id) }
+                } else {
+                    let needsMapping = observation["browse_issues"].arrayValue.contains { $0["scope"] == .string("browse") }
+                    editor = EditTarget(observation: observation, choosingMetric: needsMapping)
+                }
+            },
             edit: { editor = EditTarget(observation: observation, choosingMetric: false) },
             chooseMetric: { editor = EditTarget(observation: observation, choosingMetric: true) },
             showSource: { showSource(page: $0) },
@@ -354,14 +363,7 @@ struct ReportView: View {
     }
 
     @ViewBuilder private var reportDetails: some View {
-        let rejected = document["observations"].arrayValue.filter { $0["status"].stringValue == "rejected" }
-        if !rejected.isEmpty {
-            Section("Rejected results") {
-                ForEach(rejected, id: \.identifier) { observation in
-                    observationRow(observation, canConfirm: false)
-                }
-            }
-        }
+
         if !document["pages"].arrayValue.isEmpty {
             Section("Page processing") {
                 ForEach(indexedValues("pages")) { entry in
@@ -431,20 +433,12 @@ struct ReportView: View {
             }
         } catch { confirmationError = error.localizedDescription }
     }
-    private func toggleStatus(_ id: JSONValue, renderedStatus: String) async {
-        guard !confirmingAll, !savingReview, !rescanning else { return }
-        guard let current = document["observations"].arrayValue.first(where: { $0["observation_id"] == id }),
-              current["status"].stringValue == renderedStatus else { return }
-        let nextStatus: String
-        switch renderedStatus {
-        case "pending":
-            guard ReportReview.canConfirmIndividually(current) else { return }
-            nextStatus = "confirmed"
-        case "confirmed": nextStatus = "pending"
-        default: return
-        }
+    private func confirmReadyResult(_ id: JSONValue) async {
+        guard !confirmingAll, !savingReview, !rescanning, !extracting,
+              let current = document["observations"].arrayValue.first(where: { $0["observation_id"] == id }),
+              ReportReview.canBulkConfirm(current) else { return }
         await model.perform {
-            _ = try await saveStatusChanges([ReportReview.change(current, to: nextStatus)])
+            _ = try await saveStatusChanges([ReportReview.change(current, to: "confirmed")])
         }
     }
 
@@ -526,7 +520,7 @@ struct ReadyToConfirmView: View {
     let reportID: String
     @Binding var document: JSONValue
     let reviewEditor: (ReportView.EditTarget) -> ObservationEditor
-    let toggleStatus: (JSONValue, String) async -> Void
+    let confirmReadyResult: (JSONValue) async -> Void
     @State var editor: ReportView.EditTarget?
     @State var healthWriter: ReportView.EditTarget?
     @State var preview: DocumentLocation?
@@ -535,7 +529,7 @@ struct ReadyToConfirmView: View {
         List {
             ForEach(document["observations"].arrayValue.filter(ReportReview.canBulkConfirm), id: \.identifier) { observation in
                 ReportObservationRow(model: model, observation: observation,
-                    changeStatus: { _ = Task { await toggleStatus(observation["observation_id"], observation["status"].stringValue) } },
+                    changeStatus: { _ = Task { await confirmReadyResult(observation["observation_id"]) } },
                     edit: { editor = ReportView.EditTarget(observation: observation, choosingMetric: false) },
                     chooseMetric: { editor = ReportView.EditTarget(observation: observation, choosingMetric: true) },
                     showSource: { page in _ = Task { await openSource(page) } },
@@ -687,8 +681,7 @@ struct ReportObservationRow: View {
                 }.buttonStyle(.plain)
                 Spacer(minLength: 0)
                 let hasSuggestion = ReportReview.suggestedMetricID(observation) != nil
-                if observation["status"] != .string("rejected"),
-                   hasSuggestion || observation["browse_issues"].arrayValue.contains(where: { $0["code"] == .string("unmapped_metric") }) {
+                if hasSuggestion || observation["browse_issues"].arrayValue.contains(where: { $0["code"] == .string("unmapped_metric") }) {
                     Button(action: hasSuggestion ? edit : chooseMetric) {
                         Text(hasSuggestion ? "Suggested match" : "New")
                             .font(.caption.weight(.semibold))
@@ -720,9 +713,9 @@ struct ReportObservationRow: View {
                 .accessibilityHint("Opens the original report page")
                 #endif
                 let status = observation["status"].stringValue
-                if let changeStatus, status == "pending" || status == "confirmed" {
+                if let changeStatus, status == "pending" {
                     Button(action: changeStatus) {
-                        Text(status == "confirmed" ? "Hold" : "Confirm")
+                        Text(needsManualConfirmation ? "Review" : "Confirm")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(needsManualConfirmation ? Color.yellow : Color.accentColor)
                             .padding(.horizontal, 12)
@@ -731,7 +724,7 @@ struct ReportObservationRow: View {
                             .frame(minHeight: 44)
                     }
                     .accessibilityIdentifier("report-result-status-action")
-                    .disabled(model.isBusy || (status == "pending" && !ReportReview.canConfirmIndividually(observation)))
+                    .disabled(model.isBusy)
                 }
             }
             let suggestion = ReportReview.suggestionNote(observation)
@@ -745,9 +738,9 @@ struct ReportObservationRow: View {
             }
             ForEach(Array(observation["browse_issues"].arrayValue.enumerated()), id: \.offset) { _, issue in
                 if issue["code"] == .string("ocr_mapping_uncertain")
-                    || (issue["code"] == .string("unmapped_metric") && observation["status"] != .string("rejected")) {
+                    || issue["code"] == .string("unmapped_metric") {
                     EmptyView()
-                } else if issue["scope"] == .string("browse"), observation["status"] != .string("rejected") {
+                } else if issue["scope"] == .string("browse") {
                     Button { chooseMetric() } label: {
                         HStack(alignment: .firstTextBaseline) {
                             issueLabel(issue)

@@ -67,14 +67,10 @@ impl Metadata {
         );
     }
 
-    pub fn codes_by_metric(&self) -> BTreeMap<String, BTreeSet<String>> {
-        let mut result: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        for (code, id) in LOINC_METRICS.iter().copied().chain(
-            self.links
-                .iter()
-                .map(|(code, id)| (code.as_str(), id.as_str())),
-        ) {
-            result.entry(id.into()).or_default().insert(code.into());
+    pub fn linked_codes_by_metric(&self) -> BTreeMap<String, BTreeSet<String>> {
+        let mut result = BTreeMap::<_, BTreeSet<_>>::new();
+        for (code, id) in &self.links {
+            result.entry(id.clone()).or_default().insert(code.clone());
         }
         result
     }
@@ -96,7 +92,7 @@ pub(crate) fn clinical_metric(group: &Group) -> Result<CustomMetric, AppError> {
     if metric.standard_unit.is_empty()
         && let Some(units) = group.definition["display_units"].as_array()
         && let [unit] = units.as_slice()
-        && let Some(unit) = unit.as_str()
+        && let Some(unit) = unit.as_str().filter(|unit| *unit != "Not reported")
     {
         metric.standard_unit = crate::laboratory::custom_unit(unit).to_owned();
     }

@@ -1,4 +1,5 @@
 use crate::{add_user, archive, confirm, fixture};
+use longlivehealth::reports::ReviewStatus;
 use std::io::Read;
 
 #[tokio::test]
@@ -19,7 +20,7 @@ async fn export_contains_raw_and_revisions_without_credentials_and_delete_cleans
                 observations: vec![longlivehealth::reports::ReviewItem {
                     observation_id: None,
                     expected_revision: None,
-                    status: "pending".into(),
+                    status: ReviewStatus::Pending,
                     payload: crate::observation_payload(),
                 }],
             },

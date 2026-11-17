@@ -1,3 +1,4 @@
+use longlivehealth::reports::ReviewStatus;
 use longlivehealth::wellness::{DayRequest, algorithms::*, select_metric};
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -457,7 +458,7 @@ async fn clinical_model_requires_complete_reviewed_collection_and_explicit_resea
             ReviewItem {
                 observation_id: None,
                 expected_revision: None,
-                status: "confirmed".into(),
+                status: ReviewStatus::Confirmed,
                 payload,
             }
         })

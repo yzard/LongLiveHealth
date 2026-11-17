@@ -62,13 +62,20 @@ import Testing
             "payload": .object([
                 "raw_name": .string(id), "raw_result": .string("4.6"),
                 "sampled_at": .string("2026-11-01"), "source": .object(["quote": .string(id)]),
-                "ocr_mapping_note": .string("Check the measurement identity")
+                "ocr_mapping_note": .string("Check the measurement identity"),
+                "ocr_metric_candidate": .string("example")
             ]),
-            "metric_suggestions": .array([.object(["metric_id": .string("example")])])
+            "metric_suggestions": .array([
+                .object(["metric_id": .string("similar")]), .object(["metric_id": .string("example")])
+            ])
         ])
     }
     var report = observations
     #expect(report.filter(ReportReview.canBulkConfirm).isEmpty)
+    var withoutCandidate = observations[0]
+    withoutCandidate["payload"]["ocr_metric_candidate"] = .null
+    #expect(ReportReview.defaultMetricID(withoutCandidate) == nil)
+    #expect(!ReportReview.canConfirmIndividually(withoutCandidate))
     for index in report.indices {
         let id = ReportReview.defaultMetricID(report[index])
         #expect(id == "example")

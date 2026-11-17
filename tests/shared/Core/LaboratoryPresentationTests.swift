@@ -50,6 +50,9 @@ import Testing
     draft["metric_suggestions"] = .array([.object(["metric_id": .string("urine_ketones")])])
     draft["payload"]["ocr_new_metric"] = .object(["name": .string("OCR proposed name")])
     #expect(LaboratoryPresentation.resultTitle(draft, renamedMetrics: renamed) == "Ketone, Urine")
+    #expect(ReportReview.defaultMetricID(draft) == nil)
+    draft["payload"]["ocr_new_metric"] = .null
+    draft["payload"]["ocr_metric_candidate"] = .string("urine_ketones")
     #expect(ReportReview.defaultMetricID(draft) == "urine_ketones")
 
     draft["payload"]["unmapped_choice"] = .object([

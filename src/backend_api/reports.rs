@@ -476,15 +476,13 @@ impl StoredObservation {
         };
         let conflict = (payload.metric_id.is_some() || new_metric.is_some())
             && conflicting_loinc(payload.metric_id.as_deref(), linked, native);
-        let resolved = if self.status == "pending"
-            && learned.is_some()
-            && payload.metric_id.is_none()
-        {
-            learned_for_pending(&payload, metadata)
-        } else {
-            crate::laboratory::resolved_report_metric(&payload, context["source_name"].as_str())
-                .or_else(|| crate::laboratory::verified_custom_candidate(&payload, custom_metrics))
-        };
+        let resolved = resolve_report_mapping(
+            &payload,
+            &self.status,
+            context["source_name"].as_str(),
+            custom_metrics,
+            metadata,
+        );
         let resolved_metric_id = resolved
             .filter(|id| {
                 !id.starts_with("custom:")
@@ -627,12 +625,36 @@ impl StoredObservation {
     }
 }
 
+fn resolve_report_mapping<'a>(
+    payload: &'a ObservationPayload,
+    status: &str,
+    source: Option<&str>,
+    custom_metrics: &'a [CustomMetric],
+    metadata: &'a Metadata,
+) -> Option<&'a str> {
+    if status == "pending"
+        && payload.metric_id.is_none()
+        && test_code(payload).is_some_and(|code| metadata.links.contains_key(code))
+    {
+        return learned_for_pending(payload, metadata);
+    }
+    crate::laboratory::resolved_report_metric(payload, source)
+        .or_else(|| crate::laboratory::verified_custom_candidate(payload, custom_metrics))
+}
+
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewStatus {
+    Pending,
+    Confirmed,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReviewItem {
     pub observation_id: Option<String>,
     pub expected_revision: Option<i64>,
-    pub status: String,
+    pub status: ReviewStatus,
     pub payload: ObservationPayload,
 }
 #[derive(Deserialize)]
@@ -1047,25 +1069,31 @@ impl Database {
     pub(crate) async fn review_with_analysis(
         &self,
         user_id: &str,
-        request: ReviewRequest,
+        mut request: ReviewRequest,
         analysis_enabled: bool,
     ) -> Result<Value, AppError> {
         let queue_analysis = analysis_enabled
             && request
                 .observations
                 .iter()
-                .any(|item| item.status == "confirmed");
+                .any(|item| item.status == ReviewStatus::Confirmed);
         let report = self.report_summary(user_id, &request.report_id).await?;
-        if request.new_metric.is_some()
-            && (request.observations.len() != 1
-                || request.observations[0].observation_id.is_none()
-                || request.observations[0].status == "rejected"
-                || request.observations[0].payload.metric_id.is_some()
-                || request.observations[0].payload.unmapped_choice.is_some())
-        {
-            return Err(AppError::Invalid(
-                "Create a metric while reviewing one existing result",
-            ));
+        let legacy_definition = request.new_metric.is_some();
+        if let Some(metric) = request.new_metric.take() {
+            let [row] = request.observations.as_mut_slice() else {
+                return Err(AppError::Invalid(
+                    "Create a metric while reviewing one existing result",
+                ));
+            };
+            if row.observation_id.is_none()
+                || row.payload.metric_id.is_some()
+                || row.payload.unmapped_choice.is_some()
+            {
+                return Err(AppError::Invalid(
+                    "Create a metric while reviewing one existing result",
+                ));
+            }
+            row.payload.unmapped_choice = Some(UnmappedChoice::New(metric));
         }
         if request.observations.len() > 2000 {
             return Err(AppError::TooLarge);
@@ -1073,9 +1101,6 @@ impl Database {
         let mut seen = HashSet::new();
         for observation in &request.observations {
             observation.payload.validate(report.page_count)?;
-            if !["pending", "confirmed", "rejected"].contains(&observation.status.as_str()) {
-                return Err(AppError::Invalid("Invalid review status"));
-            }
             if let Some(id) = &observation.observation_id {
                 if !seen.insert(id) {
                     return Err(AppError::Invalid("Duplicate observation in review"));
@@ -1125,9 +1150,8 @@ impl Database {
                 .metric_id
                 .as_deref()
                 .is_some_and(lab_metric_metadata::is_clinical_id)
-                || (item.status == "confirmed"
-                    && (request.new_metric.is_some()
-                        || item.payload.metric_id.is_some()
+                || (item.status == ReviewStatus::Confirmed
+                    && (item.payload.metric_id.is_some()
                         || matches!(item.payload.unmapped_choice, Some(UnmappedChoice::New(_))))
                     && test_code(&item.payload)
                         .is_some_and(|code| crate::laboratory::loinc_metric(code).is_none()))
@@ -1209,8 +1233,14 @@ impl Database {
         let mut metadata = Metadata::load(&mut transaction, user_id).await?;
         let mut created_metrics = Vec::new();
         let mut created_definitions = std::collections::BTreeMap::<_, String>::new();
+        let original_context: Value = serde_json::from_str(&report.context_json)?;
+        let original_source = original_context["source_name"].as_str();
+        let source = request
+            .context
+            .as_ref()
+            .map_or(original_source, |context| context.source_name.as_deref());
         let inconsistent = if request.observations.iter().any(|row| {
-            row.status == "confirmed"
+            row.status == ReviewStatus::Confirmed
                 && matches!(row.payload.unmapped_choice, Some(UnmappedChoice::New(_)))
         }) {
             let stored = sqlx::query_as::<_, StoredObservation>(queries::OBSERVATIONS)
@@ -1220,7 +1250,6 @@ impl Database {
                 .await?;
             let active = stored
                 .into_iter()
-                .filter(|row| row.status != "rejected")
                 .map(|row| {
                     Ok((
                         row.observation_id,
@@ -1240,26 +1269,6 @@ impl Database {
             HashSet::new()
         };
         for mut observation in request.observations {
-            if let Some(metric) = request.new_metric.as_ref() {
-                if !metric.is_valid() {
-                    return Err(AppError::Invalid(
-                        "Enter a valid name and standard unit for the new metric",
-                    ));
-                }
-                if observation.status == "pending" {
-                    observation.payload.unmapped_choice = Some(UnmappedChoice::New(metric.clone()));
-                } else {
-                    if metric.matches_existing(&custom_metrics, &metadata) {
-                        return Err(AppError::Conflict(
-                            "A matching Browse metric already exists. Select it instead.",
-                        ));
-                    }
-                    let created = insert_custom_metric(&mut transaction, user_id, metric).await?;
-                    observation.payload.metric_id = Some(created.metric_id.clone());
-                    custom_metrics.push(created.clone());
-                    created_metrics.push(created);
-                }
-            }
             if let Some(id) = observation
                 .payload
                 .metric_id
@@ -1279,19 +1288,26 @@ impl Database {
                     "Apple Health metric is not available for this account",
                 ));
             }
-            let (id, revision, previous) = if let Some(id) = observation.observation_id {
-                let current: Option<(i64, String, String)> = sqlx::query_as(queries::OBSERVATION)
-                    .bind(user_id)
-                    .bind(&request.report_id)
-                    .bind(&id)
-                    .fetch_optional(&mut *transaction)
-                    .await?;
-                let (revision, status, payload) = current.ok_or(AppError::NotFound)?;
+            let (id, revision, previous, from_ocr) = if let Some(id) = observation.observation_id {
+                let current: Option<(i64, String, String, Option<String>)> =
+                    sqlx::query_as(queries::OBSERVATION)
+                        .bind(user_id)
+                        .bind(&request.report_id)
+                        .bind(&id)
+                        .fetch_optional(&mut *transaction)
+                        .await?;
+                let (revision, status, payload, candidate_key) =
+                    current.ok_or(AppError::NotFound)?;
                 if Some(revision) != observation.expected_revision {
                     return Err(AppError::Conflict("Observation changed"));
                 }
                 let payload: ObservationPayload = serde_json::from_str(&payload)?;
-                (id, revision + 1, Some((status, payload)))
+                (
+                    id,
+                    revision + 1,
+                    Some((status, payload)),
+                    candidate_key.is_some(),
+                )
             } else {
                 let id = uuid::Uuid::new_v4().to_string();
                 sqlx::query(queries::INSERT_OBSERVATION)
@@ -1301,9 +1317,9 @@ impl Database {
                     .bind(Option::<String>::None)
                     .execute(&mut *transaction)
                     .await?;
-                (id, 1, None)
+                (id, 1, None, false)
             };
-            if observation.status == "confirmed" {
+            if observation.status == ReviewStatus::Confirmed {
                 if previous.as_ref().is_some_and(|(_, prior)| {
                     prior.unmapped_choice.is_some()
                         && prior.unmapped_choice != observation.payload.unmapped_choice
@@ -1320,7 +1336,18 @@ impl Database {
                     }
                     Some(UnmappedChoice::New(metric)) => {
                         if !previous.as_ref().is_some_and(|(status, payload)| {
-                            status == "pending" && payload == &observation.payload
+                            (status == "pending"
+                                && (legacy_definition || payload == &observation.payload))
+                                || (status == "confirmed"
+                                    && payload.unmapped_choice.is_none()
+                                    && resolve_report_mapping(
+                                        payload,
+                                        status,
+                                        original_source,
+                                        &custom_metrics,
+                                        &metadata,
+                                    )
+                                    .is_none())
                         }) {
                             return Err(AppError::Conflict(
                                 "Save the new metric definition and result before confirming",
@@ -1385,7 +1412,7 @@ impl Database {
                     None => {}
                 }
             }
-            if observation.status == "confirmed"
+            if observation.status == ReviewStatus::Confirmed
                 && previous.as_ref().is_none_or(|(status, payload)| {
                     status != "confirmed"
                         || payload.metric_id != observation.payload.metric_id
@@ -1402,27 +1429,43 @@ impl Database {
                         &observation.payload,
                     )
                     .await?;
-                } else if let Some(id) = learned_for_pending(&observation.payload, &metadata) {
-                    // Freeze the association when the result becomes part of the history.
-                    observation.payload.metric_id = Some(id.to_owned());
-                } else if test_code(&observation.payload)
-                    .is_some_and(|code| metadata.links.contains_key(code))
-                {
-                    return Err(AppError::Invalid(
-                        "This result needs review before confirming. Check the source and select the linked Browse metric.",
-                    ));
+                } else {
+                    let resolved = resolve_report_mapping(
+                        &observation.payload,
+                        "pending",
+                        source,
+                        &custom_metrics,
+                        &metadata,
+                    );
+                    match resolved {
+                        Some(id)
+                            if id.starts_with("custom:")
+                                || learned_for_pending(&observation.payload, &metadata)
+                                    .is_some() =>
+                        {
+                            // Preserve account-specific associations across renames and rescans.
+                            observation.payload.metric_id = Some(id.to_owned());
+                        }
+                        None if from_ocr
+                            || test_code(&observation.payload)
+                                .is_some_and(|code| metadata.links.contains_key(code)) =>
+                        {
+                            return Err(AppError::Invalid(
+                                "Save a metric mapping or mark the result as new before confirming",
+                            ));
+                        }
+                        _ => {}
+                    }
                 }
             }
-            let statement = if observation.status == "confirmed" {
-                queries::CONFIRM_OBSERVATION
-            } else {
-                queries::SAVE_OBSERVATION
+            let statement = match observation.status {
+                ReviewStatus::Pending => queries::SAVE_PENDING_OBSERVATION,
+                ReviewStatus::Confirmed => queries::CONFIRM_OBSERVATION,
             };
             sqlx::query(statement)
                 .bind(user_id)
                 .bind(id)
                 .bind(revision)
-                .bind(observation.status)
                 .bind(serde_json::to_string(&observation.payload)?)
                 .bind(now()?)
                 .execute(&mut *transaction)
@@ -1812,10 +1855,7 @@ impl Database {
                     })
                     .collect::<Result<Vec<_>, AppError>>()?;
                 if include_suggestions {
-                    let active: Vec<_> = observations
-                        .iter_mut()
-                        .filter(|row| row.status != "rejected")
-                        .collect();
+                    let active: Vec<_> = observations.iter_mut().collect();
                     let inconsistent = crate::laboratory::inconsistent_subcounts(
                         active.iter().map(|row| &row.payload),
                     );

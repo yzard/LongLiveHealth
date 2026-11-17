@@ -4,6 +4,7 @@ struct ObservationEditor: View {
     let observation: JSONValue
     let metrics: [JSONValue]
     let pageCount: Int
+    let source: (Int) async throws -> DocumentLocation
     let save: (JSONValue) async throws -> Void
     @State var payload: JSONValue
     @State var printedName: String
@@ -15,9 +16,11 @@ struct ObservationEditor: View {
     @State var newMetricUnit: String
     @State var saving = false
     @State var error: String?
+    @State var preview: DocumentLocation?
+    @State var confirmAsPrinted = false
     @Environment(\.dismiss) var dismiss
-    init(observation: JSONValue, metrics: [JSONValue], pageCount: Int, choosingMetric: Bool, save: @escaping (JSONValue) async throws -> Void) {
-        self.observation = observation; self.metrics = metrics; self.pageCount = pageCount; self.save = save
+    init(observation: JSONValue, metrics: [JSONValue], pageCount: Int, choosingMetric: Bool, source: @escaping (Int) async throws -> DocumentLocation, save: @escaping (JSONValue) async throws -> Void) {
+        self.observation = observation; self.metrics = metrics; self.pageCount = pageCount; self.source = source; self.save = save
         _payload = State(initialValue: observation == .null ? .object(["source": .object(["page": .number(1), "quote": .string("")])]) : observation["payload"])
         let code = observation["lab_test_code"].stringValue
         _printedName = State(initialValue: LaboratoryPresentation.printedName(observation["payload"]["raw_name"].stringValue, code: code))
@@ -45,7 +48,7 @@ struct ObservationEditor: View {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }
                     if !choosingMetric {
                         ToolbarItem(placement: .confirmationAction) {
-                            Button("Save") { Task { await submit() } }.disabled(saveDisabled)
+                            Button(status == "pending" ? "Save Draft" : "Save") { Task { await submit(as: status) } }.disabled(saveDisabled)
                         }
                     }
                 }.interactiveDismissDisabled()
@@ -56,6 +59,11 @@ struct ObservationEditor: View {
                 } message: {
                     Text(error ?? "")
                 }
+                .originalReportPreview($preview)
+                .alert("Confirm as printed?", isPresented: $confirmAsPrinted) {
+                    Button("Cancel", role: .cancel) {}
+                    Button("Confirm for History") { Task { await submit(as: "confirmed") } }
+                } message: { Text("The result is saved as printed. It may be unavailable in metric charts.") }
         }
     }
     private var status: String {
@@ -63,9 +71,24 @@ struct ObservationEditor: View {
         return saved.isEmpty ? "pending" : saved
     }
 
+    private var canMarkAsNew: Bool {
+        status == "pending" || (status == "confirmed" && ReportReview.savedMetricID(observation) == nil)
+    }
+
     private var saveDisabled: Bool {
         saving || !validLOINC || printedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || payload["raw_result"].stringValue.isEmpty
-            || (creatingMetric && (newMetricName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || status == "rejected"))
+            || (creatingMetric && (newMetricName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+    }
+
+    private var hasSavedNewDefinition: Bool {
+        let choice = observation["payload"]["unmapped_choice"]
+        return choice["kind"] == .string("new")
+            && choice["definition"]["name"] == .string(newMetricName)
+            && choice["definition"]["standard_unit"] == .string(newMetricUnit)
+            && printedName == LaboratoryPresentation.printedName(
+                observation["payload"]["raw_name"].stringValue, code: observation["lab_test_code"].stringValue)
+            && loincCode == observation["lab_test_code"].stringValue
+            && payload == observation["payload"]
     }
 
     private var validLOINC: Bool {
@@ -76,7 +99,7 @@ struct ObservationEditor: View {
             && parts.allSatisfy { part in part.allSatisfy { "0123456789".contains($0) } }
     }
 
-    private func submit() async {
+    private func submit(as nextStatus: String) async {
         guard !saving else { return }
         saving = true
         defer { saving = false }
@@ -91,7 +114,7 @@ struct ObservationEditor: View {
                     "definition": .object(["name": .string(newMetricName), "standard_unit": .string(newMetricUnit)]),
                 ])
             } else {
-                reviewedPayload["unmapped_choice"] = metricSelection.isEmpty && status == "pending"
+                reviewedPayload["unmapped_choice"] = metricSelection.isEmpty && nextStatus == "pending"
                     ? .object(["kind": .string("unmapped")]) : .null
             }
             if printedName != originalName || loincCode != originalCode {
@@ -101,7 +124,7 @@ struct ObservationEditor: View {
             let change: JSONValue = .object([
                 "observation_id": observation["observation_id"],
                 "expected_revision": observation["revision"],
-                "status": .string(status),
+                "status": .string(nextStatus),
                 "payload": reviewedPayload,
             ])
             try await save(change)
@@ -121,14 +144,16 @@ struct ObservationEditor: View {
                 Button("Mark as New", action: markAsNew)
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("mark-as-new-metric")
-                    .disabled(status != "pending" || creatingMetric || saving)
+                    .disabled(!canMarkAsNew || creatingMetric || saving)
             }
             if creatingMetric {
                 TextField("Metric name", text: $newMetricName)
                 TextField("Standard unit", text: $newMetricUnit)
                 Button("Keep unmapped") { creatingMetric = false }
-            } else if suggestedMetricID != nil {
-                Button("Suggested match") { choosingMetric = true }.font(.caption)
+            } else if !observation["metric_suggestions"].arrayValue.isEmpty {
+                Button(suggestedMetricID == nil ? "Closest matches" : "Suggested match") {
+                    choosingMetric = true
+                }.font(.caption)
             }
             let suggestion = ReportReview.suggestionNote(observation)
             if !suggestion.isEmpty {
@@ -144,7 +169,30 @@ struct ObservationEditor: View {
             field("Reference range", "reference_range"); field("Report flag", "report_flag")
             field("Collection date: YYYY-MM-DD or ISO timestamp", "sampled_at")
         }
+        if status == "pending" {
+            Section {
+                Button("Confirm") {
+                    let unitConflict = payload["raw_unit"] == observation["payload"]["raw_unit"]
+                        && observation["browse_issues"].arrayValue.contains { $0["code"] == .string("unsupported_unit") }
+                    if !creatingMetric && (metricSelection.isEmpty || unitConflict) { confirmAsPrinted = true }
+                    else { Task { await submit(as: "confirmed") } }
+                }
+                    .accessibilityIdentifier("confirm-reviewed-result")
+                    .disabled(saveDisabled || (creatingMetric && !hasSavedNewDefinition))
+                if creatingMetric && !hasSavedNewDefinition {
+                    Text("Save the new metric as a draft before confirming.").font(.caption)
+                }
+            }
+        }
         Section("Source") {
+            if observation != .null {
+                Button("View Original Page") {
+                    Task {
+                        do { preview = try await source(Int(payload["source"]["page"].numberValue ?? 1)) }
+                        catch { self.error = error.localizedDescription }
+                    }
+                }
+            }
             Stepper("Page \(Int(payload["source"]["page"].numberValue ?? 1))", value: Binding(get: { Int(payload["source"]["page"].numberValue ?? 1) }, set: { payload["source"]["page"] = .number(Double($0)) }), in: 1...max(1, pageCount))
             TextField("Exact source text", text: Binding(get: { payload["source"]["quote"].stringValue }, set: { payload["source"]["quote"] = .string($0) }), axis: .vertical)
             field("Your notes", "notes")
@@ -165,7 +213,7 @@ struct ObservationEditor: View {
         Section {
             Button("Mark as New", action: markAsNew)
                 .accessibilityIdentifier("create-browse-metric")
-                .disabled(status != "pending")
+                .disabled(!canMarkAsNew)
             let proposal = observation["payload"]["ocr_new_metric"]
             if proposal != .null {
                 let proposed = [proposal["name"].stringValue, proposal["standard_unit"].stringValue]

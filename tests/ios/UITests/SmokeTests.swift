@@ -928,8 +928,18 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertFalse(confirm.isEnabled)
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "<0.1 mg/dL (Negative mg/dL)")).firstMatch.exists)
         XCTAssertTrue(needsReview.exists)
+        let review = app.buttons["report-result-status-action"].firstMatch
+        XCTAssertEqual(review.label, "Review")
+        review.tap()
+        XCTAssertTrue(app.navigationBars["Review result"].waitForExistence(timeout: 5))
+        let approve = app.buttons["confirm-reviewed-result"]
+        reveal(app, approve)
+        XCTAssertTrue(approve.isEnabled)
+        approve.tap()
+        XCTAssertTrue(app.navigationBars["Review result"].waitForNonExistence(timeout: 10))
+        XCTAssertTrue(needsReview.waitForNonExistence(timeout: 10))
         let confirmationCounts = try JSONSerialization.jsonObject(with: await control("test/counts")) as? [String: Int]
-        XCTAssertEqual(confirmationCounts?["reports/review"], 1)
+        XCTAssertEqual(confirmationCounts?["reports/review"], 2)
         XCTAssertNil(confirmationCounts?["reports/get"])
         // Traverse the entire long report in both directions, not only its first few rows.
         for _ in 0..<55 {

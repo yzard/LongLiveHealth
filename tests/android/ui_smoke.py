@@ -560,7 +560,7 @@ def report_metric_review():
                 adb("shell", "input", "text", "mg/L")
                 adb("shell", "input", "keyevent", "KEYCODE_BACK")
                 wait_for("mg/L")
-            tap("Save")
+            tap("Save Draft")
             wait_for("0 results ready to confirm" if negative else "1 result ready to confirm")
             saved = control("reports/get")["observations"][0]
             assert saved["payload"]["metric_id"] == ("urine_appearance" if negative else "glucose")
@@ -579,7 +579,7 @@ def report_metric_review():
             wait_for("No similar Browse metrics found.")
             wait_for("OCR suggestion: Zyphorin panel activity · mmol/L")
             tap("Mark as New")
-            wait_for("Save")
+            wait_for("Save Draft")
             assert any(n.get("class") == "android.widget.EditText" for n in tree().iter("node"))
             tap("Cancel")
             wait_for(issue)
@@ -587,8 +587,8 @@ def report_metric_review():
             tap(issue)
             wait_for("Mark as New")
             tap("Mark as New")
-            wait_for("Save")
-            tap("Save")
+            wait_for("Save Draft")
+            tap("Save Draft")
             wait_for("1 result ready to confirm")
             tap("1 result ready to confirm")
             wait_for("Zyphorin panel activity")
@@ -655,16 +655,18 @@ def report_mapping_layout():
 
 
 def report_status_actions(check_chart=False):
-    def control(path):
+    def control(path, body=None):
         return json.loads(subprocess.check_output([
             "docker", "exec", CONTAINER, "curl", "-fsS", "-X", "POST",
+            "-H", "Content-Type: application/json", "-d", json.dumps(body or {}),
             "http://127.0.0.1:18765/api/v1/" + path,
         ], text=True))
 
     control("test/reset")
     control("test/seed-report")
+    control("test/expand-report", {"count": 3})
     control("test/mark-last-result-uncertain")
-    original = control("reports/get")["observations"][0]
+    original = control("reports/get")["observations"]
     if check_chart:
         control("test/enable-report-status-chart")
     adb("shell", "am", "force-stop", "dev.longlivehealth.android")
@@ -690,69 +692,53 @@ def report_status_actions(check_chart=False):
     wait_for("Example Laboratory")
     tap("Example Laboratory")
 
-    def confirm_result():
-        nodes = [node for node in tree().iter("node")
-                 if node.get("text") == "Confirm" or node.get("content-desc") == "Confirm"]
-        tap_node(nodes[-1])
+    wait_for("2 results ready to confirm")
+    wait_for("Needs Review")
+    tap("2 results ready to confirm")
+    wait_for("Ready to Confirm")
+    adb("shell", "input", "keyevent", "KEYCODE_BACK")
+    wait_for("2 results ready to confirm")
 
-    def check_conflict(action, expected_label):
-        before = control("test/counts")
-        control("test/update-observation-elsewhere")
-        tap(action)
-        deadline = time.monotonic() + 20
-        while time.monotonic() < deadline:
-            counts = control("test/counts")
-            current = labels()
-            assert "Could not complete the action" not in current, current
-            if counts.get("reports/get", 0) > before.get("reports/get", 0) and expected_label in current:
-                break
-        else:
-            raise AssertionError("A 409 did not refresh the report")
+    before = control("test/counts")
+    control("test/update-observation-elsewhere")
+    tap("Confirm")
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
         counts = control("test/counts")
-        assert counts.get("reports/review", 0) == before.get("reports/review", 0) + 1
-        assert counts.get("reports/get", 0) == before.get("reports/get", 0) + 1
-        assert control("reports/get")["observations"][0]["status"] == "pending"
-
-    control("test/fail-review")
-    confirm_result()
-    for _ in range(15):
-        if "Could not complete the action" in labels():
+        if counts.get("reports/get", 0) > before.get("reports/get", 0):
             break
         time.sleep(.2)
     else:
-        raise AssertionError("A failed status change did not show an error")
-    tap("OK")
-    wait_for("Confirm")
-    assert control("reports/get")["observations"][0]["status"] == "pending"
-    confirm_result()
-    wait_for("Hold")
-    wait_for("View source · page 1")
-    current = control("reports/get")["observations"][0]
-    assert current["observation_id"] == original["observation_id"]
-    assert current["payload"] == original["payload"]
-    assert current["status"] == "confirmed"
-    tap("Hold")
-    wait_for("1 result ready to confirm")
-    held = control("reports/get")["observations"][0]
-    assert held["status"] == "pending"
-    assert held["payload"] == original["payload"]
-    tap("1 result ready to confirm")
-    wait_for("Ready to Confirm")
-    wait_for("Confirm")
-    confirm_result()
-    adb("shell", "input", "keyevent", "KEYCODE_BACK")
-    wait_for("Hold")
-    assert control("reports/get")["observations"][0]["status"] == "confirmed"
-    check_conflict("Hold", "1 result ready to confirm")
-    assert "Hold" not in labels()
-    check_conflict("Confirm", "1 result ready to confirm")
+        raise AssertionError("A stale batch did not refresh the report")
+    assert counts["reports/review"] == before.get("reports/review", 0) + 1
+    assert counts["reports/get"] == before.get("reports/get", 0) + 1
+    assert all(row["status"] == "pending" for row in control("reports/get")["observations"])
+
     tap("Confirm")
-    wait_for("Hold")
-    assert control("reports/get")["observations"][0]["status"] == "confirmed"
+    wait_for("0 results ready to confirm")
+    statuses = {row["observation_id"]: row["status"] for row in control("reports/get")["observations"]}
+    assert [statuses[row["observation_id"]] for row in original] == ["confirmed", "confirmed", "pending"]
+
+    tap("Review")
+    wait_for("Review result")
+    control("test/fail-review")
+    tap("Confirm")
+    wait_for("Could not save")
+    tap("OK")
+    wait_for("Review result")
+    assert next(row for row in control("reports/get")["observations"]
+                if row["observation_id"] == original[-1]["observation_id"])["status"] == "pending"
+    tap("Confirm")
+    wait_for("Confirmed Results")
+    wait_for("View source · page 1")
+    rows = control("reports/get")["observations"]
+    assert all(row["status"] == "confirmed" for row in rows)
+    assert {row["observation_id"] for row in rows} == {row["observation_id"] for row in original}
+    assert not {"Needs Review", "Hold", "Rejected"}.intersection(labels())
     if check_chart:
         tap("Browse")
         wait_for("mg/dL")
-    print("PASS: server revisions drive Confirm/Hold, and single and bulk 409 each refresh once without a retry")
+    print("PASS: Ready batch and detail confirmation, stale-batch refresh and failed-detail retry")
 
 
 def report_settings():

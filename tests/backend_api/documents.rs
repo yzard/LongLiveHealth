@@ -9,7 +9,7 @@ pub fn mixed_pdf() -> Vec<u8> {
     ])
 }
 
-fn text_pdf(page_lines: &[&[&str]]) -> Vec<u8> {
+pub(super) fn text_pdf(page_lines: &[&[&str]]) -> Vec<u8> {
     use lopdf::{Document, Object, Stream, dictionary};
     let mut document = Document::with_version("1.5");
     let pages_id = document.new_object_id();

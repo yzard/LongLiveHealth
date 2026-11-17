@@ -257,7 +257,8 @@ pub(crate) fn verified_custom_candidate<'a>(
         .raw_unit
         .as_deref()
         .map(custom_unit)
-        .unwrap_or_default();
+        .filter(|unit| !unit.is_empty())
+        .unwrap_or("1");
     let key = crate::laboratory_names::key(name);
     let mut exact = custom.iter().filter(|metric| {
         metric.standard_unit == unit && crate::laboratory_names::key(&metric.name) == key

@@ -16,7 +16,7 @@ import Testing
         let response = try #require(HTTPURLResponse(url: server, statusCode: 200, httpVersion: nil, headerFields: nil))
         return (Data("{\"total_records\":1}".utf8), response)
     })
-    let reply = try await client.post("health/sync", body: body)
+    let reply = try await client.post("health/sync", body: body, readOnly: false)
     #expect(reply["total_records"].numberValue == 1)
 }
 
@@ -27,7 +27,8 @@ import Testing
         return (Data("{\"error\":{\"message\":\"Record conflict\"}}".utf8), response)
     })
     do {
-        _ = try await client.post("health/sync", body: .object(["batch_id": .string("batch-2"), "records": .array([.object([:])])]))
+        let body: JSONValue = .object(["batch_id": .string("batch-2"), "records": .array([.object([:])])])
+        _ = try await client.post("health/sync", body: body, readOnly: false)
         Issue.record("Expected rejected upload")
     } catch APIError.status(let code, let reason) {
         #expect(code == 409)

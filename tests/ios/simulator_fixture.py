@@ -184,7 +184,7 @@ class Handler(BaseHTTPRequestHandler):
             observations[:] = [
                 dict(template, observation_id=f'fixture-marker-{index}', status='pending',
                      payload=dict(template['payload'], raw_name=f'Marker {index + 1}'))
-                for index in range(126)
+                for index in range(body.get('count', 126))
             ]
             if body.get('needs_review'):
                 for row in observations[1:]:

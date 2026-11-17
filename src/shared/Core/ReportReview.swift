@@ -3,6 +3,7 @@ import Foundation
 public nonisolated enum ReportReview {
     public static func canBulkConfirm(_ observation: JSONValue) -> Bool {
         observation["status"] == .string("pending")
+            && !observation["payload"]["ocr_mapping_note"].stringValue.contains("Previously excluded. Review before confirming.")
             && hasReviewableMapping(observation)
             && observation["browse_issues"].arrayValue.isEmpty
             && hasRequiredEvidence(observation["payload"])
@@ -47,8 +48,11 @@ public nonisolated enum ReportReview {
         guard observation["payload"]["metric_id"].stringValue.isEmpty,
               observation["payload"]["unmapped_choice"] == .null,
               observation["resolved_metric_id"].stringValue.isEmpty else { return nil }
-        return observation["metric_suggestions"].arrayValue
-            .first { !$0["metric_id"].stringValue.isEmpty }?["metric_id"].stringValue
+        let candidate = observation["payload"]["ocr_metric_candidate"].stringValue
+        guard !candidate.isEmpty, observation["metric_suggestions"].arrayValue.contains(where: {
+            $0["metric_id"] == .string(candidate)
+        }) else { return nil }
+        return candidate
     }
 
     public static func savedMetricID(_ observation: JSONValue) -> String? {

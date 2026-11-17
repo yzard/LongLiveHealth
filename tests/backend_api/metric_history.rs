@@ -1,5 +1,6 @@
 use crate::{add_user, archive, fixture, observation_payload};
 use base64::{Engine, engine::general_purpose::STANDARD};
+use longlivehealth::reports::ReviewStatus;
 use longlivehealth::{
     health::{ConnectionRequest, HealthRecordInput, SyncRequest},
     metric_history::{HistoryRequest, history},
@@ -51,7 +52,7 @@ async fn conflicting_history_units_disable_the_chart_and_list_all_reported_units
                     observations: vec![ReviewItem {
                         observation_id: None,
                         expected_revision: None,
-                        status: "confirmed".into(),
+                        status: ReviewStatus::Confirmed,
                         payload,
                     }],
                 },
@@ -100,13 +101,13 @@ async fn metric_history_preserves_three_sources_normalizes_and_isolates_users() 
                         ReviewItem {
                             observation_id: None,
                             expected_revision: None,
-                            status: "confirmed".into(),
+                            status: ReviewStatus::Confirmed,
                             payload: observation_payload(),
                         },
                         ReviewItem {
                             observation_id: None,
                             expected_revision: None,
-                            status: "pending".into(),
+                            status: ReviewStatus::Pending,
                             payload: observation_payload(),
                         },
                     ],
@@ -285,7 +286,7 @@ async fn quantity_glucose_and_clinical_component_share_report_units_and_dates() 
                 observations: vec![ReviewItem {
                     observation_id: None,
                     expected_revision: None,
-                    status: "confirmed".into(),
+                    status: ReviewStatus::Confirmed,
                     payload,
                 }],
             },
@@ -822,7 +823,7 @@ async fn report_aliases_share_history_and_browse_without_rewriting_stored_eviden
                     observations: vec![ReviewItem {
                         observation_id: None,
                         expected_revision: None,
-                        status: "confirmed".into(),
+                        status: ReviewStatus::Confirmed,
                         payload,
                     }],
                 },
@@ -889,7 +890,7 @@ async fn browse_unifies_sodium_sources_and_excludes_workflow_fields() {
                 observations: vec![ReviewItem {
                     observation_id: None,
                     expected_revision: None,
-                    status: "confirmed".into(),
+                    status: ReviewStatus::Confirmed,
                     payload,
                 }],
             },
@@ -1027,7 +1028,7 @@ async fn report_history_keeps_undated_and_non_numeric_results() {
                     .map(|payload| ReviewItem {
                         observation_id: None,
                         expected_revision: None,
-                        status: "confirmed".into(),
+                        status: ReviewStatus::Confirmed,
                         payload,
                     })
                     .collect(),
@@ -1077,7 +1078,7 @@ async fn every_function_health_marker_is_available_in_browse_after_confirmation(
         observations.push(longlivehealth::reports::ReviewItem {
             observation_id: None,
             expected_revision: None,
-            status: "confirmed".into(),
+            status: ReviewStatus::Confirmed,
             payload,
         });
     }
@@ -1149,7 +1150,7 @@ async fn pdf_lab_codes_and_names_share_history_without_rewriting_evidence() {
                     observations: vec![ReviewItem {
                         observation_id: None,
                         expected_revision: None,
-                        status: "confirmed".into(),
+                        status: ReviewStatus::Confirmed,
                         payload,
                     }],
                 },
@@ -1213,11 +1214,11 @@ async fn browse_keeps_confirmed_unmapped_results_searchable_with_original_histor
     let bob = add_user(&state, "bob").await;
     let mut report_ids = Vec::new();
     for (index, (source, unit, value, status)) in [
-        ("Lab A", None, "6.0", "confirmed"),
-        ("Lab A", None, "<6.5", "confirmed"),
-        ("Lab A", Some("mmol/L"), "7", "confirmed"),
-        ("Lab B", None, "8", "confirmed"),
-        ("Lab A", None, "9", "pending"),
+        ("Lab A", None, "6.0", ReviewStatus::Confirmed),
+        ("Lab A", None, "<6.5", ReviewStatus::Confirmed),
+        ("Lab A", Some("mmol/L"), "7", ReviewStatus::Confirmed),
+        ("Lab B", None, "8", ReviewStatus::Confirmed),
+        ("Lab A", None, "9", ReviewStatus::Pending),
     ]
     .into_iter()
     .enumerate()
@@ -1241,7 +1242,7 @@ async fn browse_keeps_confirmed_unmapped_results_searchable_with_original_histor
                     observations: vec![ReviewItem {
                         observation_id: None,
                         expected_revision: None,
-                        status: status.into(),
+                        status,
                         payload,
                     }],
                 },
@@ -1328,7 +1329,7 @@ async fn browse_hides_drafts_but_reports_keep_review_issues() {
         items.push(ReviewItem {
             observation_id: None,
             expected_revision: None,
-            status: "pending".into(),
+            status: ReviewStatus::Pending,
             payload,
         });
     }
@@ -1416,7 +1417,7 @@ async fn browse_hides_drafts_but_reports_keep_review_issues() {
                 observations: vec![ReviewItem {
                     observation_id: Some(id.into()),
                     expected_revision: Some(1),
-                    status: "confirmed".into(),
+                    status: ReviewStatus::Confirmed,
                     payload: payload.clone(),
                 }],
             },
@@ -1459,7 +1460,7 @@ async fn browse_hides_drafts_but_reports_keep_review_issues() {
                 observations: vec![ReviewItem {
                     observation_id: Some(id.into()),
                     expected_revision: Some(2),
-                    status: "pending".into(),
+                    status: ReviewStatus::Pending,
                     payload,
                 }],
             },
@@ -1597,7 +1598,7 @@ async fn browse_unifies_total_vitamin_d_without_combining_its_fractions() {
                     observations: vec![ReviewItem {
                         observation_id: None,
                         expected_revision: None,
-                        status: "confirmed".into(),
+                        status: ReviewStatus::Confirmed,
                         payload,
                     }],
                 },
@@ -1810,7 +1811,7 @@ async fn blood_count_aliases_join_pdf_and_clinical_history() {
         observations.push(ReviewItem {
             observation_id: None,
             expected_revision: None,
-            status: "confirmed".into(),
+            status: ReviewStatus::Confirmed,
             payload,
         });
     }
@@ -1947,7 +1948,7 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
                 observations: vec![ReviewItem {
                     observation_id: None,
                     expected_revision: None,
-                    status: "confirmed".into(),
+                    status: ReviewStatus::Confirmed,
                     payload: payload.clone(),
                 }],
             },
@@ -2049,7 +2050,7 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
                 observations: vec![ReviewItem {
                     observation_id: None,
                     expected_revision: None,
-                    status: "pending".into(),
+                    status: ReviewStatus::Pending,
                     payload: payload.clone(),
                 }],
             },
@@ -2065,7 +2066,7 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
     assert_eq!(pending.resolved_metric_id.as_deref(), Some(id.as_str()));
     assert_eq!(pending.display_name, "Alternate printed name");
 
-    let update = |status: &str, revision, payload| ReviewRequest {
+    let update = |status: ReviewStatus, revision, payload| ReviewRequest {
         new_metric: None,
         report_id: report_id.clone(),
         expected_revision: revision,
@@ -2073,7 +2074,7 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
         observations: vec![ReviewItem {
             observation_id: Some(pending.observation_id.clone()),
             expected_revision: Some(revision - 2),
-            status: status.into(),
+            status,
             payload,
         }],
     };
@@ -2081,12 +2082,15 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
     conflict.metric_id = Some("total_bilirubin".into());
     state
         .database
-        .review(&alice.user_id, update("pending", 3, conflict.clone()))
+        .review(
+            &alice.user_id,
+            update(ReviewStatus::Pending, 3, conflict.clone()),
+        )
         .await
         .unwrap();
     let rejected = state
         .database
-        .review(&alice.user_id, update("confirmed", 4, conflict))
+        .review(&alice.user_id, update(ReviewStatus::Confirmed, 4, conflict))
         .await
         .unwrap_err();
     assert!(rejected.to_string().contains("already linked"));
@@ -2113,7 +2117,10 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
     );
     state
         .database
-        .review(&alice.user_id, update("confirmed", 4, payload.clone()))
+        .review(
+            &alice.user_id,
+            update(ReviewStatus::Confirmed, 4, payload.clone()),
+        )
         .await
         .unwrap();
     let rows = state.database.confirmed(&alice.user_id).await.unwrap();
@@ -2136,7 +2143,7 @@ async fn rename_and_review_link_pdf_to_apple_metric_without_changing_identity() 
                 observations: vec![ReviewItem {
                     observation_id: None,
                     expected_revision: None,
-                    status: "pending".into(),
+                    status: ReviewStatus::Pending,
                     payload,
                 }],
             },
@@ -2176,15 +2183,15 @@ async fn rename_updates_saved_pending_title_and_preserves_unsaved_pdf_title() {
                 context: None,
                 new_metric: None,
                 observations: [
-                    ("confirmed", mapped.clone()),
-                    ("pending", mapped),
-                    ("pending", parsed),
+                    (ReviewStatus::Confirmed, mapped.clone()),
+                    (ReviewStatus::Pending, mapped),
+                    (ReviewStatus::Pending, parsed),
                 ]
                 .into_iter()
                 .map(|(status, payload)| ReviewItem {
                     observation_id: None,
                     expected_revision: None,
-                    status: status.into(),
+                    status,
                     payload,
                 })
                 .collect(),

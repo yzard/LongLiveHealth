@@ -102,42 +102,25 @@ pub(crate) async fn database_metrics(
     database: &crate::database::Database,
     user_id: &str,
 ) -> Result<Arc<MetricCatalog>, AppError> {
-    let metadata = database.lab_metric_metadata(user_id).await?;
-    let mut loinc_codes = metadata.codes_by_metric();
-    let mut metrics: BTreeMap<_, _> = database
-        .custom_metrics(user_id)
-        .await?
+    // A confirmation writes the definition and its LOINC link together.
+    let mut snapshot = database.pool.begin().await?;
+    let metadata = crate::lab_metric_metadata::Metadata::load(&mut snapshot, user_id).await?;
+    let stored: Vec<CustomMetric> = sqlx::query_as(crate::database::queries::CUSTOM_LAB_METRICS)
+        .bind(user_id)
+        .fetch_all(&mut *snapshot)
+        .await?;
+    snapshot.commit().await?;
+    let mut loinc_codes = metadata.linked_codes_by_metric();
+    let mut metrics: BTreeMap<_, _> = stored
         .into_iter()
         .map(|metric| (metric.metric_id.clone(), metric))
         .collect();
-    let browse = crate::metric_history::browse(database, user_id).await?;
-    for metric in browse["metrics"].as_array().ok_or(AppError::Internal)? {
-        if metric["metric_id"]
-            .as_str()
-            .is_some_and(|id| id.starts_with(crate::reports::REPORTED_METRIC_PREFIX))
-        {
-            continue;
-        }
-        let mut entry: CustomMetric = serde_json::from_value(metric.clone())?;
-        if entry.standard_unit.is_empty()
-            && let Some(units) = metric["display_units"].as_array()
-            && let [unit] = units.as_slice()
-            && let Some(unit) = unit.as_str().filter(|unit| *unit != "Not reported")
-        {
-            entry.standard_unit = crate::laboratory::custom_unit(unit).to_owned();
-        }
-        for code in metric["loinc_codes"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(serde_json::Value::as_str)
-        {
-            loinc_codes
-                .entry(entry.metric_id.clone())
-                .or_default()
-                .insert(code.to_owned());
-        }
-        metrics.insert(entry.metric_id.clone(), entry);
+    for (id, group) in crate::lab_metric_metadata::clinical_groups(database, user_id).await? {
+        metrics.insert(
+            id.clone(),
+            crate::lab_metric_metadata::clinical_metric(&group)?,
+        );
+        loinc_codes.entry(id).or_default().extend(group.loinc_codes);
     }
     for (id, name) in metadata.aliases {
         if let Some(entry) = metrics.get_mut(&id) {

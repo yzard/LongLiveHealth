@@ -29,12 +29,12 @@ nonisolated final class LiveReportLayoutTests: XCTestCase {
         XCTAssertTrue(issue.label.contains("report unit mg/dL"))
         XCTAssertTrue(issue.label.contains("database standard unit unitless (qualitative result)"))
         let ketonesTitle = app.buttons.containing(.staticText, identifier: "Ketones").firstMatch
-        let manualConfirm = app.buttons.matching(identifier: "report-result-status-action")
+        let manualReview = app.buttons.matching(identifier: "report-result-status-action")
             .allElementsBoundByIndex.first { button in
-                button.label == "Confirm" && button.frame.minY > ketonesTitle.frame.minY
+                button.label == "Review" && button.frame.minY > ketonesTitle.frame.minY
                     && button.frame.maxY < issue.frame.minY
             }
-        XCTAssertNotNil(manualConfirm)
+        XCTAssertNotNil(manualReview)
         issue.tap()
         XCTAssertTrue(app.staticTexts["Ketones - urine"].waitForExistence(timeout: 10))
         app.buttons["Cancel"].tap()

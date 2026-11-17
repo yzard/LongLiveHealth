@@ -1,3 +1,4 @@
+use longlivehealth::reports::ReviewStatus;
 mod accounts;
 mod analysis;
 mod app;
@@ -72,7 +73,7 @@ pub async fn confirm(state: &AppState, user_id: &str, report_id: &str) -> String
                 observations: vec![longlivehealth::reports::ReviewItem {
                     observation_id: None,
                     expected_revision: None,
-                    status: "confirmed".into(),
+                    status: ReviewStatus::Confirmed,
                     payload: observation_payload(),
                 }],
             },

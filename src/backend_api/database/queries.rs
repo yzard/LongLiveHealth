@@ -211,7 +211,7 @@ SELECT r.report_id, r.revision, r.context_json, f.original_name, f.page_count, r
              ORDER BY i.created_at DESC, i.run_id DESC LIMIT 1),
            (SELECT MAX(SUBSTR(json_extract(o.payload_json, '$.sampled_at'), 1, 10))
               FROM review_observations o
-             WHERE o.user_id = r.user_id AND o.report_id = r.report_id AND o.status != 'rejected'
+             WHERE o.user_id = r.user_id AND o.report_id = r.report_id
                AND SUBSTR(json_extract(o.payload_json, '$.sampled_at'), 1, 10)
                    GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')
        ) AS collection_date
@@ -225,10 +225,10 @@ pub const REPORT: &str = report_summary_query!("r.report_id = ?");
 pub const REPORTS: &str =
     report_summary_query!("(? IS NULL OR r.report_id > ?) ORDER BY r.report_id LIMIT ?");
 pub const OBSERVATIONS: &str = "SELECT o.observation_id, o.report_id, o.current_revision AS revision, o.status, o.payload_json, r.context_json FROM review_observations o JOIN reports r ON r.user_id = o.user_id AND r.report_id = o.report_id WHERE o.user_id = ? AND o.report_id = ? ORDER BY o.observation_id";
-pub const OBSERVATION: &str = "SELECT o.current_revision, o.status, o.payload_json FROM review_observations o WHERE o.user_id = ? AND o.report_id = ? AND o.observation_id = ?";
+pub const OBSERVATION: &str = "SELECT o.current_revision, o.status, o.payload_json, o.candidate_key FROM review_observations o WHERE o.user_id = ? AND o.report_id = ? AND o.observation_id = ?";
 pub const INSERT_OBSERVATION: &str = "INSERT INTO draft.observations (observation_id, user_id, report_id, current_revision, candidate_key) VALUES (?, ?, ?, 1, ?)";
-pub const SAVE_OBSERVATION: &str = "INSERT INTO draft.observations (user_id,observation_id,current_revision,status,payload_json,updated_at,report_id,candidate_key) SELECT ?1,?2,?3,?4,?5,?6,report_id,candidate_key FROM review_observations WHERE user_id=?1 AND observation_id=?2 ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision,status=excluded.status,payload_json=excluded.payload_json,updated_at=excluded.updated_at";
-pub const CONFIRM_OBSERVATION: &str = "INSERT INTO main.observations (user_id,observation_id,current_revision,status,payload_json,updated_at,report_id,candidate_key) SELECT ?1,?2,?3,?4,?5,?6,report_id,candidate_key FROM review_observations WHERE user_id=?1 AND observation_id=?2 ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision,status=excluded.status,payload_json=excluded.payload_json,updated_at=excluded.updated_at";
+pub const SAVE_PENDING_OBSERVATION: &str = "INSERT INTO draft.observations (user_id,observation_id,current_revision,status,payload_json,updated_at,report_id,candidate_key) SELECT ?1,?2,?3,'pending',?4,?5,report_id,candidate_key FROM review_observations WHERE user_id=?1 AND observation_id=?2 ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision,payload_json=excluded.payload_json,updated_at=excluded.updated_at";
+pub const CONFIRM_OBSERVATION: &str = "INSERT INTO main.observations (user_id,observation_id,current_revision,status,payload_json,updated_at,report_id,candidate_key) SELECT ?1,?2,?3,'confirmed',?4,?5,report_id,candidate_key FROM review_observations WHERE user_id=?1 AND observation_id=?2 ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision,payload_json=excluded.payload_json,updated_at=excluded.updated_at";
 pub const UPDATE_REPORT: &str = "UPDATE reports SET revision = revision + 1, context_json = COALESCE(?, context_json) WHERE user_id = ? AND report_id = ? AND revision = ?";
 pub const OBSERVATION_HISTORY: &str = "SELECT observation_id, current_revision AS revision, status, payload_json, updated_at AS created_at FROM review_observations WHERE user_id = ? AND observation_id = ?";
 pub const CONFIRMED_OBSERVATIONS: &str = r#"
@@ -288,7 +288,7 @@ SELECT o.payload_json, json_extract(r.context_json, '$.source_name') AS source_n
   FROM reports r
   JOIN reports current ON current.user_id = r.user_id AND current.report_id = ?2
   JOIN review_observations o ON o.user_id = r.user_id AND o.report_id = r.report_id
- WHERE r.user_id = ?1 AND r.report_id != current.report_id AND o.status != 'rejected'
+ WHERE r.user_id = ?1 AND r.report_id != current.report_id
    AND lower(trim(json_extract(r.context_json, '$.source_name'))) = lower(trim(?3))
    AND (o.status = 'confirmed'
         OR (r.created_at, r.report_id) < (current.created_at, current.report_id)
@@ -816,7 +816,7 @@ UNION ALL
 SELECT d.observation_id, d.user_id, d.report_id, d.current_revision, d.status, d.payload_json, d.updated_at, d.candidate_key FROM draft.observations d WHERE EXISTS (SELECT 1 FROM main.reports r WHERE r.user_id=d.user_id AND r.report_id=d.report_id)
 AND NOT EXISTS (SELECT 1 FROM main.observations o WHERE o.observation_id=d.observation_id AND o.current_revision>=d.current_revision);
 "#;
-pub const MIGRATE_REPORT_DRAFTS: &str = "INSERT INTO draft.observations (observation_id,user_id,report_id,current_revision,status,payload_json,updated_at,candidate_key) SELECT * FROM main.observations WHERE status!='confirmed' ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision,status=excluded.status,payload_json=excluded.payload_json,updated_at=excluded.updated_at WHERE excluded.current_revision>observations.current_revision";
+pub const MIGRATE_REPORT_DRAFTS: &str = "INSERT INTO draft.observations (observation_id,user_id,report_id,current_revision,status,payload_json,updated_at,candidate_key) SELECT observation_id,user_id,report_id,current_revision+CASE WHEN status='rejected' THEN 1 ELSE 0 END,'pending',CASE WHEN status='rejected' THEN json_set(payload_json,'$.ocr_mapping_note','Previously excluded. Review before confirming. ' || coalesce(json_extract(payload_json,'$.ocr_mapping_note'),'')) ELSE payload_json END,updated_at,candidate_key FROM main.observations WHERE status!='confirmed' ON CONFLICT(observation_id) DO UPDATE SET current_revision=excluded.current_revision,status=excluded.status,payload_json=excluded.payload_json,updated_at=excluded.updated_at WHERE excluded.current_revision>observations.current_revision";
 pub const REMOVE_SUPERSEDED_OFFICIAL: &str = "DELETE FROM main.observations WHERE EXISTS (SELECT 1 FROM draft.observations d WHERE d.observation_id=observations.observation_id AND (d.current_revision>observations.current_revision OR (d.current_revision=observations.current_revision AND observations.status!='confirmed')))";
 pub const REMOVE_SUPERSEDED_DRAFTS: &str = "DELETE FROM draft.observations WHERE NOT EXISTS (SELECT 1 FROM main.reports r WHERE r.user_id=observations.user_id AND r.report_id=observations.report_id) OR EXISTS (SELECT 1 FROM main.observations o WHERE o.observation_id=observations.observation_id AND o.current_revision>=observations.current_revision)";
 

@@ -1,4 +1,199 @@
 use crate::{add_user, archive, fixture};
+use longlivehealth::reports::ReviewStatus;
+
+#[tokio::test]
+async fn new_confirmed_metric_and_loinc_are_used_in_the_next_report_rescan() {
+    use longlivehealth::{
+        metric_history::{HistoryRequest, history},
+        reports::{NewMetric, ReviewItem, ReviewRequest, UnmappedChoice},
+    };
+    use serde_json::{Value, json};
+    use std::sync::{Arc, Mutex};
+
+    let (_directory, mut state) = fixture().await;
+    let user = add_user(&state, "alice").await;
+    let received = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let requests = received.clone();
+    let provider = axum::Router::new().route(
+        "/v1/chat/completions",
+        axum::routing::post(move |axum::Json(request): axum::Json<Value>| {
+            let requests = requests.clone();
+            async move {
+                let evidence: Value = serde_json::from_str(
+                    request["messages"][1]["content"][0]["text"]
+                        .as_str()
+                        .unwrap(),
+                )
+                .unwrap();
+                let metric = evidence["laboratory_metric_catalog"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|entry| entry[1] == "pH of Urine")
+                    .cloned();
+                let mut requests = requests.lock().unwrap();
+                let first = requests.is_empty();
+                requests.push(metric.clone().unwrap_or(Value::Null));
+                let date = if first { "2018-06-01" } else { "2019-06-01" };
+                let mut row = crate::observation_payload();
+                row.raw_name = if first {
+                    "pH (50560-2)"
+                } else {
+                    "Urine pH (50560-2)"
+                }
+                .into();
+                row.raw_result = if first { "6.0" } else { "6.5" }.into();
+                row.raw_unit = None;
+                row.sampled_at = Some(date.into());
+                row.source.quote = format!("{} {} {date}", row.raw_name, row.raw_result);
+                row.metric_id = None;
+                row.ocr_metric_candidate = metric
+                    .as_ref()
+                    .and_then(|entry| entry[0].as_str())
+                    .map(str::to_owned);
+                row.ocr_new_metric = metric.is_none().then(|| NewMetric {
+                    name: "pH of Urine".into(),
+                    standard_unit: "".into(),
+                });
+                axum::Json(super::provider::completion(json!({
+                    "observations": [row], "warnings": [], "source_name": "Fixture Lab",
+                })))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    Arc::make_mut(&mut state.config).llm.base_url =
+        format!("http://{}/v1", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, provider).await.unwrap() });
+    let app = longlivehealth::app::create_application(state.clone());
+    let token = crate::token(&state, "alice").await;
+    let mut reports = Vec::new();
+    for line in ["pH 6.0 2018-06-01", "Urine pH 6.5 2019-06-01"] {
+        let (status, uploaded) = crate::upload(
+            &app,
+            &token,
+            &uuid::Uuid::new_v4().to_string(),
+            &super::documents::text_pdf(&[&[line]]),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        reports.push(uploaded["file"]["file_id"].as_str().unwrap().to_owned());
+        assert!(longlivehealth::worker::extract_next(&state).await.unwrap());
+    }
+    assert_ne!(reports[0], reports[1]);
+    assert_eq!(*received.lock().unwrap(), [Value::Null, Value::Null]);
+
+    let change = |report_id: &str, document: &Value, status: ReviewStatus, payload| {
+        let row = &document["observations"][0];
+        state.database.review(
+            &user.user_id,
+            ReviewRequest {
+                report_id: report_id.into(),
+                expected_revision: document["report"]["revision"].as_i64().unwrap(),
+                context: None,
+                new_metric: None,
+                observations: vec![ReviewItem {
+                    observation_id: row["observation_id"].as_str().map(str::to_owned),
+                    expected_revision: row["revision"].as_i64(),
+                    status,
+                    payload,
+                }],
+            },
+        )
+    };
+    let first = state
+        .database
+        .report(&user.user_id, &reports[0])
+        .await
+        .unwrap();
+    assert_eq!(first["observations"][0]["status"], "pending");
+    assert!(first["observations"][0]["resolved_metric_id"].is_null());
+    let mut payload: longlivehealth::reports::ObservationPayload =
+        serde_json::from_value(first["observations"][0]["payload"].clone()).unwrap();
+    assert!(
+        change(
+            &reports[0],
+            &first,
+            ReviewStatus::Confirmed,
+            payload.clone()
+        )
+        .await
+        .is_err()
+    );
+    payload.unmapped_choice = Some(UnmappedChoice::New(payload.ocr_new_metric.clone().unwrap()));
+    let saved = change(&reports[0], &first, ReviewStatus::Pending, payload.clone())
+        .await
+        .unwrap();
+    assert!(
+        state
+            .database
+            .custom_metrics(&user.user_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let confirmed = change(&reports[0], &saved, ReviewStatus::Confirmed, payload)
+        .await
+        .unwrap();
+    let id = confirmed["created_metric"]["metric_id"].as_str().unwrap();
+    assert!(id.starts_with("custom:"));
+    let revision = state
+        .database
+        .report_summary(&user.user_id, &reports[1])
+        .await
+        .unwrap()
+        .revision;
+    state
+        .database
+        .rescan_report(&user.user_id, &reports[1], revision)
+        .await
+        .unwrap();
+    assert!(longlivehealth::worker::extract_next(&state).await.unwrap());
+    let entry = received.lock().unwrap()[2].clone();
+    assert_eq!(entry[0], id);
+    assert_eq!(entry[2], "1");
+    assert_eq!(entry[4], json!(["50560-2"]));
+    let second = state
+        .database
+        .report(&user.user_id, &reports[1])
+        .await
+        .unwrap();
+    assert_eq!(second["observations"][0]["status"], "pending");
+    assert_eq!(
+        second["observations"][0]["payload"]["ocr_metric_candidate"],
+        id
+    );
+    assert!(second["observations"][0]["payload"]["metric_id"].is_null());
+    assert_eq!(second["observations"][0]["resolved_metric_id"], id);
+    let payload = serde_json::from_value(second["observations"][0]["payload"].clone()).unwrap();
+    let after = change(&reports[1], &second, ReviewStatus::Confirmed, payload)
+        .await
+        .unwrap();
+    assert_eq!(after["observations"][0]["payload"]["metric_id"], id);
+    let history = history(
+        &state.database,
+        &user.user_id,
+        HistoryRequest {
+            metric_id: id.into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(history["records"].as_array().unwrap().len(), 2);
+    for (point, report) in history["points"].as_array().unwrap().iter().zip(&reports) {
+        assert_eq!(point["report_id"], *report);
+    }
+    assert_eq!(
+        state
+            .database
+            .custom_metrics(&user.user_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    server.abort();
+}
 
 #[tokio::test]
 async fn extraction_replay_refreshes_untouched_drafts_and_preserves_reviewed_rows() {
@@ -67,7 +262,10 @@ async fn extraction_replay_refreshes_untouched_drafts_and_preserves_reviewed_row
         .await
         .unwrap()
         .revision;
-    let edits = [(&original[1], "pending"), (&original[2], "confirmed")];
+    let edits = [
+        (&original[1], ReviewStatus::Pending),
+        (&original[2], ReviewStatus::Confirmed),
+    ];
     state
         .database
         .review(
@@ -82,10 +280,13 @@ async fn extraction_replay_refreshes_untouched_drafts_and_preserves_reviewed_row
                     .map(|(row, status)| {
                         let mut payload = row.payload.clone();
                         payload.notes = Some("Reviewer annotation".into());
+                        if status == ReviewStatus::Confirmed {
+                            payload.metric_id = Some("ldl_cholesterol".into());
+                        }
                         ReviewItem {
                             observation_id: Some(row.observation_id.clone()),
                             expected_revision: Some(row.revision),
-                            status: status.into(),
+                            status,
                             payload,
                         }
                     })
@@ -382,7 +583,7 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
                 observations: vec![longlivehealth::reports::ReviewItem {
                     observation_id: None,
                     expected_revision: None,
-                    status: "confirmed".into(),
+                    status: ReviewStatus::Confirmed,
                     payload: manual,
                 }],
             },
@@ -1014,7 +1215,7 @@ async fn rescan_removes_only_numeric_overlaps_and_refreshes_ocr_again() {
                     observations: vec![ReviewItem {
                         observation_id: None,
                         expected_revision: None,
-                        status: "confirmed".into(),
+                        status: ReviewStatus::Confirmed,
                         payload: result(name, "120.0", "2026-08-01", "mg/dL"),
                     }],
                     new_metric: None,

@@ -1,6 +1,42 @@
 use crate::{add_user, archive, confirm, fixture, observation_payload};
 use longlivehealth::laboratory::normalized;
+use longlivehealth::reports::ReviewStatus;
 use longlivehealth::reports::{ReviewItem, ReviewRequest, TrendRequest, trends};
+
+#[tokio::test]
+async fn report_review_api_rejects_retired_status_without_writing_a_revision() {
+    use axum::http::StatusCode;
+    use serde_json::json;
+
+    let (directory, state) = fixture().await;
+    let user = add_user(&state, "alice").await;
+    let report_id = archive(&state, "alice").await;
+    let token = crate::token(&state, "alice").await;
+    let router = longlivehealth::app::create_application(state.clone());
+    let (status, response) = crate::request(
+        &router,
+        "/api/v1/reports/review",
+        Some(&token),
+        json!({
+            "report_id": report_id,
+            "expected_revision": 1,
+            "observations": [
+                {"status": "confirmed", "payload": observation_payload()},
+                {"status": "rejected", "payload": observation_payload()}
+            ]
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{response}");
+    let report = state
+        .database
+        .report(&user.user_id, &report_id)
+        .await
+        .unwrap();
+    assert_eq!(report["report"]["revision"], 1);
+    assert_eq!(observation_counts(directory.path()).await, (0, 0));
+}
 
 #[tokio::test]
 async fn partial_review_history_and_conflicts_are_transactional() {
@@ -17,13 +53,13 @@ async fn partial_review_history_and_conflicts_are_transactional() {
             ReviewItem {
                 observation_id: None,
                 expected_revision: None,
-                status: "confirmed".into(),
+                status: ReviewStatus::Confirmed,
                 payload: observation_payload(),
             },
             ReviewItem {
                 observation_id: None,
                 expected_revision: None,
-                status: "pending".into(),
+                status: ReviewStatus::Pending,
                 payload: observation_payload(),
             },
         ],
@@ -67,7 +103,7 @@ async fn partial_review_history_and_conflicts_are_transactional() {
                 observations: vec![ReviewItem {
                     observation_id: Some(id.clone()),
                     expected_revision: Some(1),
-                    status: "confirmed".into(),
+                    status: ReviewStatus::Confirmed,
                     payload: edited,
                 }],
             },
@@ -206,7 +242,7 @@ async fn confirmed_units_share_scale_and_unknown_values_report_specific_reasons(
             ReviewItem {
                 observation_id: None,
                 expected_revision: None,
-                status: "confirmed".into(),
+                status: ReviewStatus::Confirmed,
                 payload,
             }
         })
@@ -368,7 +404,7 @@ async fn reviewing_moves_rows_between_sqlite_databases_and_updates_browse_histor
                 observations: vec![ReviewItem {
                     observation_id: None,
                     expected_revision: None,
-                    status: "pending".into(),
+                    status: ReviewStatus::Pending,
                     payload: observation_payload(),
                 }],
             },
@@ -396,11 +432,9 @@ async fn reviewing_moves_rows_between_sqlite_databases_and_updates_browse_histor
         .unwrap()
         .to_owned();
     for (status, counts) in [
-        ("confirmed", (1, 0)),
-        ("pending", (0, 1)),
-        ("confirmed", (1, 0)),
-        ("rejected", (0, 1)),
-        ("confirmed", (1, 0)),
+        (ReviewStatus::Confirmed, (1, 0)),
+        (ReviewStatus::Pending, (0, 1)),
+        (ReviewStatus::Confirmed, (1, 0)),
     ] {
         let revision = document["observations"][0]["revision"].as_i64().unwrap();
         let request = |expected| ReviewRequest {
@@ -411,7 +445,7 @@ async fn reviewing_moves_rows_between_sqlite_databases_and_updates_browse_histor
             observations: vec![ReviewItem {
                 observation_id: Some(id.clone()),
                 expected_revision: Some(expected),
-                status: status.into(),
+                status,
                 payload: observation_payload(),
             }],
         };
@@ -430,12 +464,15 @@ async fn reviewing_moves_rows_between_sqlite_databases_and_updates_browse_histor
             .await
             .unwrap();
         assert_eq!(observation_counts(directory.path()).await, counts);
-        assert_eq!(document["observations"][0]["status"], status);
+        assert_eq!(
+            document["observations"][0]["status"],
+            serde_json::to_value(status).unwrap()
+        );
         assert_eq!(document["observations"][0]["observation_id"], id);
         assert_eq!(document["observations"][0]["payload"]["raw_result"], "120");
         let history = ldl_history(&state.database, &user.user_id).await;
         let points = history["points"].as_array().unwrap();
-        if status == "confirmed" {
+        if status == ReviewStatus::Confirmed {
             assert_eq!(points.len(), 1);
             assert_eq!(points[0]["observation_id"], id);
         } else {
@@ -444,7 +481,7 @@ async fn reviewing_moves_rows_between_sqlite_databases_and_updates_browse_histor
         }
         assert_eq!(
             state.database.confirmed(&user.user_id).await.unwrap().len(),
-            usize::from(status == "confirmed")
+            usize::from(status == ReviewStatus::Confirmed)
         );
     }
 }
@@ -464,12 +501,12 @@ async fn deleting_report_removes_official_and_draft_results() {
                 report_id: report.clone(),
                 expected_revision: 1,
                 context: None,
-                observations: ["pending", "confirmed"]
+                observations: [ReviewStatus::Pending, ReviewStatus::Confirmed]
                     .into_iter()
                     .map(|status| ReviewItem {
                         observation_id: None,
                         expected_revision: None,
-                        status: status.into(),
+                        status,
                         payload: observation_payload(),
                     })
                     .collect(),
@@ -651,7 +688,7 @@ async fn rescan_keeps_results_and_original_and_rejects_stale_or_active_requests(
                 observations: vec![ReviewItem {
                     observation_id: None,
                     expected_revision: None,
-                    status: "pending".into(),
+                    status: ReviewStatus::Pending,
                     payload: observation_payload(),
                 }],
             },
@@ -735,7 +772,7 @@ async fn stored_results_display_loinc_long_common_name_without_remapping() {
                     .map(|payload| ReviewItem {
                         observation_id: None,
                         expected_revision: None,
-                        status: "pending".into(),
+                        status: ReviewStatus::Pending,
                         payload,
                     })
                     .collect(),
@@ -831,7 +868,7 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
                 .map(|payload| ReviewItem {
                     observation_id: None,
                     expected_revision: None,
-                    status: "pending".into(),
+                    status: ReviewStatus::Pending,
                     payload,
                 })
                 .collect(),
@@ -917,7 +954,7 @@ async fn report_rows_explain_browse_blockers_and_distinguish_chart_only_issues()
                 observations: vec![ReviewItem {
                     observation_id: Some(bad["observation_id"].as_str().unwrap().into()),
                     expected_revision: Some(1),
-                    status: "confirmed".into(),
+                    status: ReviewStatus::Confirmed,
                     payload: corrected,
                 }],
             },
@@ -968,7 +1005,7 @@ async fn saving_mappings_keeps_ocr_evidence_and_rechecks_independent_report_issu
                     ReviewItem {
                         observation_id: None,
                         expected_revision: None,
-                        status: "pending".into(),
+                        status: ReviewStatus::Pending,
                         payload,
                     }
                 })
@@ -1014,7 +1051,7 @@ async fn saving_mappings_keeps_ocr_evidence_and_rechecks_independent_report_issu
                     observations: vec![ReviewItem {
                         observation_id: Some(observation_id.clone()),
                         expected_revision: row["revision"].as_i64(),
-                        status: "pending".into(),
+                        status: ReviewStatus::Pending,
                         payload,
                     }],
                 },
@@ -1061,9 +1098,8 @@ async fn report_summaries_use_collection_evidence_for_the_date_column() {
             .is_none()
     );
     let observations = [
-        ("confirmed", "2026-08-15"),
-        ("pending", "2026-09-01T23:30:00-05:00"),
-        ("rejected", "2026-10-01"),
+        (ReviewStatus::Confirmed, "2026-08-15"),
+        (ReviewStatus::Pending, "2026-09-01T23:30:00-05:00"),
     ]
     .into_iter()
     .map(|(status, date)| {
@@ -1072,7 +1108,7 @@ async fn report_summaries_use_collection_evidence_for_the_date_column() {
         ReviewItem {
             observation_id: None,
             expected_revision: None,
-            status: status.into(),
+            status,
             payload,
         }
     })
@@ -1161,7 +1197,7 @@ async fn review_creates_an_owned_metric_and_links_its_confirmed_browse_history()
                 observations: vec![ReviewItem {
                     observation_id: None,
                     expected_revision: None,
-                    status: "pending".into(),
+                    status: ReviewStatus::Pending,
                     payload: payload.clone(),
                 }],
                 new_metric: None,
@@ -1178,7 +1214,7 @@ async fn review_creates_an_owned_metric_and_links_its_confirmed_browse_history()
         observations: vec![ReviewItem {
             observation_id: Some(draft["observation_id"].as_str().unwrap().to_owned()),
             expected_revision: Some(observation_revision),
-            status: "confirmed".into(),
+            status: ReviewStatus::Confirmed,
             payload: payload.clone(),
         }],
         new_metric: Some(NewMetric {
@@ -1232,6 +1268,80 @@ async fn review_creates_an_owned_metric_and_links_its_confirmed_browse_history()
 }
 
 #[tokio::test]
+async fn mark_as_new_replaces_a_legacy_confirmed_display_identity_with_a_persisted_metric() {
+    use longlivehealth::reports::{NewMetric, UnmappedChoice};
+
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "alice").await;
+    let report_id = archive(&state, "alice").await;
+    let review = |revision, observation_id, expected_revision, payload| {
+        state.database.review(
+            &user.user_id,
+            ReviewRequest {
+                report_id: report_id.clone(),
+                expected_revision: revision,
+                context: None,
+                new_metric: None,
+                observations: vec![ReviewItem {
+                    observation_id,
+                    expected_revision,
+                    status: ReviewStatus::Confirmed,
+                    payload,
+                }],
+            },
+        )
+    };
+    let mut payload = observation_payload();
+    payload.raw_name = "pH (50560-2)".into();
+    payload.raw_result = "6.0".into();
+    payload.raw_unit = None;
+    payload.metric_id = None;
+    payload.source.quote = "pH (50560-2) 6.0".into();
+    let original = review(1, None, None, payload.clone()).await.unwrap();
+    let legacy = &original["observations"][0];
+    assert!(legacy["payload"]["metric_id"].is_null());
+    let browse = longlivehealth::metric_history::browse(&state.database, &user.user_id)
+        .await
+        .unwrap();
+    let displayed_id = browse["metrics"][0]["metric_id"].as_str().unwrap();
+    assert!(displayed_id.starts_with("reported:"));
+    payload.unmapped_choice = Some(UnmappedChoice::New(NewMetric {
+        name: "pH of Urine".into(),
+        standard_unit: "".into(),
+    }));
+    let promoted = review(
+        2,
+        legacy["observation_id"].as_str().map(str::to_owned),
+        legacy["revision"].as_i64(),
+        payload,
+    )
+    .await
+    .unwrap();
+    let row = &promoted["observations"][0];
+    let id = promoted["created_metric"]["metric_id"].as_str().unwrap();
+    assert_ne!(id, displayed_id);
+    assert_eq!(row["payload"]["metric_id"], id);
+    assert_eq!(row["observation_id"], legacy["observation_id"]);
+    assert_eq!(row["payload"]["source"], legacy["payload"]["source"]);
+    assert_eq!(row["status"], "confirmed");
+    let browse = longlivehealth::metric_history::browse(&state.database, &user.user_id)
+        .await
+        .unwrap();
+    assert_eq!(browse["metrics"][0]["metric_id"], id);
+    let history = longlivehealth::metric_history::history(
+        &state.database,
+        &user.user_id,
+        longlivehealth::metric_history::HistoryRequest {
+            metric_id: id.into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(history["metric"]["loinc"][0]["code"], "50560-2");
+    assert_eq!(history["points"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
     use longlivehealth::reports::{NewMetric, UnmappedChoice};
     use serde_json::Value;
@@ -1239,7 +1349,7 @@ async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
     let (_directory, state) = fixture().await;
     let user = add_user(&state, "alice").await;
     let report = archive(&state, "alice").await;
-    let request = |revision, row: Option<&Value>, status: &str, payload| ReviewRequest {
+    let request = |revision, row: Option<&Value>, status: ReviewStatus, payload| ReviewRequest {
         report_id: report.clone(),
         expected_revision: revision,
         context: None,
@@ -1247,7 +1357,7 @@ async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
         observations: vec![ReviewItem {
             observation_id: row.map(|row| row["observation_id"].as_str().unwrap().to_owned()),
             expected_revision: row.and_then(|row| row["revision"].as_i64()),
-            status: status.into(),
+            status,
             payload,
         }],
     };
@@ -1259,7 +1369,10 @@ async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
     payload.metric_id = None;
     let initial = state
         .database
-        .review(&user.user_id, request(1, None, "pending", payload.clone()))
+        .review(
+            &user.user_id,
+            request(1, None, ReviewStatus::Pending, payload.clone()),
+        )
         .await
         .unwrap();
     let initial = &initial["observations"][0];
@@ -1273,7 +1386,7 @@ async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
             .database
             .review(
                 &user.user_id,
-                request(2, Some(initial), "confirmed", payload.clone())
+                request(2, Some(initial), ReviewStatus::Confirmed, payload.clone())
             )
             .await
             .is_err()
@@ -1285,7 +1398,7 @@ async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
         .database
         .review(
             &user.user_id,
-            request(2, Some(initial), "pending", payload.clone()),
+            request(2, Some(initial), ReviewStatus::Pending, payload.clone()),
         )
         .await
         .unwrap();
@@ -1308,7 +1421,7 @@ async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
             .database
             .review(
                 &user.user_id,
-                request(3, Some(wrong), "confirmed", payload.clone())
+                request(3, Some(wrong), ReviewStatus::Confirmed, payload.clone())
             )
             .await
             .is_err()
@@ -1328,7 +1441,7 @@ async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
         .database
         .review(
             &user.user_id,
-            request(3, Some(wrong), "pending", payload.clone()),
+            request(3, Some(wrong), ReviewStatus::Pending, payload.clone()),
         )
         .await
         .unwrap();
@@ -1352,7 +1465,7 @@ async fn saved_mapping_intent_is_checked_before_it_can_create_a_metric() {
         .database
         .review(
             &user.user_id,
-            request(4, Some(corrected), "confirmed", payload),
+            request(4, Some(corrected), ReviewStatus::Confirmed, payload),
         )
         .await
         .unwrap();
@@ -1384,7 +1497,7 @@ async fn a_saved_new_metric_can_confirm_a_qualitative_result_with_a_compatible_u
     let (_directory, state) = fixture().await;
     let user = add_user(&state, "alice").await;
     let report = archive(&state, "alice").await;
-    let request = |revision, row: Option<&Value>, status: &str, payload| ReviewRequest {
+    let request = |revision, row: Option<&Value>, status: ReviewStatus, payload| ReviewRequest {
         report_id: report.clone(),
         expected_revision: revision,
         context: None,
@@ -1392,7 +1505,7 @@ async fn a_saved_new_metric_can_confirm_a_qualitative_result_with_a_compatible_u
         observations: vec![ReviewItem {
             observation_id: row.map(|row| row["observation_id"].as_str().unwrap().to_owned()),
             expected_revision: row.and_then(|row| row["revision"].as_i64()),
-            status: status.into(),
+            status,
             payload,
         }],
     };
@@ -1409,7 +1522,10 @@ async fn a_saved_new_metric_can_confirm_a_qualitative_result_with_a_compatible_u
     }));
     let saved = state
         .database
-        .review(&user.user_id, request(1, None, "pending", payload.clone()))
+        .review(
+            &user.user_id,
+            request(1, None, ReviewStatus::Pending, payload.clone()),
+        )
         .await
         .unwrap();
     let wrong = &saved["observations"][0];
@@ -1425,7 +1541,7 @@ async fn a_saved_new_metric_can_confirm_a_qualitative_result_with_a_compatible_u
             .database
             .review(
                 &user.user_id,
-                request(2, Some(wrong), "confirmed", payload.clone())
+                request(2, Some(wrong), ReviewStatus::Confirmed, payload.clone())
             )
             .await
             .is_err()
@@ -1447,7 +1563,7 @@ async fn a_saved_new_metric_can_confirm_a_qualitative_result_with_a_compatible_u
         .database
         .review(
             &user.user_id,
-            request(2, Some(wrong), "pending", payload.clone()),
+            request(2, Some(wrong), ReviewStatus::Pending, payload.clone()),
         )
         .await
         .unwrap();
@@ -1459,7 +1575,7 @@ async fn a_saved_new_metric_can_confirm_a_qualitative_result_with_a_compatible_u
         .database
         .review(
             &user.user_id,
-            request(3, Some(pending), "confirmed", payload),
+            request(3, Some(pending), ReviewStatus::Confirmed, payload),
         )
         .await
         .unwrap();
@@ -1502,7 +1618,7 @@ async fn confirming_multiple_new_results_creates_each_distinct_saved_definition_
         ReviewItem {
             observation_id: None,
             expected_revision: None,
-            status: "pending".into(),
+            status: ReviewStatus::Pending,
             payload,
         }
     })
@@ -1527,7 +1643,7 @@ async fn confirming_multiple_new_results_creates_each_distinct_saved_definition_
         .map(|row| ReviewItem {
             observation_id: row["observation_id"].as_str().map(str::to_owned),
             expected_revision: row["revision"].as_i64(),
-            status: "confirmed".into(),
+            status: ReviewStatus::Confirmed,
             payload: serde_json::from_value(row["payload"].clone()).unwrap(),
         })
         .collect();
