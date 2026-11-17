@@ -74,6 +74,7 @@ companion object {
                 ""
             }
             "language.system" -> InterfaceLanguage.system()
+            "language.catalog" -> InterfaceLanguage.catalogJson(context)
             "language.apply" -> { InterfaceLanguage.apply(context, input); "" }
             "active" -> active.toString()
             "unlocked" -> context.getSystemService(android.os.UserManager::class.java).isUserUnlocked.toString()

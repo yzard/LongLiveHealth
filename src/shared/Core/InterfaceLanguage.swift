@@ -66,16 +66,20 @@ public nonisolated struct InterfaceText: ExpressibleByStringLiteral, Expressible
 public nonisolated enum InterfaceCatalog {
     private static let placeholders = try? NSRegularExpression(pattern: #"\{([0-9]+)\}"#)
     private static let chinese: [String: String] = {
+        #if os(Android)
+        // The Android package stores the shared catalog as an APK asset.
+        guard let catalog = try? AndroidSystem.invoke("language.catalog", "") else { return [:] }
+        let data = Data(catalog.utf8)
+        #else
         #if SWIFT_PACKAGE
         let bundle = Bundle.module
         #else
         let bundle = Bundle.main
         #endif
         guard let url = bundle.url(forResource: "InterfaceChinese", withExtension: "json"),
-              let data = try? Data(contentsOf: url),
-              let catalog = try? JSONDecoder().decode([String: String].self, from: data)
-        else { return [:] }
-        return catalog
+              let data = try? Data(contentsOf: url) else { return [:] }
+        #endif
+        return (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
     }()
 
     public static func label(_ key: String, language: InterfaceLanguage) -> String {

@@ -18,6 +18,6 @@ let package = Package(
         .target(name: "HealthApp", dependencies: [
             .product(name: "SkipFuseUI", package: "skip-fuse-ui"),
             .product(name: "Crypto", package: "swift-crypto")
-        ], resources: [.process("Resources"), .process("Core/Resources")], plugins: [.plugin(name: "skipstone", package: "skip")]),
+        ], exclude: ["Core/Resources"], resources: [.process("Resources")], plugins: [.plugin(name: "skipstone", package: "skip")]),
     ]
 )

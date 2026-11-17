@@ -11,6 +11,8 @@ internal object InterfaceLanguage {
         preferences(context).edit().putString("selection", value).apply()
     }
 
+    fun catalogJson(context: Context): String = catalog(context).toString()
+
     fun text(context: Context, english: String, values: Array<out Any>): String {
         val selection = preferences(context).getString("selection", null)
         val chinese = selection == "zh-Hans" || (selection == null && system().substringBefore('-').equals("zh", true))
