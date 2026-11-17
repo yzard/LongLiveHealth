@@ -138,6 +138,7 @@ impl ObservationPayload {
                 .strip_prefix("custom:")
                 .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok())
             && !lab_metric_metadata::is_clinical_id(metric)
+            && !lab_metric_metadata::is_reported_id(metric)
             && crate::laboratory::metric_definition(metric).is_none()
         {
             return Err(AppError::Invalid(
@@ -220,6 +221,30 @@ pub struct Observation {
 }
 
 pub(crate) const REPORTED_METRIC_PREFIX: &str = "reported:";
+
+pub(crate) fn reported_identity(
+    payload: &ObservationPayload,
+    source_name: Option<&str>,
+    report_id: &str,
+) -> String {
+    let (printed_name, code) = crate::laboratory::split_test_code(&payload.raw_name);
+    let identity = json!([
+        crate::sources::report_key(source_name, report_id),
+        printed_name.trim().to_lowercase(),
+        payload
+            .ocr_section_heading
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .to_lowercase(),
+        code,
+        payload.raw_unit.as_deref().unwrap_or("").trim()
+    ]);
+    format!(
+        "{REPORTED_METRIC_PREFIX}{}",
+        hex::encode(Sha256::digest(identity.to_string()))
+    )
+}
 
 impl Observation {
     pub(crate) fn browse_metric_id(&self) -> Option<&str> {
@@ -456,7 +481,7 @@ impl StoredObservation {
         native_links: &std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
         include_suggestions: bool,
     ) -> Result<Observation, AppError> {
-        let payload: ObservationPayload = serde_json::from_str(&self.payload_json)?;
+        let mut payload: ObservationPayload = serde_json::from_str(&self.payload_json)?;
         let context: Value = serde_json::from_str(&self.context_json)?;
         let code = test_code(&payload);
         let learned = code
@@ -470,6 +495,19 @@ impl StoredObservation {
                 .and_then(|ids| ids.first())
                 .map(String::as_str)
         });
+        let source_name = context["source_name"].as_str();
+        if self.status == "pending"
+            && payload.metric_id.is_none()
+            && payload.unmapped_choice.is_none()
+            && linked_candidate.is_none()
+            && native.is_none()
+            && !crate::laboratory::test_code_conflicts(&payload.raw_name)
+            && crate::laboratory::resolved_report_metric(&payload, source_name).is_none()
+            && let Some(id) = metadata.report_suggestion(&payload, source_name, &self.report_id)
+        {
+            payload.ocr_metric_candidate = Some(id.to_owned());
+            payload.ocr_new_metric = None;
+        }
         let new_metric = match &payload.unmapped_choice {
             Some(UnmappedChoice::New(metric)) => Some(metric),
             _ => None,
@@ -479,15 +517,23 @@ impl StoredObservation {
         let resolved = resolve_report_mapping(
             &payload,
             &self.status,
-            context["source_name"].as_str(),
+            source_name,
             custom_metrics,
             metadata,
         );
+        let reported_metric_id = (self.status == "confirmed"
+            && resolved.is_none()
+            && !crate::laboratory::is_administrative_name(&payload.raw_name))
+        .then(|| reported_identity(&payload, source_name, &self.report_id));
+        let named_id = reported_metric_id
+            .as_ref()
+            .filter(|id| metadata.named_reports.contains_key(*id));
         let resolved_metric_id = resolved
             .filter(|id| {
-                !id.starts_with("custom:")
+                (!id.starts_with("custom:") && !lab_metric_metadata::is_reported_id(id))
                     || custom_metrics.iter().any(|metric| metric.metric_id == *id)
             })
+            .or(named_id.map(String::as_str))
             .map(str::to_owned);
         let custom = custom_metrics
             .iter()
@@ -580,31 +626,7 @@ impl StoredObservation {
                 .or_else(|| custom.map(|metric| metric.name.as_str()))
                 .unwrap_or_else(|| crate::laboratory::display_name(printed_name, Some(id)))
         });
-        // Keep unresolved measurements under their reported identity. Only
-        // records with the same source, label, section, code, and unit share it.
-        let reported_metric_id = (self.status == "confirmed"
-            && resolved_metric_id.is_none()
-            && !crate::laboratory::is_administrative_name(&payload.raw_name))
-        .then(|| {
-            let source =
-                crate::sources::report_key(context["source_name"].as_str(), &self.report_id);
-            let identity = json!([
-                source,
-                printed_name.trim().to_lowercase(),
-                payload
-                    .ocr_section_heading
-                    .as_deref()
-                    .unwrap_or("")
-                    .trim()
-                    .to_lowercase(),
-                lab_test_code,
-                payload.raw_unit.as_deref().unwrap_or("").trim()
-            ]);
-            format!(
-                "{REPORTED_METRIC_PREFIX}{}",
-                hex::encode(Sha256::digest(identity.to_string()))
-            )
-        });
+        let reported_metric_id = reported_metric_id.filter(|_| resolved_metric_id.is_none());
         Ok(Observation {
             display_name: display_name.to_owned(),
             lab_test_code: lab_test_code.map(str::to_owned),
@@ -1256,6 +1278,7 @@ impl Database {
             .fetch_all(&mut *transaction)
             .await?;
         let mut metadata = Metadata::load(&mut transaction, user_id).await?;
+        custom_metrics.extend(metadata.named_report_metrics());
         let mut created_metrics = Vec::new();
         let mut created_definitions = std::collections::BTreeMap::<_, String>::new();
         let original_context: Value = serde_json::from_str(&report.context_json)?;
@@ -1294,11 +1317,10 @@ impl Database {
             HashSet::new()
         };
         for mut observation in request.observations {
-            if let Some(id) = observation
-                .payload
-                .metric_id
-                .as_deref()
-                .filter(|id| id.starts_with("custom:"))
+            if let Some(id) =
+                observation.payload.metric_id.as_deref().filter(|id| {
+                    id.starts_with("custom:") || lab_metric_metadata::is_reported_id(id)
+                })
                 && !custom_metrics.iter().any(|metric| metric.metric_id == id)
             {
                 return Err(AppError::Invalid(
@@ -1814,6 +1836,7 @@ impl Database {
         include_suggestions: bool,
         connection: Option<&mut SqliteConnection>,
     ) -> Result<Vec<Observation>, AppError> {
+        custom_metrics.extend(metadata.named_report_metrics());
         let needs_review_catalog = |payload: &ObservationPayload| {
             payload
                 .metric_id

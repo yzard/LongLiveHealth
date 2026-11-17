@@ -103,6 +103,7 @@ fn page_preparation_is_bounded_inline_and_preserves_untrusted_text_evidence() {
     let input_catalog = ocr::MetricCatalog {
         metrics: vec![owned],
         browse_metric_index: Default::default(),
+        printed_aliases: Default::default(),
         loinc_codes: [(
             "custom:owned".into(),
             ["1234-5".into()].into_iter().collect(),

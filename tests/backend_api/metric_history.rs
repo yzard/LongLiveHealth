@@ -21,6 +21,237 @@ async fn read(state: &longlivehealth::app::AppState, user: &str) -> Value {
 }
 
 #[tokio::test]
+async fn renamed_report_metrics_are_suggested_by_loinc_or_original_identity_and_keep_history() {
+    let (directory, mut state) = fixture().await;
+    let alice = add_user(&state, "alice").await;
+    let token = crate::token(&state, "alice").await;
+    let app = longlivehealth::app::create_application(state.clone());
+    let first = archive(&state, "alice").await;
+    let second = archive(&state, "alice").await;
+    let row = |name: &str, year: &str, unit: Option<&str>, status| {
+        let mut payload = observation_payload();
+        payload.raw_name = name.into();
+        payload.raw_result = "6.5".into();
+        payload.raw_unit = unit.map(str::to_owned);
+        payload.sampled_at = Some(format!("{year}-10-20"));
+        payload.metric_id = None;
+        ReviewItem {
+            observation_id: None,
+            expected_revision: None,
+            status,
+            payload,
+        }
+    };
+    let request = |report_id: &str, observations| ReviewRequest {
+        report_id: report_id.into(),
+        expected_revision: 1,
+        context: Some(serde_json::from_value(json!({"source_name":"Fixture Laboratory"})).unwrap()),
+        observations,
+        new_metric: None,
+    };
+    state
+        .database
+        .review(
+            &alice.user_id,
+            request(
+                &first,
+                vec![
+                    row("pH (50560-2)", "2018", None, ReviewStatus::Confirmed),
+                    row(
+                        "Synthetic particle ratio",
+                        "2018",
+                        Some("U/L"),
+                        ReviewStatus::Confirmed,
+                    ),
+                ],
+            ),
+        )
+        .await
+        .unwrap();
+    let catalog = longlivehealth::metric_history::browse(&state.database, &alice.user_id)
+        .await
+        .unwrap();
+    let metrics = catalog["metrics"].as_array().unwrap();
+    let rename = |printed, label| {
+        let id = metrics
+            .iter()
+            .find(|entry| entry["name"] == printed)
+            .unwrap()["metric_id"]
+            .clone();
+        (id, label)
+    };
+    let aliases = [
+        rename("pH", "pH of Urine"),
+        rename("Synthetic particle ratio", "My particle ratio"),
+    ];
+    for (id, name) in &aliases {
+        assert!(id.as_str().unwrap().starts_with("reported:"));
+        let (status, _) = crate::request(
+            &app,
+            "/api/v1/metrics/rename",
+            Some(&token),
+            json!({"metric_id":id,"name":name}),
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+    }
+    let db = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(directory.path().join("database.sqlite")),
+    )
+    .await
+    .unwrap();
+    sqlx::query("DELETE FROM named_report_metrics")
+        .execute(&db)
+        .await
+        .unwrap();
+    db.close().await;
+    let db = longlivehealth::database::Database::open(directory.path())
+        .await
+        .unwrap();
+    let second_report = db
+        .review(
+            &alice.user_id,
+            request(
+                &second,
+                vec![
+                    row("Urine pH (50560-2)", "2019", None, ReviewStatus::Pending),
+                    row(
+                        "Synthetic particle ratio",
+                        "2019",
+                        Some("U/L"),
+                        ReviewStatus::Pending,
+                    ),
+                    row("pH (50560-2)", "2019", Some("mg/dL"), ReviewStatus::Pending),
+                ],
+            ),
+        )
+        .await
+        .unwrap();
+    let rows = second_report["observations"].as_array().unwrap();
+    let found = |printed: &str| {
+        rows.iter()
+            .find(|row| row["payload"]["raw_name"] == printed)
+            .unwrap()
+    };
+    let mapping = |result: &Value, alias: &(Value, &str)| {
+        assert_eq!(result["payload"]["ocr_metric_candidate"], alias.0);
+        assert_eq!(result["ocr_suggestion_name"], alias.1);
+        assert_eq!(result["metric_suggestions"][0]["metric_id"], alias.0);
+        assert!(result["payload"]["metric_id"].is_null());
+    };
+    let urine = found("Urine pH (50560-2)");
+    mapping(urine, &aliases[0]);
+    mapping(found("Synthetic particle ratio"), &aliases[1]);
+    let mismatch = found("pH (50560-2)");
+    mapping(mismatch, &aliases[0]);
+    assert!(
+        mismatch["browse_issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["code"] == "unsupported_unit")
+    );
+    let confirmed = db
+        .review(
+            &alice.user_id,
+            ReviewRequest {
+                new_metric: None,
+                report_id: second,
+                expected_revision: second_report["report"]["revision"].as_i64().unwrap(),
+                context: None,
+                observations: vec![ReviewItem {
+                    observation_id: urine["observation_id"].as_str().map(str::to_owned),
+                    expected_revision: urine["revision"].as_i64(),
+                    status: ReviewStatus::Confirmed,
+                    payload: serde_json::from_value({
+                        let mut payload = urine["payload"].clone();
+                        payload["metric_id"] = aliases[0].0.clone();
+                        payload
+                    })
+                    .unwrap(),
+                }],
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        confirmed["observations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["status"] == "confirmed" && row["resolved_metric_id"] == aliases[0].0)
+    );
+    let series = history(
+        &db,
+        &alice.user_id,
+        HistoryRequest {
+            metric_id: aliases[0].0.as_str().unwrap().into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(series["metric"]["name"], aliases[0].1);
+    assert_eq!(series["points"].as_array().unwrap().len(), 2);
+    assert!(
+        series["points"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|point| point["unit"] == "1")
+    );
+    let fresh_report = archive(&state, "alice").await;
+    while let Some(job) = db.claim_job(2_000_000_000, 600, 3).await.unwrap() {
+        db.finish_job(&job, 2_000_000_001, None).await.unwrap();
+    }
+    let ids = aliases.each_ref().map(|(id, _)| id.clone());
+    let (sent, received) = tokio::sync::oneshot::channel();
+    let sent = std::sync::Arc::new(std::sync::Mutex::new(Some(sent)));
+    let provider = axum::Router::new().route(
+        "/v1/chat/completions",
+        axum::routing::post(move |axum::Json(request): axum::Json<Value>| {
+            let sent = sent.clone();
+            async move {
+                let evidence: Value = serde_json::from_str(
+                    request["messages"][1]["content"][0]["text"]
+                        .as_str()
+                        .unwrap(),
+                )
+                .unwrap();
+                sent.lock().unwrap().take().unwrap().send(evidence).unwrap();
+                axum::Json(super::provider::completion(
+                    json!({"observations":[],"warnings":[]}),
+                ))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    std::sync::Arc::make_mut(&mut state.config).llm.base_url =
+        format!("http://{}/v1", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, provider).await.unwrap() });
+    db.rescan_report(&alice.user_id, &fresh_report, 1)
+        .await
+        .unwrap();
+    assert!(longlivehealth::worker::extract_next(&state).await.unwrap());
+    let evidence = received.await.unwrap();
+    let entries = evidence["laboratory_metric_catalog"].as_array().unwrap();
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry == &json!([ids[0], "pH of Urine", "1", ["pH"], ["50560-2"]]))
+    );
+    assert!(entries.iter().any(|entry| entry
+        == &json!([
+            ids[1],
+            "My particle ratio",
+            "U/L",
+            ["Synthetic particle ratio"],
+            []
+        ])));
+    server.abort();
+}
+
+#[tokio::test]
 async fn conflicting_history_units_disable_the_chart_and_list_all_reported_units() {
     let (_directory, state) = fixture().await;
     let alice = add_user(&state, "alice").await;

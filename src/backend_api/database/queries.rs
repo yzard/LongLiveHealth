@@ -56,6 +56,31 @@ pub const LAB_METRIC_ALIASES: &str =
 pub const SET_LAB_METRIC_ALIAS: &str = "INSERT INTO lab_metric_aliases (user_id, metric_id, display_name) VALUES (?,?,?) ON CONFLICT (user_id, metric_id) DO UPDATE SET display_name = excluded.display_name";
 pub const LAB_METRIC_LOINC_LINKS: &str =
     "SELECT loinc_code, metric_id FROM lab_metric_loinc_links WHERE user_id = ?";
+pub const NAMED_REPORT_METRICS: &str = r#"
+SELECT metric_id, printed_name, standard_unit, loinc_code
+  FROM named_report_metrics
+ WHERE user_id = ?
+"#;
+pub const INSERT_NAMED_REPORT_METRIC: &str = r#"
+INSERT INTO named_report_metrics (user_id, metric_id, printed_name, standard_unit, loinc_code)
+VALUES (?, ?, ?, ?, ?) ON CONFLICT (user_id, metric_id) DO NOTHING
+"#;
+pub const UNREGISTERED_REPORT_ALIAS_OWNERS: &str = r#"
+SELECT DISTINCT a.user_id
+  FROM lab_metric_aliases a
+ WHERE a.metric_id GLOB 'reported:*'
+   AND NOT EXISTS (
+       SELECT 1 FROM named_report_metrics n WHERE n.user_id = a.user_id AND n.metric_id = a.metric_id
+   )
+"#;
+pub const NAMED_REPORT_METRIC_ORIGINS: &str = r#"
+SELECT o.report_id, o.payload_json, r.context_json
+  FROM review_observations o
+  JOIN reports r ON r.user_id = o.user_id AND r.report_id = o.report_id
+ WHERE o.user_id = ? AND o.status = 'confirmed'
+   AND json_extract(o.payload_json, '$.metric_id') IS NULL
+ ORDER BY r.created_at, o.observation_id
+"#;
 pub const LINK_LAB_METRIC_LOINC: &str =
     "INSERT INTO lab_metric_loinc_links (user_id, loinc_code, metric_id) VALUES (?,?,?)";
 pub const EXPORT_TABLES: &[(&str, &str)] = &[

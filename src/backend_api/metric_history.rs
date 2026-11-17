@@ -34,8 +34,13 @@ pub async fn history(
         None
     };
     let reported = request.metric_id.starts_with(REPORTED_METRIC_PREFIX);
+    let metadata = database.lab_metric_metadata(user_id).await?;
     let definition = if reported {
-        None
+        metadata
+            .named_report_metrics()
+            .find(|metric| metric.metric_id == request.metric_id)
+            .map(serde_json::to_value)
+            .transpose()?
     } else if let Some(group) = &clinical {
         Some(group.definition.clone())
     } else if request.metric_id.starts_with("custom:") {
@@ -71,7 +76,6 @@ pub async fn history(
                 .cloned()
         })
         .ok_or(AppError::NotFound)?;
-    let metadata = database.lab_metric_metadata(user_id).await?;
     metadata.apply_name(&mut definition);
     let mut points = report_history["points"]
         .as_array()
@@ -111,7 +115,10 @@ pub async fn history(
         point["source_name"] = json!(source_name);
         point["filename"] = json!(filename);
     }
-    if request.metric_id.starts_with("custom:") || clinical.is_some() {
+    if request.metric_id.starts_with("custom:")
+        || clinical.is_some()
+        || metadata.named_reports.contains_key(&request.metric_id)
+    {
         metadata.apply_loinc(
             &mut definition,
             clinical.as_ref().map(|group| &group.loinc_codes),
@@ -444,7 +451,8 @@ pub async fn browse(database: &Database, user_id: &str) -> Result<Value, AppErro
     let records = load_health(&database.pool, user_id, "").await?;
     let metadata = database.lab_metric_metadata(user_id).await?;
     let reports = database.confirmed(user_id).await?;
-    let custom_metrics = database.custom_metrics(user_id).await?;
+    let mut custom_metrics = database.custom_metrics(user_id).await?;
+    custom_metrics.extend(metadata.named_report_metrics());
     database
         .cpu
         .run(move || {

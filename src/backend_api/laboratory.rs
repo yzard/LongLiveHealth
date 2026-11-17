@@ -125,6 +125,7 @@ pub(crate) type OcrMetricEntry<'a> = (&'a str, &'a str, &'a str, Vec<&'a str>, V
 pub(crate) fn ocr_metric_catalog<'a>(
     account_metrics: &'a [CustomMetric],
     account_codes: &'a std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+    printed_aliases: &'a std::collections::BTreeMap<String, String>,
 ) -> Vec<OcrMetricEntry<'a>> {
     let mut catalog: std::collections::BTreeMap<_, _> = DEFINITIONS
         .values()
@@ -136,10 +137,11 @@ pub(crate) fn ocr_metric_catalog<'a>(
     catalog
         .into_iter()
         .map(|(id, (name, unit))| {
-            let aliases = metric_aliases(id)
-                .collect::<std::collections::BTreeSet<_>>()
-                .into_iter()
-                .collect();
+            let mut aliases: std::collections::BTreeSet<&'a str> =
+                metric_aliases(id).map(|name| -> &'a str { name }).collect();
+            if let Some(printed_name) = printed_aliases.get(id) {
+                aliases.insert(printed_name.as_str());
+            }
             let codes = account_codes
                 .get(id)
                 .into_iter()
@@ -153,7 +155,7 @@ pub(crate) fn ocr_metric_catalog<'a>(
                 .collect::<std::collections::BTreeSet<_>>()
                 .into_iter()
                 .collect();
-            (id, name, unit, aliases, codes)
+            (id, name, unit, aliases.into_iter().collect(), codes)
         })
         .collect()
 }

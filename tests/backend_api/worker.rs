@@ -605,17 +605,21 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
         axum::routing::post(move |axum::Json(request): axum::Json<serde_json::Value>| {
             let alice_metric = captured_id.clone();
             let first = calls.fetch_add(1, Ordering::SeqCst) == 0;
-            let (name, codes) = if first {
-                ("Direct bilirubin", vec!["1968-7"])
+            let (name, aliases, codes) = if first {
+                ("Direct bilirubin", vec![], vec!["1968-7"])
             } else {
-                ("Renamed direct bilirubin", vec!["1968-7", "35191-6"])
+                (
+                    "Renamed direct bilirubin",
+                    vec!["Direct bilirubin"],
+                    vec!["1968-7", "35191-6"],
+                )
             };
             async move {
                 let input = &request["messages"][1]["content"];
                 let evidence: serde_json::Value =
                     serde_json::from_str(input[0]["text"].as_str().unwrap()).unwrap();
                 let catalog = evidence["laboratory_metric_catalog"].as_array().unwrap();
-                assert!(catalog.contains(&json!([alice_metric, name, "mg/L", [], codes])));
+                assert!(catalog.contains(&json!([alice_metric, name, "mg/L", aliases, codes])));
                 assert!(
                     !catalog
                         .iter()

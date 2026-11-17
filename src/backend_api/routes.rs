@@ -442,6 +442,11 @@ async fn list_metrics(
         }
     }
     let metadata = database.lab_metric_metadata(user).await?;
+    for metric in metadata.named_report_metrics() {
+        let mut definition = serde_json::to_value(metric)?;
+        metadata.apply_loinc(&mut definition, None);
+        definitions.push(definition);
+    }
     for definition in &mut definitions {
         metadata.apply_name(definition);
     }

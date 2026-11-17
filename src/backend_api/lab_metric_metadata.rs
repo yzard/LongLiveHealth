@@ -11,10 +11,24 @@ use serde_json::{Value, json};
 use sqlx::{Sqlite, SqliteConnection, Transaction};
 use std::collections::{BTreeMap, BTreeSet};
 
+#[derive(sqlx::FromRow)]
+pub(crate) struct NamedReportMetric {
+    metric_id: String,
+    pub printed_name: String,
+    standard_unit: String,
+    pub loinc_code: Option<String>,
+}
+
+pub(crate) fn is_reported_id(id: &str) -> bool {
+    id.strip_prefix(crate::reports::REPORTED_METRIC_PREFIX)
+        .is_some_and(|key| key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
 #[derive(Default)]
 pub(crate) struct Metadata {
     pub aliases: BTreeMap<String, String>,
     pub links: BTreeMap<String, String>,
+    pub named_reports: BTreeMap<String, NamedReportMetric>,
 }
 
 impl Metadata {
@@ -32,14 +46,55 @@ impl Metadata {
                 .await?
                 .into_iter()
                 .collect(),
+            named_reports: sqlx::query_as::<_, NamedReportMetric>(queries::NAMED_REPORT_METRICS)
+                .bind(user_id)
+                .fetch_all(&mut *connection)
+                .await?
+                .into_iter()
+                .map(|metric| (metric.metric_id.clone(), metric))
+                .collect(),
         })
+    }
+
+    pub fn named_report_metrics(&self) -> impl Iterator<Item = CustomMetric> + '_ {
+        self.named_reports.iter().map(|(id, metric)| CustomMetric {
+            metric_id: id.clone(),
+            name: self.aliases[id].clone(),
+            standard_unit: metric.standard_unit.clone(),
+        })
+    }
+
+    pub fn report_suggestion<'a>(
+        &'a self,
+        payload: &ObservationPayload,
+        source: Option<&str>,
+        report_id: &str,
+    ) -> Option<&'a str> {
+        let code = test_code(payload);
+        if code.is_some_and(|code| loinc_metric(code).is_some() || self.links.contains_key(code)) {
+            return None;
+        }
+        let identity = crate::reports::reported_identity(payload, source, report_id);
+        if let Some((key, _)) = self.named_reports.get_key_value(&identity) {
+            return Some(key);
+        }
+        let code = code?;
+        let mut candidates = self
+            .named_reports
+            .iter()
+            .filter(|(_, metric)| metric.loinc_code.as_deref() == Some(code));
+        let (id, _) = candidates.next()?;
+        candidates.next().is_none().then_some(id)
     }
 
     pub fn apply_name(&self, metric: &mut Value) {
         if let Some(id) = metric["metric_id"].as_str()
             && let Some(name) = self.aliases.get(id)
         {
-            metric["original_name"] = metric["name"].clone();
+            metric["original_name"] = self
+                .named_reports
+                .get(id)
+                .map_or_else(|| metric["name"].clone(), |named| json!(named.printed_name));
             metric["name"] = json!(name);
         }
     }
@@ -55,6 +110,11 @@ impl Metadata {
                 (metric == id && loinc_metric(code).is_none()).then_some(code.as_str())
             }))
             .chain(native_codes.into_iter().flatten().map(String::as_str))
+            .chain(
+                self.named_reports
+                    .get(id)
+                    .and_then(|metric| metric.loinc_code.as_deref()),
+            )
             .collect();
         metric["loinc"] = json!(
             codes
@@ -160,6 +220,83 @@ pub(crate) async fn link_confirmed(
     Ok(())
 }
 
+async fn register_named_report_metric(
+    connection: &mut SqliteConnection,
+    user: &str,
+    definition: &Value,
+) -> Result<(), AppError> {
+    let id = definition["metric_id"].as_str().ok_or(AppError::Internal)?;
+    let name = definition["original_name"]
+        .as_str()
+        .or_else(|| definition["name"].as_str())
+        .ok_or(AppError::Internal)?;
+    let unit = definition["standard_unit"]
+        .as_str()
+        .map(crate::laboratory::custom_unit)
+        .filter(|unit| !unit.is_empty())
+        .unwrap_or("1");
+    let code = definition["loinc"][0]["code"]
+        .as_str()
+        .filter(|code| crate::loinc::long_common_name(code).is_some());
+    sqlx::query(queries::INSERT_NAMED_REPORT_METRIC)
+        .bind(user)
+        .bind(id)
+        .bind(name)
+        .bind(unit)
+        .bind(code)
+        .execute(connection)
+        .await?;
+    Ok(())
+}
+
+pub(crate) async fn register_existing_report_aliases(database: &Database) -> Result<(), AppError> {
+    let owners: Vec<String> = sqlx::query_scalar(queries::UNREGISTERED_REPORT_ALIAS_OWNERS)
+        .fetch_all(&database.pool)
+        .await?;
+    for user in owners {
+        let mut transaction = database.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let metadata = Metadata::load(&mut transaction, &user).await?;
+        let mut remaining: BTreeSet<_> = metadata
+            .aliases
+            .keys()
+            .filter(|id| is_reported_id(id) && !metadata.named_reports.contains_key(*id))
+            .collect();
+        let originals: Vec<(String, String, String)> =
+            sqlx::query_as(queries::NAMED_REPORT_METRIC_ORIGINS)
+                .bind(&user)
+                .fetch_all(&mut *transaction)
+                .await?;
+        for (report_id, payload, context) in originals {
+            let payload: ObservationPayload = serde_json::from_str(&payload)?;
+            let context: Value = serde_json::from_str(&context)?;
+            let id = crate::reports::reported_identity(
+                &payload,
+                context["source_name"].as_str(),
+                &report_id,
+            );
+            if !remaining.remove(&id) {
+                continue;
+            }
+            register_named_report_metric(
+                &mut transaction,
+                &user,
+                &json!({
+                    "metric_id": id,
+                    "name": split_test_code(&payload.raw_name).0,
+                    "standard_unit": payload.raw_unit,
+                    "loinc": [{"code": test_code(&payload)}],
+                }),
+            )
+            .await?;
+            if remaining.is_empty() {
+                break;
+            }
+        }
+        transaction.commit().await?;
+    }
+    Ok(())
+}
+
 impl Database {
     pub(crate) async fn lab_metric_metadata(&self, user: &str) -> Result<Metadata, AppError> {
         Metadata::load(&mut *self.pool.acquire().await?, user).await
@@ -185,14 +322,12 @@ pub(crate) async fn rename(
         ));
     }
     let catalog = metric_history::browse(database, user).await?;
-    if !catalog["metrics"]
+    let definition = catalog["metrics"]
         .as_array()
         .ok_or(AppError::Internal)?
         .iter()
-        .any(|entry| entry["metric_id"] == request.metric_id)
-    {
-        return Err(AppError::NotFound);
-    }
+        .find(|entry| entry["metric_id"] == request.metric_id)
+        .ok_or(AppError::NotFound)?;
     let mut transaction = database.pool.begin_with("BEGIN IMMEDIATE").await?;
     sqlx::query(queries::SET_LAB_METRIC_ALIAS)
         .bind(user)
@@ -200,6 +335,9 @@ pub(crate) async fn rename(
         .bind(name)
         .execute(&mut *transaction)
         .await?;
+    if is_reported_id(&request.metric_id) {
+        register_named_report_metric(&mut transaction, user, definition).await?;
+    }
     sqlx::query(queries::INVALIDATE_EXPORTS)
         .bind(user)
         .execute(&mut *transaction)

@@ -108,6 +108,7 @@ impl Database {
             temporary_files: crate::temporary::TemporaryFiles::new(directory.join("tmp")),
         };
         database.reconcile_report_drafts().await?;
+        crate::lab_metric_metadata::register_existing_report_aliases(&database).await?;
         Ok(database)
     }
 

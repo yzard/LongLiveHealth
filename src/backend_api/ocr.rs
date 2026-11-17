@@ -97,6 +97,7 @@ pub struct MetricCatalog {
     pub metrics: Vec<CustomMetric>,
     pub loinc_codes: BTreeMap<String, BTreeSet<String>>,
     pub browse_metric_index: BTreeMap<String, BTreeSet<String>>,
+    pub printed_aliases: BTreeMap<String, String>,
 }
 
 pub(crate) async fn database_metrics(
@@ -124,13 +125,31 @@ pub(crate) async fn database_metrics(
         );
         loinc_codes.entry(id).or_default().extend(group.loinc_codes);
     }
+    for metric in metadata.named_report_metrics() {
+        metrics.insert(metric.metric_id.clone(), metric);
+    }
+    let mut printed_aliases: BTreeMap<_, _> = metadata
+        .named_reports
+        .iter()
+        .map(|(id, metric)| (id.clone(), metric.printed_name.clone()))
+        .collect();
+    for (id, metric) in &metadata.named_reports {
+        loinc_codes
+            .entry(id.clone())
+            .or_default()
+            .extend(metric.loinc_code.iter().cloned());
+    }
     for (id, name) in metadata.aliases {
         if let Some(entry) = metrics.get_mut(&id) {
+            printed_aliases
+                .entry(id)
+                .or_insert_with(|| entry.name.clone());
             entry.name = name;
         } else if let Some(metric) = crate::laboratory::metrics()
             .into_iter()
             .find(|metric| metric.metric_id == id)
         {
+            printed_aliases.insert(id.clone(), metric.name.into());
             metrics.insert(
                 id.clone(),
                 CustomMetric {
@@ -179,6 +198,7 @@ pub(crate) async fn database_metrics(
         metrics: metrics.into_values().collect(),
         loinc_codes,
         browse_metric_index,
+        printed_aliases,
     }))
 }
 
@@ -289,7 +309,7 @@ pub fn prepare_messages(
         "report_collection_date": report_collection_date,
         "printed_loinc_names": printed_loinc_names,
         "source_qualified_aliases": crate::laboratory_names::SOURCE_QUALIFIED_ALIASES,
-        "laboratory_metric_catalog": crate::laboratory::ocr_metric_catalog(&catalog.metrics, &catalog.loinc_codes),
+        "laboratory_metric_catalog": crate::laboratory::ocr_metric_catalog(&catalog.metrics, &catalog.loinc_codes, &catalog.printed_aliases),
         "browse_metric_index": catalog.browse_metric_index,
     });
     Ok(json!([
@@ -307,7 +327,7 @@ pub fn wrap_completion(
     let parsed = serde_json::from_str::<serde_json::Value>(&reply.response_body).ok();
     let choice = parsed.as_ref().and_then(|v| v["choices"].get(0));
     let content = choice.and_then(|v| v["message"]["content"].as_str());
-    let mut envelope = json!({"model":model,"engine":"strata","prompt_version":"laboratory-page-v19","content":content,"raw_response_body":reply.response_body});
+    let mut envelope = json!({"model":model,"engine":"strata","prompt_version":"laboratory-page-v20","content":content,"raw_response_body":reply.response_body});
     let mut status = reply.status_code;
     if (200..300).contains(&status) {
         let rows = content.and_then(ModelPage::parse);
