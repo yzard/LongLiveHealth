@@ -14,28 +14,28 @@ struct SpecialtyRecordView: View {
     @State var failure: String?
     var body: some View {
         List {
-            if let failure { Text(failure).foregroundStyle(.secondary) }
+            if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
             if result["record_type"] == .string("electrocardiogram") {
                 Section {
                     ECGWaveformView(trace: ecgTrace).frame(height: 240)
-                    if loading { ProgressView("Loading ECG waveform") }
+                    if loading { ProgressView(uiText("Loading ECG waveform")) }
                 }
-                Section("Record Details") {
-                    Text("Collected: \(HistoricalValue.date(timestamp: result["start_at"].numberValue, text: ""))")
-                    Text("Classification: \(ECGRecordInfo.classification(result["source_classification"])) · Symptoms: \(ECGRecordInfo.symptoms(result["details"]["ecg_symptoms_status"]))")
+                Section(uiText("Record Details")) {
+                    Text(uiText("Collected: \(HistoricalValue.date(timestamp: result["start_at"].numberValue, text: ""))"))
+                    Text(uiText("Classification: \(ECGRecordInfo.classification(result["source_classification"])) · Symptoms: \(ECGRecordInfo.symptoms(result["details"]["ecg_symptoms_status"]))"))
                     HStack {
-                        if let frequency = result["sampling_frequency_hz"].numberValue { Text("Sampling: \(frequency.formatted()) Hz") }
-                        if let rate = result["details"]["average_heart_rate"].numberValue { Text("· Heart rate: \(rate.formatted()) BPM") }
+                        if let frequency = result["sampling_frequency_hz"].numberValue { Text(uiText("Sampling: \(frequency.formatted()) Hz")) }
+                        if let rate = result["details"]["average_heart_rate"].numberValue { Text(uiText("· Heart rate: \(rate.formatted()) BPM")) }
                     }
-                    Text("Source: \(model.sourceLabel(SourceNames.key(reference)))").foregroundStyle(.secondary)
+                    Text(uiText("Source: \(model.sourceLabel(SourceNames.key(reference)))")).foregroundStyle(.secondary)
                 }
             } else {
-                Section("Source") {
+                Section(uiText("Source")) {
                     Text(model.sourceLabel(SourceNames.key(reference)))
                     if let at = result["start_at"].numberValue { Text(Date(timeIntervalSince1970: at).formatted()).font(.caption) }
                 }
                 if !result["details"].objectValue.isEmpty {
-                    Section("Recorded details") {
+                    Section(uiText("Recorded details")) {
                         ForEach(result["details"].objectValue.keys.sorted(), id: \.self) { key in
                             VStack(alignment: .leading) {
                                 Text(HealthSyncProgress.name(key)).font(.caption).foregroundStyle(.secondary)
@@ -46,31 +46,31 @@ struct SpecialtyRecordView: View {
                 }
             }
             if result["record_type"] == .string("workout_route") {
-                Section("Recorded route") {
+                Section(uiText("Recorded route")) {
                     RouteTraceView(samples: result["samples"].arrayValue).frame(height: 260)
-                    Text("Positions \(offset)–\(offset + result["samples"].arrayValue.count) of \(Int(result["sample_count"].numberValue ?? 0))").font(.caption)
-                    if offset > 0 { Button("Previous positions") { offset = max(0, offset - 5000) } }
-                    if let next = result["next_sample_offset"].numberValue { Button("Next positions") { offset = Int(next) } }
+                    Text(uiText("Positions \(offset)–\(offset + result["samples"].arrayValue.count) of \(Int(result["sample_count"].numberValue ?? 0))")).font(.caption)
+                    if offset > 0 { Button(uiText("Previous positions")) { offset = max(0, offset - 5000) } }
+                    if let next = result["next_sample_offset"].numberValue { Button(uiText("Next positions")) { offset = Int(next) } }
                 }
             }
             if result["fhir"]["resource"] != .null {
-                Section("Clinical resource") {
+                Section(uiText("Clinical resource")) {
                     Text(result["fhir"]["resource"]["resourceType"].stringValue).font(.headline)
                     ForEach(result["fhir"]["resource"].objectValue.keys.sorted(), id: \.self) { key in
                         DisclosureGroup(key) { CopyableText(result["fhir"]["resource"][key].formattedJSON).font(.system(.caption, design: .monospaced)) }
                     }
-                    ShareLink("Share source resource", item: result["fhir"]["resource"].formattedJSON)
+                    ShareLink(uiText("Share source resource"), item: result["fhir"]["resource"].formattedJSON)
                 }
             }
             ForEach(Array(result["related"].arrayValue.enumerated()), id: \.offset) { _, relation in
-                Section("Related source measurement") {
-                    Text(relation["state"].stringValue)
+                Section(uiText("Related source measurement")) {
+                    Text(uiState(relation["state"].stringValue))
                     ForEach(Array(relation["records"].arrayValue.enumerated()), id: \.offset) { _, record in
                         Text(record["record_type"].stringValue + " · " + HistoricalValue.quantity(record["value"], unit: HistoricalValue.displayUnit(record["unit"].stringValue, kind: record["record_type"].stringValue)))
                     }
                 }
             }
-            InfoHelp(title: "Source record", message: result["notes"].arrayValue.map(\.stringValue).joined(separator: "\n"))
+            InfoHelp(title: uiText("Source record"), message: result["notes"].arrayValue.map(\.stringValue).joined(separator: "\n"))
         }.mobileNavigationTitle(title).initialTask(id: offset) { await load() }.refreshable { await load() }
     }
     private func load() async {

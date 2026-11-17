@@ -6,8 +6,8 @@ struct MetricAboutView: View {
     let name: String
 
     var body: some View {
-        Text(MetricEducation.explanation(id: id, name: name)
-             ?? "A description for this specific test is not available yet. Its full name and original report identify what was measured.")
+        Text(uiLabel(MetricEducation.explanation(id: id, name: name)
+             ?? "A description for this specific test is not available yet. Its full name and original report identify what was measured."))
             .accessibilityIdentifier("metric-explanation")
     }
 }

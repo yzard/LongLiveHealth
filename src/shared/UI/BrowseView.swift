@@ -19,7 +19,7 @@ struct BrowseView: View {
         let words = search.split(whereSeparator: { $0.isWhitespace }).map(String.init)
         return entries.filter { entry in
             let category = categories.first { $0.id == entry.categoryID }?.title ?? ""
-            let terms = [metricTitle(entry), entry.title, entry.kind, category] + entry.aliases
+            let terms = [metricTitle(entry), entry.title, entry.kind, category, uiLabel(category)] + entry.aliases
             return words.allSatisfy { word in terms.contains { $0.localizedStandardContains(word) } }
         }
     }
@@ -30,7 +30,7 @@ struct BrowseView: View {
             NavigationStack { metricList }
         } detail: {
             NavigationStack(path: $detailPath) {
-                EmptyContent(title: "Choose a metric", symbol: "chart.xyaxis.line")
+                EmptyContent(title: uiText("Choose a metric"), symbol: "chart.xyaxis.line")
                     .navigationDestination(for: BrowseChoice.self) { choice in
                         destination(choice)
                     }
@@ -43,14 +43,14 @@ struct BrowseView: View {
     private var metricList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                if loading { ProgressView("Loading metrics") }
-                if let failure { Text(failure).foregroundStyle(.secondary) }
+                if loading { ProgressView(uiText("Loading metrics")) }
+                if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
                 if search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     ForEach(Array(Set(categories.map(\.section))).sorted(), id: \.self) { section in
                         categoryGrid(title: section)
                     }
                     if entries.isEmpty && !loading && failure == nil {
-                        EmptyContent(title: "No health data", symbol: "heart")
+                        EmptyContent(title: uiText("No health data"), symbol: "heart")
                     }
                 } else {
                     VStack(alignment: .leading, spacing: 16) {
@@ -58,12 +58,12 @@ struct BrowseView: View {
                             metricLink(entry)
                         }
                         if searchedEntries.isEmpty && !loading {
-                            EmptyContent(title: "No results for \(search)", symbol: "magnifyingglass")
+                            EmptyContent(title: uiText("No results for \(search)"), symbol: "magnifyingglass")
                         }
                     }
                 }
             }.padding()
-        }.mobileNavigationTitle("Browse")
+        }.mobileNavigationTitle(uiText("Browse"))
             .metricsSearch($search)
             .initialTask(id: model.reportDataRevision) { await reload() }
             .refreshable { await reload() }
@@ -72,7 +72,7 @@ struct BrowseView: View {
         let categories = categories.filter { $0.section == title }
         return VStack(alignment: .leading, spacing: 12) {
             if !categories.isEmpty {
-                Text(title).font(.title2.bold())
+                Text(uiLabel(title)).font(.title2.bold())
                 // A lazy grid becomes its own scrolling container on Android.
                 // Keep these small category rows in the page's single ScrollView.
                 VStack(spacing: 10) {
@@ -100,7 +100,7 @@ struct BrowseView: View {
                 #else
                 Image(systemName: category.symbol).font(.title).foregroundStyle(category.color)
                 #endif
-                Text(category.title).font(.headline).foregroundStyle(.primary)
+                Text(uiLabel(category.title)).font(.headline).foregroundStyle(.primary)
                     .multilineTextAlignment(.leading)
             }
             .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
@@ -111,7 +111,7 @@ struct BrowseView: View {
     private func categoryList(_ category: BrowseCategory) -> some View {
         List {
             ForEach(entries.filter { $0.categoryID == category.id }) { entry in metricLink(entry) }
-        }.mobileNavigationTitle(category.title)
+        }.mobileNavigationTitle(uiLabel(category.title))
     }
     @ViewBuilder private func metricLink(_ entry: BrowseEntry) -> some View {
         #if os(Android)

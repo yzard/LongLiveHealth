@@ -9,24 +9,24 @@ struct DailyLogsView: View {
     var body: some View {
         List {
             Section {
-                Button("Record weight") { editing = LogSelection(entry: nil, kind: "body") }
-                Button("Record an event or observation") { editing = LogSelection(entry: nil) }
+                Button(uiText("Record weight")) { editing = LogSelection(entry: nil, kind: "body") }
+                Button(uiText("Record an event or observation")) { editing = LogSelection(entry: nil) }
             }
             Section {
-                NavigationLink("Nutrition", destination: NutritionDayView(model: model))
-                NavigationLink("Training planner", destination: TrainingPlannerView(model: model))
-                NavigationLink("Reminders", destination: RemindersView(model: model))
+                NavigationLink(uiText("Nutrition"), destination: NutritionDayView(model: model))
+                NavigationLink(uiText("Training planner"), destination: TrainingPlannerView(model: model))
+                NavigationLink(uiText("Reminders"), destination: RemindersView(model: model))
             }
-            Section("Last 30 days") {
-                if entries.isEmpty { Text("No entries in this range.").foregroundStyle(.secondary) }
+            Section(uiText("Last 30 days")) {
+                if entries.isEmpty { Text(uiText("No entries in this range.")).foregroundStyle(.secondary) }
                 ForEach(entries, id: \.identifier) { item in
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(item["entry"]["kind"].stringValue.replacingOccurrences(of: "_", with: " ").capitalized).font(.headline)
+                        Text(uiState(item["entry"]["kind"].stringValue)).font(.headline)
                         Text(Date(timeIntervalSince1970: item["at"].numberValue ?? 0).formatted()).font(.caption)
-                        if let load = item["calculation"]["session_load_au"].numberValue { Text("Session load: \(load.formatted()) AU") }
-                        DisclosureGroup("Observation") {
+                        if let load = item["calculation"]["session_load_au"].numberValue { Text(uiText("Session load: \(load.formatted()) AU")) }
+                        DisclosureGroup(uiText("Observation")) {
                             ForEach(EntryDraft.fields(item["entry"]["kind"].stringValue), id: \.key) { field in
-                                LabeledContent(field.label, value: EntryDraft.decode(item["entry"])[field.key].flatMap { $0.isEmpty ? nil : $0 } ?? "Not recorded")
+                                LabeledContent(uiLabel(field.label), value: EntryDraft.decode(item["entry"])[field.key].flatMap { $0.isEmpty ? nil : $0 } ?? uiText("Not recorded"))
                             }
                         }
                         if item["entry"]["kind"] == .string("nutrition") {
@@ -34,22 +34,22 @@ struct DailyLogsView: View {
                         }
                         HStack {
                             if item["entry"]["kind"] == .string("sleep_correction") {
-                                NavigationLink("Edit sleep confirmation", destination: SleepSessionsView(model: model))
-                            } else { Button("Edit") { editing = LogSelection(entry: item) } }
+                                NavigationLink(uiText("Edit sleep confirmation"), destination: SleepSessionsView(model: model))
+                            } else { Button(uiText("Edit")) { editing = LogSelection(entry: item) } }
                             Spacer()
-                            Button("Delete", role: .destructive) { deleting = item }
+                            Button(uiText("Delete"), role: .destructive) { deleting = item }
                         }.buttonStyle(.borderless)
                     }
                 }
             }
-        }.mobileNavigationTitle("Manual Imports")
+        }.mobileNavigationTitle(uiText("Manual Imports"))
             .initialTask { await reload() }.refreshable { await reload() }
             .onChange(of: model.entryMutation) { _, change in if let change { entries = change.applying(to: entries) { ($0["at"].numberValue ?? 0) >= Date().timeIntervalSince1970 - 30 * 86400 && ($0["at"].numberValue ?? 0) <= Date().timeIntervalSince1970 } } }
             .sheet(item: $editing) { selection in
                 NavigationStack { LogEditor(model: model, existing: selection.entry, initialKind: selection.kind, initialValues: [:], initialDate: Date()) }
             }
-            .confirmationDialog("Delete this log and its revision history? Separate exports and backups remain unchanged.", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
-                Button("Delete log", role: .destructive) { if let entry = deleting { Task { await remove(entry) } } }
+            .confirmationDialog(uiText("Delete this log and its revision history? Separate exports and backups remain unchanged."), isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
+                Button(uiText("Delete log"), role: .destructive) { if let entry = deleting { Task { await remove(entry) } } }
             }
     }
     private func reload() async {
@@ -86,36 +86,36 @@ struct LogEditor: View {
     @State var initialized = false
     var body: some View {
         Form {
-            Picker("Log type", selection: $kind) { ForEach(EntryDraft.kinds, id: \.self) { Text($0.replacingOccurrences(of: "_", with: " ").capitalized).tag($0) } }.disabled(existing != nil)
-            DatePicker(kind == "training" ? "Session started at" : "Observed at", selection: $date)
+            Picker(uiText("Log type"), selection: $kind) { ForEach(EntryDraft.kinds, id: \.self) { Text(uiState($0)).tag($0) } }.disabled(existing != nil)
+            DatePicker(kind == "training" ? uiText("Session started at") : uiText("Observed at"), selection: $date)
             ForEach(EntryDraft.fields(kind), id: \.key) { field in
                 let binding = Binding(get: { values[field.key] ?? field.choices.first ?? "" }, set: { values[field.key] = $0 })
                 if field.format == "bool" {
-                    Toggle(field.label, isOn: Binding(get: { binding.wrappedValue == "true" }, set: { binding.wrappedValue = $0 ? "true" : "false" }))
+                    Toggle(uiLabel(field.label), isOn: Binding(get: { binding.wrappedValue == "true" }, set: { binding.wrappedValue = $0 ? "true" : "false" }))
                 } else if field.format == "nutrients" {
-                    Text(field.key == "nutrients_per_100g" ? "Amounts per 100 grams" : field.key == "daily_targets" ? "Your daily targets" : field.key == "totals" ? "Full-day equivalent totals" : "Additional nutrients for this portion").font(.headline)
+                    Text(field.key == "nutrients_per_100g" ? uiText("Amounts per 100 grams") : field.key == "daily_targets" ? uiText("Your daily targets") : field.key == "totals" ? uiText("Full-day equivalent totals") : uiText("Additional nutrients for this portion")).font(.headline)
                     NumberMapEditor(value: binding, definitions: kind == "diet_quality" ? NumberMapEditor.dietFields : NumberMapEditor.nutrients.filter { field.key != "micronutrients" || !["energy_kcal", "protein_g", "carbohydrate_g", "fat_g", "fiber_g", "water_ml"].contains($0.0) })
                 } else if field.format == "ingredients" {
                     RecipeIngredientsEditor(model: model, value: binding)
                 } else if !field.choices.isEmpty {
-                    Picker(field.label, selection: binding) { ForEach(field.choices, id: \.self) { Text($0.capitalized).tag($0) } }
+                    Picker(uiLabel(field.label), selection: binding) { ForEach(field.choices, id: \.self) { Text(uiState($0)).tag($0) } }
                 } else if field.format.contains("datetime") {
-                    DatePicker(field.label, selection: Binding(get: { ISO8601DateFormatter().date(from: binding.wrappedValue) ?? Date() }, set: { binding.wrappedValue = ISO8601DateFormatter().string(from: $0) }))
-                    Button(binding.wrappedValue.isEmpty ? "Record this time" : "Clear recorded time") {
+                    DatePicker(uiLabel(field.label), selection: Binding(get: { ISO8601DateFormatter().date(from: binding.wrappedValue) ?? Date() }, set: { binding.wrappedValue = ISO8601DateFormatter().string(from: $0) }))
+                    Button(binding.wrappedValue.isEmpty ? uiText("Record this time") : uiText("Clear recorded time")) {
                         binding.wrappedValue = binding.wrappedValue.isEmpty ? ISO8601DateFormatter().string(from: Date()) : ""
                     }
-                    Text(binding.wrappedValue.isEmpty ? "Not recorded" : binding.wrappedValue).font(.caption)
+                    Text(binding.wrappedValue.isEmpty ? uiText("Not recorded") : binding.wrappedValue).font(.caption)
                 } else if field.format.contains("number") {
-                    TextField(field.label, text: binding).keyboardType(.decimalPad)
+                    TextField(uiLabel(field.label), text: binding).keyboardType(.decimalPad)
                 } else {
-                    TextField(field.label, text: binding, axis: .vertical).lineLimit(6)
+                    TextField(uiLabel(field.label), text: binding, axis: .vertical).lineLimit(6)
                 }
             }
-            if kind == "training" { InfoHelp(title: "Training effort", message: "Record effort for the whole session on the CR10 scale, ideally about 30 minutes afterward. External weight excludes body mass.") }
-            if let failure { Text(failure).foregroundStyle(.red) }
-            Button("Save log") { Task { await save() } }.disabled(saving)
-        }.disabled(saving).mobileNavigationTitle(existing == nil ? (kind == "body" ? "Record weight" : "New observation") : "Edit observation")
-            .toolbar { Button("Cancel") { dismiss() }.disabled(saving) }
+            if kind == "training" { InfoHelp(title: uiText("Training effort"), message: uiText("Record effort for the whole session on the CR10 scale, ideally about 30 minutes afterward. External weight excludes body mass.")) }
+            if let failure { Text(uiMessage(failure)).foregroundStyle(.red) }
+            Button(uiText("Save log")) { Task { await save() } }.disabled(saving)
+        }.disabled(saving).mobileNavigationTitle(existing == nil ? (kind == "body" ? uiText("Record weight") : uiText("New observation")) : uiText("Edit observation"))
+            .toolbar { Button(uiText("Cancel")) { dismiss() }.disabled(saving) }
             .interactiveDismissDisabled()
             .onAppear {
                 guard !initialized else { return }; initialized = true

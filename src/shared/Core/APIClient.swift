@@ -167,6 +167,7 @@ public nonisolated final class APIClient: Sendable {
     private func request(_ path: String, method: String, forceRefresh: Bool) async throws -> URLRequest {
         var request = URLRequest(url: server.appendingPathComponent("api/v1").appendingPathComponent(path))
         request.httpMethod = method
+        request.setValue(InterfaceLanguage.current.rawValue, forHTTPHeaderField: "Accept-Language")
         let credential = try await authorization?(forceRefresh) ?? token
         if let token = credential { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         return request

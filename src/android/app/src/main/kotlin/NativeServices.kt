@@ -73,6 +73,8 @@ companion object {
                 }
                 ""
             }
+            "language.system" -> InterfaceLanguage.system()
+            "language.apply" -> { InterfaceLanguage.apply(context, input); "" }
             "active" -> active.toString()
             "unlocked" -> context.getSystemService(android.os.UserManager::class.java).isUserUnlocked.toString()
             "notifications.clear" -> { context.getSystemService(NotificationManager::class.java).cancelAll(); "" }
@@ -137,7 +139,7 @@ companion object {
             val biometricOnly = input.getBoolean("biometrics")
             val builder = BiometricPrompt.PromptInfo.Builder().setTitle(input.getString("reason"))
                 .setAllowedAuthenticators(if (biometricOnly) Authenticators.BIOMETRIC_STRONG else Authenticators.BIOMETRIC_STRONG or Authenticators.DEVICE_CREDENTIAL)
-            if (biometricOnly) builder.setNegativeButtonText("Cancel")
+            if (biometricOnly) builder.setNegativeButtonText(context.interfaceText("Cancel"))
             continuation.invokeOnCancellation { owner.runOnUiThread { prompt.cancelAuthentication() } }
             prompt.authenticate(builder.build())
         }

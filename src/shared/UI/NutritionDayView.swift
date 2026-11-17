@@ -8,30 +8,30 @@ struct NutritionDayView: View {
     var body: some View {
         List {
             Section {
-                DatePicker("Date", selection: $date, displayedComponents: .date)
-                NavigationLink("Meal planner and shopping list", destination: MealPlannerView(model: model))
-                NavigationLink("Meals and glucose", destination: MealGlucoseView(model: model))
-                NavigationLink("Diet quality assessment", destination: DietQualityView(model: model))
-                NavigationLink("Foods, recipes and goals", destination: FoodLibraryView(model: model))
-                InfoHelp(title: "Daily intake", message: "Recorded intake only. Missing entries remain unknown.")
-                Text(result["goal_state"].stringValue.replacingOccurrences(of: "_", with: " ")).font(.caption)
-                if let failure { Text(failure).foregroundStyle(.secondary) }
+                DatePicker(uiText("Date"), selection: $date, displayedComponents: .date)
+                NavigationLink(uiText("Meal planner and shopping list"), destination: MealPlannerView(model: model))
+                NavigationLink(uiText("Meals and glucose"), destination: MealGlucoseView(model: model))
+                NavigationLink(uiText("Diet quality assessment"), destination: DietQualityView(model: model))
+                NavigationLink(uiText("Foods, recipes and goals"), destination: FoodLibraryView(model: model))
+                InfoHelp(title: uiText("Daily intake"), message: uiText("Recorded intake only. Missing entries remain unknown."))
+                Text(uiState(result["goal_state"].stringValue)).font(.caption)
+                if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
             }
             ForEach(Array(result["nutrients"].arrayValue.enumerated()), id: \.offset) { _, item in
-                Section(item["nutrient"].stringValue.replacingOccurrences(of: "_", with: " ")) {
-                    Text((item["observed_sum"].numberValue?.formatted() ?? "Unknown") + " " + item["unit"].stringValue)
-                    Text("Known records: \(Int(item["known_records"].numberValue ?? 0)) · Missing values: \(Int(item["missing_records"].numberValue ?? 0))").font(.caption)
-                    if let target = item["target"].numberValue { Text("Your target: \(target.formatted()) \(item["unit"].stringValue)") }
-                    if let fraction = item["recorded_fraction_of_target"].numberValue { Text("Recorded intake: \((100 * fraction).formatted())% of target").font(.caption) }
+                Section(uiState(item["nutrient"].stringValue)) {
+                    Text((item["observed_sum"].numberValue?.formatted() ?? uiText("Unknown")) + " " + item["unit"].stringValue)
+                    Text(uiText("Known records: \(Int(item["known_records"].numberValue ?? 0)) · Missing values: \(Int(item["missing_records"].numberValue ?? 0))")).font(.caption)
+                    if let target = item["target"].numberValue { Text(uiText("Your target: \(target.formatted()) \(item["unit"].stringValue)")) }
+                    if let fraction = item["recorded_fraction_of_target"].numberValue { Text(uiText("Recorded intake: \((100 * fraction).formatted())% of target")).font(.caption) }
                 }
             }
-            Section("Recorded foods") {
+            Section(uiText("Recorded foods")) {
                 ForEach(Array(result["records"].arrayValue.enumerated()), id: \.offset) { _, item in
                     Text(item["entry"]["content"]["food"].stringValue + " · " + item["entry"]["content"]["meal"].stringValue)
                 }
             }
-            if !result["notes"].arrayValue.isEmpty { InfoHelp(title: "Method", message: result["notes"].arrayValue.map(\.stringValue).joined(separator: "\n\n")) }
-        }.mobileNavigationTitle("Nutrition").initialTask(id: date) { await load() }.refreshable { await load() }
+            if !result["notes"].arrayValue.isEmpty { InfoHelp(title: uiText("Method"), message: result["notes"].arrayValue.map(\.stringValue).joined(separator: "\n\n")) }
+        }.mobileNavigationTitle(uiText("Nutrition")).initialTask(id: date) { await load() }.refreshable { await load() }
     }
     private func load() async {
         guard let client = model.client, let token = model.session?.token else { return }

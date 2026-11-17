@@ -76,6 +76,9 @@ pub fn create_application(state: AppState) -> Router {
     routes::router(upload_limit)
         .merge(crate::webgui::router())
         .layer(DefaultBodyLimit::max(16_384))
+        .layer(middleware::from_fn(
+            crate::interface_language::with_request_language,
+        ))
         .layer(middleware::from_fn(crate::middleware::request_logging))
         .with_state(state)
 }

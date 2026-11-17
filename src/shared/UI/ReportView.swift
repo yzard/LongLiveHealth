@@ -38,7 +38,7 @@ struct ReportView: View {
     var body: some View {
         reportList
         .disabled(submittingAll || rescanning || savingResult)
-        .mobileNavigationTitle(document["context"]["report_title"].stringValue.isEmpty ? "Blood Work" : document["context"]["report_title"].stringValue)
+        .mobileNavigationTitle(document["context"]["report_title"].stringValue.isEmpty ? uiText("Blood Work") : document["context"]["report_title"].stringValue)
         .navigationBarTitleDisplayMode(.inline)
         .initialTask { await reload() }
         .task(id: model.jobs.first { $0["file_id"].stringValue == reportID }?["job_id"].stringValue) { await followExtraction() }
@@ -55,13 +55,13 @@ struct ReportView: View {
                 reviewEditor: reviewEditor, submitReadyResult: submitReadyResult)
         }
         #endif
-        .alert("Rescan report?", isPresented: $rescanConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Rescan", role: .destructive) { Task { await rescan() } }
-        } message: { Text("Rescan deletes all existing results and runs OCR again on the original report. New results will be pending review.") }
-        .alert("Delete report?", isPresented: $deleting) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete report", role: .destructive) { Task { await model.perform {
+        .alert(uiText("Rescan report?"), isPresented: $rescanConfirmation) {
+            Button(uiText("Cancel"), role: .cancel) {}
+            Button(uiText("Rescan"), role: .destructive) { Task { await rescan() } }
+        } message: { Text(uiText("Rescan deletes all existing results and runs OCR again on the original report. New results will be pending review.")) }
+        .alert(uiText("Delete report?"), isPresented: $deleting) {
+            Button(uiText("Cancel"), role: .cancel) {}
+            Button(uiText("Delete report"), role: .destructive) { Task { await model.perform {
                 guard let client = model.client else { return }
                 _ = try await model.request("reports/delete", body: .object(["report_id": .string(reportID), "expected_revision": document["report"]["revision"]]))
                 try model.archive?.remove(name: "report-\(reportID).json"); try model.archive?.remove(name: "source-\(reportID)")
@@ -70,7 +70,7 @@ struct ReportView: View {
                 try model.archive?.save(model.reports, name: "reports.json")
                 dismiss()
             } } }
-        } message: { Text("This deletes the report, its submitted and draft results, and related analysis from your archive. The server then removes stored files. Offline backups you made are separate.") }
+        } message: { Text(uiText("This deletes the report, its submitted and draft results, and related analysis from your archive. The server then removes stored files. Offline backups you made are separate.")) }
     }
     private enum ReportRow: Identifiable {
         case info, markerCount, actions, retry, relationship, unlink, review, error, empty, ocrOutput
@@ -118,13 +118,13 @@ struct ReportView: View {
             + needsReview.map { ReportRow.observation($0) }
         var result = [
             ReportSection(id: "info", title: nil, rows: information),
-            ReportSection(id: "review", title: "Review Results", rows: review)
+            ReportSection(id: "review", title: uiText("Review Results"), rows: review)
         ]
         if !needsReviewRows.isEmpty {
-            result.append(ReportSection(id: "manual", title: "Needs Review", rows: needsReviewRows))
+            result.append(ReportSection(id: "manual", title: uiText("Needs Review"), rows: needsReviewRows))
         }
         if !submitted.isEmpty {
-            result.append(ReportSection(id: "submitted", title: "Submitted Results",
+            result.append(ReportSection(id: "submitted", title: uiText("Submitted Results"),
                 rows: submitted.map { ReportRow.observation($0) }))
         }
         if ["pages", "extraction_inputs", "extraction_outputs"].contains(where: { !document[$0].arrayValue.isEmpty }) {
@@ -208,7 +208,7 @@ struct ReportView: View {
 
     @ViewBuilder private func reportSectionHeader(_ title: String?) -> some View {
         if let title {
-            Text(title.uppercased()).font(.footnote).foregroundStyle(.secondary)
+            Text(uiLabel(title).uppercased()).font(.footnote).foregroundStyle(.secondary)
                 .accessibilityAddTraits(.isHeader)
                 .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 8)
         } else {
@@ -232,10 +232,10 @@ struct ReportView: View {
         case .info:
             Button { contextVisible = true } label: {
                 HStack {
-                    Text("Report Info")
+                    Text(uiText("Report Info"))
                     Spacer()
                     let source = document["context"]["source_name"].stringValue
-                    Text(source.isEmpty ? "Set source name" : source).foregroundStyle(.secondary)
+                    Text(source.isEmpty ? uiText("Set source name") : source).foregroundStyle(.secondary)
                     Image(systemName: MobileSymbol.name("chevron.right")).font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -246,7 +246,7 @@ struct ReportView: View {
         case .markerCount:
             let count = document["observations"].arrayValue.count
             HStack {
-                Text("Total Markers")
+                Text(uiText("Total Markers"))
                 Spacer()
                 Text("\(count)").foregroundStyle(.secondary)
             }
@@ -254,33 +254,33 @@ struct ReportView: View {
         case .actions:
             reportActions
         case .retry:
-            Button("Retry failed extraction") { Task { await retryExtraction() } }
+            Button(uiText("Retry failed extraction")) { Task { await retryExtraction() } }
         case .relationship:
-            Text("Excluded from trends: \(document["relation"]["kind"].stringValue). Original data is retained.").font(.caption)
+            Text(uiText("Excluded from trends: \(document["relation"]["kind"].stringValue). Original data is retained.")).font(.caption)
         case .unlink:
-            Button("Treat as independent report") { Task { await unlink() } }
+            Button(uiText("Treat as independent report")) { Task { await unlink() } }
         case .review:
             reviewActions
         case .error:
-            if let submissionError { Text(submissionError).foregroundStyle(.red) }
+            if let submissionError { Text(uiMessage(submissionError)).foregroundStyle(.red) }
         case .empty:
-            Text("No extracted results yet.").foregroundStyle(.secondary)
+            Text(uiText("No extracted results yet.")).foregroundStyle(.secondary)
         case .validation(let entry):
             validationRow(entry.value)
         case .observation(let observation):
             observationRow(observation)
         case .ocrOutput:
             NavigationLink {
-                List { ocrDiagnostics }.mobileNavigationTitle("Raw OCR Output")
+                List { ocrDiagnostics }.mobileNavigationTitle(uiText("Raw OCR Output"))
             } label: {
                 #if os(Android)
                 HStack {
-                    Text("Raw OCR Output")
+                    Text(uiText("Raw OCR Output"))
                     Spacer()
                     Image(systemName: MobileSymbol.name("chevron.right")).font(.caption).foregroundStyle(.secondary)
                 }
                 #else
-                Text("Raw OCR Output")
+                Text(uiText("Raw OCR Output"))
                 #endif
             }.accessibilityIdentifier("report-ocr-output")
         }
@@ -288,15 +288,15 @@ struct ReportView: View {
 
     private var reportActions: some View {
         HStack(spacing: 12) {
-            Button { showSource(page: 1) } label: { reportAction("View Original", icon: "doc.text.magnifyingglass") }
-                .accessibilityLabel("View original report").accessibilityIdentifier("report-original")
-            Button { editor = EditTarget(observation: .null) } label: { reportAction("Add Result", icon: "plus") }
-                .accessibilityLabel("Add result manually").accessibilityIdentifier("report-add-result")
-            Button { rescanConfirmation = true } label: { reportAction("Rescan", icon: "arrow.clockwise") }
-                .accessibilityLabel("Rescan report").accessibilityIdentifier("report-rescan")
+            Button { showSource(page: 1) } label: { reportAction(uiText("View Original"), icon: "doc.text.magnifyingglass") }
+                .accessibilityLabel(Text(uiText("View original report"))).accessibilityIdentifier("report-original")
+            Button { editor = EditTarget(observation: .null) } label: { reportAction(uiText("Add Result"), icon: "plus") }
+                .accessibilityLabel(Text(uiText("Add result manually"))).accessibilityIdentifier("report-add-result")
+            Button { rescanConfirmation = true } label: { reportAction(uiText("Rescan"), icon: "arrow.clockwise") }
+                .accessibilityLabel(Text(uiText("Rescan report"))).accessibilityIdentifier("report-rescan")
                 .disabled(extracting || rescanning)
-            Button(role: .destructive) { deleting = true } label: { reportAction("Delete", icon: "trash") }
-                .accessibilityLabel("Delete report").accessibilityIdentifier("report-delete")
+            Button(role: .destructive) { deleting = true } label: { reportAction(uiText("Delete"), icon: "trash") }
+                .accessibilityLabel(Text(uiText("Delete report"))).accessibilityIdentifier("report-delete")
         }.buttonStyle(.borderless)
         .disabled(document == .null || model.isBusy)
     }
@@ -306,7 +306,7 @@ struct ReportView: View {
         return HStack {
             #if os(Android)
             Button { readyVisible = true } label: {
-                Text(observations.count == 1 ? "1 result ready to submit" : "\(observations.count) results ready to submit")
+                Text(observations.count == 1 ? uiText("1 result ready to submit") : uiText("\(observations.count) results ready to submit"))
                     .foregroundStyle(.primary).frame(maxWidth: .infinity, alignment: .leading)
             }.buttonStyle(.borderless)
             .accessibilityIdentifier("ready-to-submit-results")
@@ -316,14 +316,14 @@ struct ReportView: View {
                 ReadyToSubmitView(model: model, reportID: reportID, document: $document,
                     reviewEditor: reviewEditor, submitReadyResult: submitReadyResult)
             } label: {
-                Text(observations.count == 1 ? "1 result ready to submit" : "\(observations.count) results ready to submit")
+                Text(observations.count == 1 ? uiText("1 result ready to submit") : uiText("\(observations.count) results ready to submit"))
                     .foregroundStyle(.primary).frame(maxWidth: .infinity, alignment: .leading)
             }.buttonStyle(.borderless)
             .accessibilityIdentifier("ready-to-submit-results")
             .disabled(observations.isEmpty)
             #endif
             Spacer(minLength: 8)
-            Button(submittingAll ? "Submitting…" : "Submit") { Task { await submitAll() } }
+            Button(submittingAll ? uiText("Submitting…") : uiText("Submit")) { Task { await submitAll() } }
                 .buttonStyle(.borderless)
                 .accessibilityIdentifier("submit-all-results")
                 .disabled(submittingAll || extracting || observations.isEmpty)
@@ -335,8 +335,8 @@ struct ReportView: View {
         let field = issue["field"].stringValue.replacingOccurrences(of: "_", with: " ")
         let reason = issue["reason"] == .string("invalid_date") ? "Invalid" : "Missing"
         return VStack(alignment: .leading, spacing: 4) {
-            Text(name.isEmpty ? "Item \(Int(issue["item_index"].numberValue ?? 0))" : name).font(.headline)
-            Text("Page \(Int(issue["page"].numberValue ?? 0)) · \(reason) \(field)").foregroundStyle(.red)
+            Text(name.isEmpty ? uiText("Item \(Int(issue["item_index"].numberValue ?? 0))") : name).font(.headline)
+            Text(uiText("Page \(Int(issue["page"].numberValue ?? 0)) · \(reason) \(field)")).foregroundStyle(.red)
         }
     }
 
@@ -396,31 +396,31 @@ struct ReportView: View {
 
     @ViewBuilder private var ocrDiagnostics: some View {
         if !document["pages"].arrayValue.isEmpty {
-            Section("Page processing") {
+            Section(uiText("Page processing")) {
                 ForEach(indexedValues("pages")) { entry in
                     let page = entry.value
-                    NavigationLink("Page \(Int(page["page"].numberValue ?? 0)) · \(page["status"].stringValue)") {
+                    NavigationLink(uiText("Page \(Int(page["page"].numberValue ?? 0)) · \(page["status"].stringValue)")) {
                         ScrollView { CopyableText(page["content"].stringValue).font(.caption).padding() }
-                            .mobileNavigationTitle("Page processing")
+                            .mobileNavigationTitle(uiText("Page processing"))
                     }
                 }
             }
         }
         if !document["extraction_inputs"].arrayValue.isEmpty {
-            Section("Document evidence") {
+            Section(uiText("Document evidence")) {
                 ForEach(indexedValues("extraction_inputs")) { entry in
                     let input = entry.value
-                    NavigationLink("Page \(Int(input["page"].numberValue ?? 0)) · text layer: \(input["text_status"].stringValue.isEmpty ? "image only" : input["text_status"].stringValue)") {
+                    NavigationLink(uiText("Page \(Int(input["page"].numberValue ?? 0)) · text layer: \(input["text_status"].stringValue.isEmpty ? "image only" : input["text_status"].stringValue)")) {
                         DocumentEvidenceView(model: model, reportID: reportID, input: input)
                     }
                 }
             }
         }
         if !document["extraction_outputs"].arrayValue.isEmpty {
-            Section("Original OCR output") {
+            Section(uiText("Original OCR output")) {
                 ForEach(indexedValues("extraction_outputs")) { entry in
                     let output = entry.value
-                    NavigationLink("Page \(Int(output["page"].numberValue ?? 0)) · \(output["stage"].stringValue)") {
+                    NavigationLink(uiText("Page \(Int(output["page"].numberValue ?? 0)) · \(output["stage"].stringValue)")) {
                         ExtractionOutputView(model: model, reportID: reportID, output: output)
                     }
                 }
@@ -430,7 +430,7 @@ struct ReportView: View {
     private func reportAction(_ title: String, icon: String) -> some View {
         VStack(spacing: 5) {
             Image(systemName: MobileSymbol.name(icon)).font(.body)
-            Text(title).font(.caption).lineLimit(1)
+            Text(uiLabel(title)).font(.caption).lineLimit(1)
             #if !os(Android)
                 .minimumScaleFactor(0.8)
             #endif
@@ -580,7 +580,7 @@ struct ReadyToSubmitView: View {
                     writeHealth: { healthWriter = ReportView.EditTarget(observation: observation) })
             }
         }
-        .mobileNavigationTitle("Ready to Submit")
+        .mobileNavigationTitle(uiText("Ready to Submit"))
         .sheet(item: $editor) { target in reviewEditor(target) }
         .sheet(item: $healthWriter) { target in ReviewedGlucoseWriter(model: model, observation: target.observation) }
         .originalReportPreview($preview)
@@ -601,8 +601,8 @@ struct ExtractionOutputView: View {
         ScrollView { VStack(alignment: .leading, spacing: 16) {
             Text(output["model"].stringValue).font(.caption)
             CopyableText(original["content"].stringValue)
-            DisclosureGroup("Complete provider response") { CopyableText(original["response_body"].stringValue).font(.caption.monospaced()) }
-        }.padding() }.mobileNavigationTitle("Original OCR output").initialTask {
+            DisclosureGroup(uiText("Complete provider response")) { CopyableText(original["response_body"].stringValue).font(.caption.monospaced()) }
+        }.padding() }.mobileNavigationTitle(uiText("Original OCR output")).initialTask {
             do {
                 guard let client = model.client else { return }
                 original = try await model.request("reports/extraction/get", body: .object(["report_id": .string(reportID), "run_id": output["run_id"], "page": output["page"], "stage": output["stage"]]))
@@ -621,12 +621,12 @@ struct ReviewedGlucoseWriter: View {
     var body: some View {
         NavigationStack { Form {
             Text("\(observation["payload"]["raw_result"].stringValue) \(observation["payload"]["raw_unit"].stringValue)")
-            Text("Report collection date: \(observation["payload"]["sampled_at"].stringValue)").font(.caption)
-            DatePicker("Collection date and time", selection: $sampledAt)
-            Toggle("I verified the collection date and time", isOn: $verifiedTime)
-            InfoHelp(title: "Collection time", message: "\(MobilePlatform.healthProviderName) requires a timestamp. Check the original report before saving. The complete report and its revisions remain on your server.")
-            if let error { Text(error).foregroundStyle(.red) }
-            Button("Save reviewed glucose") { Task {
+            Text(uiText("Report collection date: \(observation["payload"]["sampled_at"].stringValue)")).font(.caption)
+            DatePicker(uiText("Collection date and time"), selection: $sampledAt)
+            Toggle(uiText("I verified the collection date and time"), isOn: $verifiedTime)
+            InfoHelp(title: uiText("Collection time"), message: uiText("\(MobilePlatform.healthProviderName) requires a timestamp. Check the original report before saving. The complete report and its revisions remain on your server."))
+            if let error { Text(uiMessage(error)).foregroundStyle(.red) }
+            Button(uiText("Save reviewed glucose")) { Task {
                 guard let session = model.session, !model.isBusy else { return }
                 var saved = false
                 await model.perform {
@@ -651,7 +651,7 @@ struct ReviewedGlucoseWriter: View {
                 }
                 if saved { dismiss(); await model.synchronizeHealth(requestAccess: false, requestSelectedAccess: false, automatic: false) }
             } }.disabled(!verifiedTime || model.isBusy)
-        }.mobileNavigationTitle("Save to \(MobilePlatform.healthProviderName)").toolbar { Button("Cancel") { dismiss() }.disabled(model.isBusy) } }
+        }.mobileNavigationTitle(uiText("Save to \(uiLabel(MobilePlatform.healthProviderName))")).toolbar { Button(uiText("Cancel")) { dismiss() }.disabled(model.isBusy) } }
     }
 }
 
@@ -663,16 +663,16 @@ struct DocumentEvidenceView: View {
     @State var error: String?
     var body: some View {
         List {
-            if let error { Text(error).foregroundStyle(.red) }
+            if let error { Text(uiMessage(error)).foregroundStyle(.red) }
             if evidence == .null && error == nil { ProgressView() }
             else {
-                Text("Text layer: \(evidence["text_layer"]["status"].stringValue.isEmpty ? "not applicable to image" : evidence["text_layer"]["status"].stringValue)")
-                if !evidence["error_code"].stringValue.isEmpty { Text("Text extraction issue: \(evidence["error_code"].stringValue)").foregroundStyle(.orange) }
-                InfoHelp(title: "Recognition evidence", message: "The page image is always used for recognition. PDF text may be incomplete or disagree with the image.")
+                Text(uiText("Text layer: \(evidence["text_layer"]["status"].stringValue.isEmpty ? "not applicable to image" : evidence["text_layer"]["status"].stringValue)"))
+                if !evidence["error_code"].stringValue.isEmpty { Text(uiText("Text extraction issue: \(evidence["error_code"].stringValue)")).foregroundStyle(.orange) }
+                InfoHelp(title: uiText("Recognition evidence"), message: uiText("The page image is always used for recognition. PDF text may be incomplete or disagree with the image."))
                 CopyableText(evidence["text_layer"]["text"].stringValue)
-                Text("Positioned words: \(evidence["text_layer"]["words"].arrayValue.count)").font(.caption)
+                Text(uiText("Positioned words: \(evidence["text_layer"]["words"].arrayValue.count)")).font(.caption)
             }
-        }.mobileNavigationTitle("Document evidence").initialTask {
+        }.mobileNavigationTitle(uiText("Document evidence")).initialTask {
             do {
                 guard let client = model.client else { return }
                 evidence = try await model.request("reports/input/get", body: .object(["report_id": .string(reportID), "run_id": input["run_id"], "page": input["page"]]))
@@ -720,7 +720,7 @@ struct ReportObservationRow: View {
                             .fixedSize(horizontal: false, vertical: true)
                         let code = observation["lab_test_code"].stringValue
                         if !code.isEmpty {
-                            Text("LOINC \(code)")
+                            Text(uiText("LOINC \(code)"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .fixedSize()
@@ -731,7 +731,7 @@ struct ReportObservationRow: View {
                 Spacer(minLength: 0)
                 if hasPossibleMatch || isNew {
                     Button(action: edit) {
-                        Text(hasPossibleMatch ? "Possible match" : "New")
+                        Text(hasPossibleMatch ? uiText("Possible match") : uiText("New"))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(Color.yellow)
                             .padding(.horizontal, 8)
@@ -756,13 +756,13 @@ struct ReportObservationRow: View {
                     Image(systemName: MobileSymbol.name("doc.text.magnifyingglass"))
                         .frame(minWidth: 44, minHeight: 44)
                 }
-                .accessibilityLabel(Text("View source · page \(sourcePage)"))
+                .accessibilityLabel(Text(uiText("View source · page \(sourcePage)")))
                 #if !os(Android)
-                .accessibilityHint("Opens the original report page")
+                .accessibilityHint(uiText("Opens the original report page"))
                 #endif
                 if let changeStatus, status == "pending" {
                     Button(action: changeStatus) {
-                        Text(needsManualReview ? "Review" : "Submit")
+                        Text(needsManualReview ? uiText("Review") : uiText("Submit"))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(needsManualReview ? Color.yellow : Color.accentColor)
                             .padding(.horizontal, 12)
@@ -776,11 +776,11 @@ struct ReportObservationRow: View {
             }
             let suggestion = ReportReview.suggestionNote(observation, includeMetricName: !hasPossibleMatch)
             if !suggestion.isEmpty {
-                Text("OCR suggestion: \(suggestion)").font(.caption).foregroundStyle(.secondary)
+                Text(uiText("OCR suggestion: \(suggestion)")).font(.caption).foregroundStyle(.secondary)
             }
             let name = observation["lab_test_name"].stringValue
             if !name.isEmpty {
-                Text("Recommended name: \(name)").font(.caption).foregroundStyle(.secondary)
+                Text(uiText("Recommended name: \(name)")).font(.caption).foregroundStyle(.secondary)
                     .accessibilityIdentifier("report-result-loinc-name")
             }
             ForEach(Array(observation["browse_issues"].arrayValue.enumerated()), id: \.offset) { _, issue in
@@ -800,13 +800,13 @@ struct ReportObservationRow: View {
                 }
             }
             if observation["status"] == .string("submitted"), observation["payload"]["metric_id"] == .string("glucose") {
-                Button("Save to \(MobilePlatform.healthProviderName)") { writeHealth() }.font(.caption).disabled(model.isBusy)
+                Button(uiText("Save to \(uiLabel(MobilePlatform.healthProviderName))")) { writeHealth() }.font(.caption).disabled(model.isBusy)
             }
         }.buttonStyle(.borderless).padding(.vertical, 5)
     }
 
     private func issueLabel(_ issue: JSONValue) -> some View {
-        Label(issue["message"].stringValue, systemImage: MobileSymbol.name("exclamationmark.triangle"))
+        Label(uiMessage(issue["message"].stringValue), systemImage: MobileSymbol.name("exclamationmark.triangle"))
             .font(.caption).foregroundStyle(Color.yellow)
             .fixedSize(horizontal: false, vertical: true)
     }

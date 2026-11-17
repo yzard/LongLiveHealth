@@ -13,20 +13,20 @@ struct ECGRecordsView: View {
     }
     var body: some View {
         VStack(spacing: 0) {
-            if loading { ProgressView("Loading recordings") }
-            if let failure { Text(failure).foregroundStyle(.secondary) }
+            if loading { ProgressView(uiText("Loading recordings")) }
+            if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
             if let record = records.first(where: { identity($0) == selected }) {
                 SpecialtyRecordView(model: model, reference: record, title: "Electrocardiogram").id(selected)
-            } else if !loading && failure == nil { Text("No ECG recordings.") }
+            } else if !loading && failure == nil { Text(uiText("No ECG recordings.")) }
             if !records.isEmpty {
-                Picker("ECG recording", selection: $selected) {
+                Picker(uiText("ECG recording"), selection: $selected) {
                     ForEach(Array(records.enumerated()), id: \.offset) { _, record in
                         Text("\(Date(timeIntervalSince1970: record["at"].numberValue ?? 0).formatted())").tag(identity(record))
                     }
                 }.padding(.horizontal)
             }
-            if cursor != .null { Button("More recordings") { Task { await load() } }.disabled(loading) }
-        }.mobileNavigationTitle("Electrocardiogram").initialTask { await load() }
+            if cursor != .null { Button(uiText("More recordings")) { Task { await load() } }.disabled(loading) }
+        }.mobileNavigationTitle(uiText("Electrocardiogram")).initialTask { await load() }
     }
     private func load() async {
         guard !loading, let token = model.session?.token else { return }

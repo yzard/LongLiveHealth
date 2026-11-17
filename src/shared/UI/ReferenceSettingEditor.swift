@@ -22,25 +22,25 @@ struct ReferenceSettingEditor: View {
             let profile = preferences["reference_profile"]
             Section {
                 if setting == .birthDate {
-                Toggle("Use date of birth", isOn: Binding(get: { profile["birth_date"] != .null }, set: { enabled in
+                Toggle(uiText("Use date of birth"), isOn: Binding(get: { profile["birth_date"] != .null }, set: { enabled in
                     var changed = profile == .null ? JSONValue.object([:]) : profile
                     changed["birth_date"] = enabled ? .string(dateString(Date())) : .null
                     update(["reference_profile": changed])
                 }))
                 if profile["birth_date"] != .null {
-                    DatePicker("Date of Birth", selection: Binding(get: { date(profile["birth_date"]) }, set: { value in
+                    DatePicker(uiText("Date of Birth"), selection: Binding(get: { date(profile["birth_date"]) }, set: { value in
                         var changed = profile; changed["birth_date"] = .string(dateString(min(value, Date()))); update(["reference_profile": changed])
                     }), displayedComponents: .date).environment(\.timeZone, .gmt)
                 }
                 } else {
-                Picker("Biological Sex", selection: Binding(get: { profile["reference_sex"].stringValue }, set: { value in
+                Picker(uiText("Biological Sex"), selection: Binding(get: { profile["reference_sex"].stringValue }, set: { value in
                     var changed = profile == .null ? JSONValue.object([:]) : profile
                     changed["reference_sex"] = value.isEmpty ? .null : .string(value)
                     update(["reference_profile": changed])
                 })) {
-                    Text("Not specified").tag("")
-                    Text("Female").tag("female")
-                    Text("Male").tag("male")
+                    Text(uiText("Not specified")).tag("")
+                    Text(uiText("Female")).tag("female")
+                    Text(uiText("Male")).tag("male")
                 }.accessibilityIdentifier("biological-sex-picker")
                 }
             }

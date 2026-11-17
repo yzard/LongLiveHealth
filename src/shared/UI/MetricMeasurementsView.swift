@@ -17,11 +17,11 @@ struct MetricMeasurementsView: View {
     private var bounds: [Double] { [result["first_at"].numberValue, result["last_at"].numberValue].compactMap { $0 } }
     var body: some View {
         MetricDetailScreen(title: title) {
-            if loading { Section { ProgressView("Loading selected period") } }
-            if let failure { Section { Text(failure).foregroundStyle(.secondary) } }
+            if loading { Section { ProgressView(uiText("Loading selected period")) } }
+            if let failure { Section { Text(uiMessage(failure)).foregroundStyle(.secondary) } }
             MetricChartSection {
                 if units.count > 1 {
-                    Picker("Measurement unit", selection: Binding(get: { displayUnit }, set: { selectedUnit = $0 })) {
+                    Picker(uiText("Measurement unit"), selection: Binding(get: { displayUnit }, set: { selectedUnit = $0 })) {
                         ForEach(units, id: \.self) { Text(HistoricalValue.displayUnit($0, kind: kind)).tag($0) }
                     }
                 }
@@ -30,19 +30,19 @@ struct MetricMeasurementsView: View {
                     initialPeriod: kind == "heart_rate" ? .day : .week, showsHour: true, heartRate: kind == "heart_rate",
                     navigationTimestamps: bounds, onWindowChange: { selectedWindow = $0 })
             }
-            Section("About this metric") {
-                if let explanation = MetricEducation.explanation(id: kind, name: title) { Text(explanation) }
+            Section(uiText("About this metric")) {
+                if let explanation = MetricEducation.explanation(id: kind, name: title) { Text(uiLabel(explanation)) }
                 else { Text(definition["description"].stringValue) }
             }
             Section {
-                if !loading && failure == nil && result["valid_samples"].numberValue == 0 { Text("No recorded measurements in this period.") }
+                if !loading && failure == nil && result["valid_samples"].numberValue == 0 { Text(uiText("No recorded measurements in this period.")) }
                 if let excluded = result["excluded_samples"].numberValue, excluded > 0 {
-                    Text("\(Int(excluded)) measurements have unsupported values or units. Their originals remain in Historical Values.").font(.caption)
+                    Text(uiText("\(Int(excluded)) measurements have unsupported values or units. Their originals remain in Historical Values.")).font(.caption)
                 }
             }
             if let selectedWindow {
                 Section {
-                    NavigationLink("Historical Values") {
+                    NavigationLink(uiText("Historical Values")) {
                         if definition["family"] != .string("quantity") {
                             HealthRecordHistoryView(model: model, definition: definition, historicalOnly: true)
                         } else {
@@ -100,11 +100,11 @@ struct MeasurementValuesView: View {
                     value: HistoricalValue.quantity(point[converted ? "value" : "raw_value"],
                         unit: HistoricalValue.displayUnit(unit.isEmpty ? "Unit Not Specified" : unit, kind: kind)))
             }
-            if let failure { Text(failure).foregroundStyle(.secondary) }
+            if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
             if loading { ProgressView() }
-            if nextOffset != nil { Button("Load more") { Task { await load() } }.disabled(loading) }
-            if !loading && points.isEmpty && failure == nil { Text("No measurements in this period.") }
-        }.mobileNavigationTitle("Historical Values").navigationBarTitleDisplayMode(.inline)
+            if nextOffset != nil { Button(uiText("Load more")) { Task { await load() } }.disabled(loading) }
+            if !loading && points.isEmpty && failure == nil { Text(uiText("No measurements in this period.")) }
+        }.mobileNavigationTitle(uiText("Historical Values")).navigationBarTitleDisplayMode(.inline)
             .initialTask { await load() }
     }
     private func load() async {

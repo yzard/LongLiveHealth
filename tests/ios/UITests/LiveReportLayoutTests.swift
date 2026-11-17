@@ -90,6 +90,57 @@ nonisolated final class LiveReportLayoutTests: XCTestCase {
         XCTAssertTrue(app.buttons["report-info"].waitForExistence(timeout: 5))
     }
 
+    @MainActor func testLanguageSelectionOnDevice() throws {
+        guard ProcessInfo.processInfo.environment["LLH_LIVE_DEVICE_AUDIT"] == "1" else {
+            throw XCTSkip("Requires a signed-in physical device")
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+        let tabs = app.tabBars.buttons
+        func dismissConnectionAlert() {
+            let alert = app.alerts.matching(
+                NSPredicate(format: "label IN %@", ["Could not complete the action", "无法完成操作"])
+            ).firstMatch
+            if alert.exists { alert.buttons.firstMatch.tap() }
+        }
+        dismissConnectionAlert()
+        XCTAssertTrue(tabs.firstMatch.waitForExistence(timeout: 20))
+        let originallyChinese = tabs["数据"].exists
+
+        func switchLanguage(to chinese: Bool) {
+            dismissConnectionAlert()
+            let data = tabs[chinese ? "Data" : "数据"]
+            XCTAssertTrue(data.waitForExistence(timeout: 8))
+            data.tap()
+            let settings = app.navigationBars[chinese ? "Settings" : "设置"]
+            if !settings.exists { app.buttons["open-settings"].tap() }
+            XCTAssertTrue(settings.waitForExistence(timeout: 8))
+            let picker = app.descendants(matching: .any)
+                .matching(identifier: "settings-interface-language").firstMatch
+            for _ in 0..<3 where !picker.isHittable {
+                dismissConnectionAlert()
+                if !picker.isHittable { app.swipeUp() }
+            }
+            XCTAssertTrue(picker.isHittable)
+            picker.tap()
+            app.buttons[chinese ? "中文" : "English"].firstMatch.tap()
+            let expected = chinese ? ["健康洞察", "浏览", "数据"] : ["Insights", "Browse", "Data"]
+            XCTAssertTrue(tabs[expected[2]].waitForExistence(timeout: 8))
+            XCTAssertEqual(tabs.allElementsBoundByIndex.map(\.label), expected)
+        }
+
+        switchLanguage(to: !originallyChinese)
+        app.terminate()
+        app.launch()
+        dismissConnectionAlert()
+        XCTAssertTrue(tabs[originallyChinese ? "Data" : "数据"].waitForExistence(timeout: 12))
+        switchLanguage(to: originallyChinese)
+        if originallyChinese, ProcessInfo.processInfo.environment["LLH_LIVE_RESTORE_LANGUAGE"] == "en" {
+            switchLanguage(to: false)
+        }
+    }
+
     @MainActor func testInstalledReportLayout() throws {
         guard ProcessInfo.processInfo.environment["LLH_LIVE_DEVICE_AUDIT"] == "1" else {
             throw XCTSkip("Requires a signed-in physical device")

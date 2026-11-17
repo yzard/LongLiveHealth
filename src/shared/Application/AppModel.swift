@@ -42,6 +42,7 @@ final class AppModel {
     var client: APIClient? { mustChangePassword ? nil : credentials?.client() }
 
     init() {
+        _ = InterfaceLanguageSettings.shared
         do { if let saved = try SessionVault.load() { try activate(saved) } }
         catch { errorMessage = error.localizedDescription }
         loadSharedReports()
@@ -563,7 +564,7 @@ final class AppModel {
         isAuthenticating = true; defer { isAuthenticating = false }
         let identity = session?.token
         do {
-            let success = try await MobilePlatform.authenticate(reason: "Unlock your health archive", requireBiometrics: false)
+            let success = try await MobilePlatform.authenticate(reason: uiText("Unlock your health archive"), requireBiometrics: false)
             guard session?.token == identity, success else { return }
             isLocked = false
         } catch { /* Cancellation leaves the privacy screen in place. */ }
@@ -574,7 +575,7 @@ final class AppModel {
         isAuthenticating = true; defer { isAuthenticating = false }
         let identity = session?.token
         do {
-            guard try await MobilePlatform.authenticate(reason: "Change biometric unlock for your health archive", requireBiometrics: enabled), session?.token == identity else { return }
+            guard try await MobilePlatform.authenticate(reason: uiText("Change biometric unlock for your health archive"), requireBiometrics: enabled), session?.token == identity else { return }
             try credentials.setBiometricUnlock(enabled)
             biometricUnlock = enabled
         } catch { errorMessage = error.localizedDescription }

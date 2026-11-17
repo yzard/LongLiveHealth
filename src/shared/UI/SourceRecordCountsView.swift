@@ -8,21 +8,21 @@ struct SourceRecordCountsView: View {
 
     var body: some View {
         List {
-            if loading { ProgressView("Loading sources") }
+            if loading { ProgressView(uiText("Loading sources")) }
             if let failure {
-                Text(failure).foregroundStyle(.secondary)
-                Button("Retry") { Task { await reload() } }
+                Text(uiMessage(failure)).foregroundStyle(.secondary)
+                Button(uiText("Retry")) { Task { await reload() } }
             } else if !loading && sources.isEmpty {
-                Text("No visible records. Sync to start archiving data.").foregroundStyle(.secondary)
+                Text(uiText("No visible records. Sync to start archiving data.")).foregroundStyle(.secondary)
             }
             ForEach(Array(sources.enumerated()), id: \.offset) { _, source in
                 VStack(alignment: .leading, spacing: 6) {
                     Text(model.sourceLabel(SourceNames.key(source)))
                     Text("\(source["platform"].stringValue) · \(HealthSyncProgress.name(source["record_type"].stringValue))").font(.caption)
-                    Text("\(Int(source["record_count"].numberValue ?? 0).formatted()) records").font(.caption)
+                    Text(uiText("\(Int(source["record_count"].numberValue ?? 0).formatted()) records")).font(.caption)
                 }
             }
-        }.mobileNavigationTitle("Sources Record Count").navigationBarTitleDisplayMode(.inline)
+        }.mobileNavigationTitle(uiText("Sources Record Count")).navigationBarTitleDisplayMode(.inline)
             .initialTask { await reload() }.refreshable { await reload() }
     }
 

@@ -10,8 +10,8 @@ struct CalendarPlanButton: View {
     @State private var saved = false
     var body: some View {
         VStack(alignment: .leading) {
-            Button(saved ? "Review another calendar copy" : "Review in Calendar") { showing = true }
-            if saved { InfoHelp(title: "Calendar copy saved", message: "Later changes to this plan do not update that copy.") }
+            Button(saved ? uiText("Review another calendar copy") : uiText("Review in Calendar")) { showing = true }
+            if saved { InfoHelp(title: uiText("Calendar copy saved"), message: uiText("Later changes to this plan do not update that copy.")) }
         }.sheet(isPresented: $showing) {
             CalendarEventEditor(title: title, start: start, durationMinutes: durationMinutes) { action in
                 if action == .saved { saved = true }

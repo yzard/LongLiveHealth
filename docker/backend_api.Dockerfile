@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 poppler
 WORKDIR /workspace/src/backend_api
 COPY src/archive/ /workspace/src/archive/
 COPY src/frontend/ /workspace/src/frontend/
+COPY src/shared/Core/Resources/InterfaceChinese.json /workspace/src/shared/Core/Resources/InterfaceChinese.json
 COPY src/backend_api/ /workspace/src/backend_api/
 COPY tests/backend_api/ /workspace/tests/backend_api/
 # BuildKit keeps dependency compilation and registry downloads across source edits.

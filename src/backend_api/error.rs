@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    http::StatusCode,
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde::Serialize;
@@ -76,10 +76,15 @@ impl IntoResponse for AppError {
         } else {
             self.to_string()
         };
+        let language = crate::interface_language::Language::current();
         (
             status,
+            [(header::CONTENT_LANGUAGE, language.tag())],
             Json(ErrorBody {
-                error: ErrorDetail { code, message },
+                error: ErrorDetail {
+                    code,
+                    message: language.message(&message).to_owned(),
+                },
             }),
         )
             .into_response()

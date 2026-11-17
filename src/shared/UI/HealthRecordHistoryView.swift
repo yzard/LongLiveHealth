@@ -14,26 +14,26 @@ struct HealthRecordHistoryView: View {
         MetricDetailScreen(title: historicalOnly ? "Historical Values" : definition["title"].stringValue) {
             if !historicalOnly && definition["family"] == .string("characteristic") {
                 Section {
-                    Text("Latest value").font(.subheadline).foregroundStyle(.secondary)
-                    if loading { ProgressView("Loading latest value") }
+                    Text(uiText("Latest value")).font(.subheadline).foregroundStyle(.secondary)
+                    if loading { ProgressView(uiText("Loading latest value")) }
                     else {
                         Text(CharacteristicValue.text(kind: definition["kind"].stringValue, details: latestDetail["details"]))
                             .font(.largeTitle.bold()).accessibilityIdentifier("latest-characteristic-value")
                     }
                 }
             }
-            if !historicalOnly { Section("About this metric") { Text(definition["description"].stringValue) } }
-            Section("Historical Values") {
-                if let failure { Text(failure).foregroundStyle(.secondary) }
+            if !historicalOnly { Section(uiText("About this metric")) { Text(definition["description"].stringValue) } }
+            Section(uiText("Historical Values")) {
+                if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
                 ForEach(Array(HistoricalValue.newestFirst(records, timestamps: ["at"], dates: []).enumerated()), id: \.offset) { _, item in
                     NavigationLink { SpecialtyRecordView(model: model, reference: item) } label: {
                         HistoricalValueRow(timestamp: item["at"].numberValue, dateText: "",
                             source: model.sourceLabel(SourceNames.key(item)), value: HistoricalValue.record(item))
                     }
                 }
-                if loading { ProgressView("Loading records") }
-                if !loading && records.isEmpty && failure == nil { Text("No recorded history.") }
-                if cursor != .null { Button("Load more") { Task { await load() } }.disabled(loading) }
+                if loading { ProgressView(uiText("Loading records")) }
+                if !loading && records.isEmpty && failure == nil { Text(uiText("No recorded history.")) }
+                if cursor != .null { Button(uiText("Load more")) { Task { await load() } }.disabled(loading) }
             }
         }.initialTask { await load() }
     }

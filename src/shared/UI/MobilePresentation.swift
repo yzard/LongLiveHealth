@@ -36,15 +36,15 @@ extension View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search metrics", text: text).textFieldStyle(.plain)
-                    .autocorrectionDisabled().accessibilityLabel(Text("Search metrics"))
+                TextField(uiText("Search metrics"), text: text).textFieldStyle(.plain)
+                    .autocorrectionDisabled().accessibilityLabel(Text(uiText("Search metrics")))
                 if !text.wrappedValue.isEmpty {
                     Button { text.wrappedValue = "" } label: {
                         Text("×").font(.system(size: 22, weight: .medium)).foregroundStyle(.secondary)
                             .frame(width: 28, height: 28)
                             .background(Color.secondary.opacity(0.18), in: Circle())
                             .frame(width: 44, height: 44)
-                    }.buttonStyle(.plain).accessibilityLabel(Text("Clear search"))
+                    }.buttonStyle(.plain).accessibilityLabel(Text(uiText("Clear search")))
                 }
             }.padding(12).background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal, 16).padding(.bottom, 8)
@@ -73,7 +73,7 @@ struct CopyableText: View {
     init(_ value: String) { self.value = value }
     var body: some View {
         #if os(Android)
-        Text(value).contextMenu { Button("Copy") { MobilePlatform.copy(value) } }
+        Text(value).contextMenu { Button(uiText("Copy")) { MobilePlatform.copy(value) } }
         #else
         Text(value).textSelection(.enabled)
         #endif

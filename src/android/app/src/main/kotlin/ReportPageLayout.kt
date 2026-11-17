@@ -32,7 +32,7 @@ internal class ReportPageLayout(private val activity: AppCompatActivity, title: 
     val slider = SeekBar(activity).apply {
         progressTintList = ColorStateList.valueOf(accent)
         thumbTintList = ColorStateList.valueOf(accent)
-        contentDescription = "Report page"
+        contentDescription = activity.interfaceText("Report page")
     }
     val controls = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL }
     init {
@@ -46,7 +46,7 @@ internal class ReportPageLayout(private val activity: AppCompatActivity, title: 
             setImageResource(R.drawable.report_back)
             imageTintList = ColorStateList.valueOf(accent)
             scaleType = ImageView.ScaleType.CENTER
-            contentDescription = "Back"
+            contentDescription = activity.interfaceText("Back")
             background = GradientDrawable().apply { setColor(surface); cornerRadius = dp(14).toFloat() }
             setOnClickListener { activity.finish() }
         }, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.START or Gravity.CENTER_VERTICAL))

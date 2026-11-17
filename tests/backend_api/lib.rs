@@ -19,6 +19,7 @@ mod health_batch;
 mod health_connect;
 mod insight_history;
 mod insights;
+mod interface_language;
 mod jobs;
 mod laboratory;
 mod lifecycle;

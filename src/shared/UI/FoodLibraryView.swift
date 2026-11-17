@@ -11,23 +11,23 @@ struct FoodLibraryView: View {
     var body: some View {
         List {
             Section {
-                Picker("Library", selection: $kind) { Text("Foods").tag("food"); Text("Recipes").tag("recipe"); Text("Goals").tag("nutrition_goals") }
-                NavigationLink("Look up a barcode", destination: FoodLookupView(model: model))
-                Button("Add entry") { editor = Selection(existing: nil, kind: kind) }
-                InfoHelp(title: "Food library", message: "Your local food database retains label sources. Review portions before saving. Missing nutrients remain unknown.")
-                InfoHelp(title: "Nutrients", message: "Nutrient names include energy_kcal, protein_g, carbohydrate_g, fat_g, fiber_g, water_ml, sodium_mg, calcium_mg, iron_mg and vitamin_d_ug.")
-                if let failure { Text(failure).foregroundStyle(.secondary) }
+                Picker(uiText("Library"), selection: $kind) { Text(uiText("Foods")).tag("food"); Text(uiText("Recipes")).tag("recipe"); Text(uiText("Goals")).tag("nutrition_goals") }
+                NavigationLink(uiText("Look up a barcode"), destination: FoodLookupView(model: model))
+                Button(uiText("Add entry")) { editor = Selection(existing: nil, kind: kind) }
+                InfoHelp(title: uiText("Food library"), message: uiText("Your local food database retains label sources. Review portions before saving. Missing nutrients remain unknown."))
+                InfoHelp(title: uiText("Nutrients"), message: uiText("Nutrient names include energy_kcal, protein_g, carbohydrate_g, fat_g, fiber_g, water_ml, sodium_mg, calcium_mg, iron_mg and vitamin_d_ug."))
+                if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
             }
             ForEach(entries.filter { query.isEmpty || $0["entry"]["content"].formattedJSON.localizedCaseInsensitiveContains(query) }, id: \.identifier) { item in
                 Section {
-                    Text(item["entry"]["content"]["name"].stringValue.isEmpty ? "Daily targets" : item["entry"]["content"]["name"].stringValue).font(.headline)
+                    Text(item["entry"]["content"]["name"].stringValue.isEmpty ? uiText("Daily targets") : item["entry"]["content"]["name"].stringValue).font(.headline)
                     Text(item["entry"]["content"]["source"].stringValue).font(.caption)
-                    Button("Edit") { editor = Selection(existing: item, kind: kind) }
-                    if kind != "nutrition_goals" { NavigationLink("Measure a portion") { FoodPortionView(model: model, item: item) } }
-                    Button("Delete", role: .destructive) { Task { await remove(item) } }
+                    Button(uiText("Edit")) { editor = Selection(existing: item, kind: kind) }
+                    if kind != "nutrition_goals" { NavigationLink(uiText("Measure a portion")) { FoodPortionView(model: model, item: item) } }
+                    Button(uiText("Delete"), role: .destructive) { Task { await remove(item) } }
                 }
             }
-        }.mobileNavigationTitle("Food library").searchable(text: $query, prompt: "Name, brand or barcode")
+        }.mobileNavigationTitle(uiText("Food library")).searchable(text: $query, prompt: "Name, brand or barcode")
             .initialTask(id: kind) { await load() }.refreshable { await load() }
             .onChange(of: model.entryMutation) { _, change in if let change { entries = change.applying(to: entries) { $0["entry"]["kind"].stringValue == kind } } }
             .sheet(item: $editor) { selection in
@@ -62,16 +62,16 @@ struct FoodPortionView: View {
     var body: some View {
         Form {
             Text(item["entry"]["content"]["name"].stringValue)
-            TextField("Amount in " + unit, text: $amount).keyboardType(.decimalPad)
-            Picker("Meal", selection: $meal) { ForEach(["breakfast", "lunch", "dinner", "snack", "drink"], id: \.self) { Text($0.capitalized).tag($0) } }
-            Button("Calculate portion") { Task { await calculate() } }.disabled(loading)
-            if let failure { Text(failure).foregroundStyle(.secondary) }
+            TextField(uiText("Amount in \(unit)"), text: $amount).keyboardType(.decimalPad)
+            Picker(uiText("Meal"), selection: $meal) { ForEach(["breakfast", "lunch", "dinner", "snack", "drink"], id: \.self) { Text(uiState($0)).tag($0) } }
+            Button(uiText("Calculate portion")) { Task { await calculate() } }.disabled(loading)
+            if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
             if result != .null {
-                ForEach(result["nutrients"].objectValue.keys.sorted(), id: \.self) { key in LabeledContent(key, value: result["nutrients"][key].numberValue?.formatted() ?? "Unknown") }
-                Text("Incomplete nutrients: " + result["incomplete_nutrients"].arrayValue.map(\.stringValue).joined(separator: ", ")).font(.caption)
+                ForEach(result["nutrients"].objectValue.keys.sorted(), id: \.self) { key in LabeledContent(key, value: result["nutrients"][key].numberValue?.formatted() ?? uiText("Unknown")) }
+                Text(uiText("Incomplete nutrients: \(result["incomplete_nutrients"].arrayValue.map { uiState($0.stringValue) }.joined(separator: ", "))")).font(.caption)
                 EditorLink("Review and save food log") { LogEditor(model: model, existing: nil, initialKind: "nutrition", initialValues: draft(), initialDate: Date()) }
             }
-        }.mobileNavigationTitle("Food portion").onChange(of: amount) { _, _ in result = .null }.onChange(of: meal) { _, _ in result = .null }
+        }.mobileNavigationTitle(uiText("Food portion")).onChange(of: amount) { _, _ in result = .null }.onChange(of: meal) { _, _ in result = .null }
     }
     private func draft() -> [String: String] {
         var values = ["food": result["food"].stringValue, "meal": result["meal"].stringValue]
@@ -102,20 +102,20 @@ struct RecipeIngredientsEditor: View {
     @State var failure: String?
     private var ingredients: [JSONValue] { guard let data = value.data(using: .utf8) else { return [] }; return (try? JSONDecoder().decode([JSONValue].self, from: data)) ?? [] }
     var body: some View {
-        Section("Ingredient snapshots") {
+        Section(uiText("Ingredient snapshots")) {
             ForEach(Array(ingredients.enumerated()), id: \.offset) { index, item in
-                HStack { Text(item["food_name"].stringValue + " · " + (item["grams"].numberValue?.formatted() ?? "") + " g"); Spacer(); Button("Remove") { var items = ingredients; items.remove(at: index); save(items) } }
+                HStack { Text(item["food_name"].stringValue + " · " + (item["grams"].numberValue?.formatted() ?? "") + " g"); Spacer(); Button(uiText("Remove")) { var items = ingredients; items.remove(at: index); save(items) } }
             }
-            SelectionPicker(title: "Food", selection: $selected, placeholder: "Select a saved food", choices: foods.map { MenuChoice(id: $0["record_id"].stringValue, title: $0["entry"]["content"]["name"].stringValue) })
-            TextField("Ingredient grams", text: $grams).keyboardType(.decimalPad)
-            Button("Add ingredient snapshot") {
+            SelectionPicker(title: uiText("Food"), selection: $selected, placeholder: uiText("Select a saved food"), choices: foods.map { MenuChoice(id: $0["record_id"].stringValue, title: $0["entry"]["content"]["name"].stringValue) })
+            TextField(uiText("Ingredient grams"), text: $grams).keyboardType(.decimalPad)
+            Button(uiText("Add ingredient snapshot")) {
                 guard let food = foods.first(where: { $0["record_id"].stringValue == selected }), let number = Double(grams), number.isFinite, number > 0 else { failure = "Select a food and enter positive grams."; return }
                 let content = food["entry"]["content"]
                 var items = ingredients
                 items.append(.object(["food_name": content["name"], "grams": .number(number), "nutrients_per_100g": content["nutrients_per_100g"], "source": .string(content["source"].stringValue + " · " + food["record_id"].stringValue + " revision " + String(Int(food["version"].numberValue ?? 0)))]))
                 save(items); grams = ""; failure = nil
             }
-            if let failure { Text(failure).font(.caption) }
+            if let failure { Text(uiMessage(failure)).font(.caption) }
         }.initialTask {
             guard let client = model.client, let token = model.session?.token else { return }
             do { let response = try await model.request("wellness/library", body: .object(["kind": .string("food")]))

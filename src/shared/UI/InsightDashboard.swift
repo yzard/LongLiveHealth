@@ -23,12 +23,12 @@ struct InsightDashboardCard: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
                 InsightSymbol(symbol: panel["symbol"].stringValue, color: tint)
-                Text(panel["title"].stringValue).font(.headline)
+                Text(uiMessage(panel["title"].stringValue)).font(.headline)
                 Spacer()
                 if !expanded { Image(systemName: "chevron.right").font(.caption.bold()) }
             }.foregroundStyle(tint)
             visual
-            Text(panel["summary"].stringValue).font(.subheadline).foregroundStyle(.secondary)
+            Text(uiMessage(panel["summary"].stringValue)).font(.subheadline).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -46,7 +46,7 @@ struct InsightDashboardCard: View {
                 HStack(spacing: 20) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(duration(seconds)).font(.system(size: 34, weight: .bold)).minimumScaleFactor(0.7)
-                        Text("Recorded sleep").font(.subheadline).foregroundStyle(.secondary)
+                        Text(uiText("Recorded sleep")).font(.subheadline).foregroundStyle(.secondary)
                         dated(session["end_at"])
                     }
                     Spacer(minLength: 0)
@@ -55,15 +55,15 @@ struct InsightDashboardCard: View {
                             Circle().stroke(tint.opacity(0.18), lineWidth: 9)
                             Circle().trim(from: 0, to: min(1, seconds / (goal * 60)))
                                 .stroke(tint, style: StrokeStyle(lineWidth: 9, lineCap: .round)).rotationEffect(.degrees(-90))
-                            Text("Goal\n\(duration(goal * 60))").font(.caption.weight(.semibold)).multilineTextAlignment(.center)
+                            Text(uiText("Goal\n\(duration(goal * 60))")).font(.caption.weight(.semibold)).multilineTextAlignment(.center)
                         }.frame(width: 88, height: 88).padding(5)
-                            .accessibilityLabel("Recorded sleep \(duration(seconds)); personal goal \(duration(goal * 60))")
+                            .accessibilityLabel(Text(uiText("Recorded sleep \(duration(seconds)); personal goal \(duration(goal * 60))")))
                     }
                 }
                 InsightSleepStages(session: session).frame(height: expanded ? 140 : 88)
             } else {
-                Text("No complete recent session").font(.title2.bold())
-                Text("Sync sleep stages to see recorded sleep here.").font(.subheadline)
+                Text(uiText("No complete recent session")).font(.title2.bold())
+                Text(uiText("Sync sleep stages to see recorded sleep here.")).font(.subheadline)
             }
         case "readiness":
             HStack(alignment: .top, spacing: 10) {
@@ -71,11 +71,11 @@ struct InsightDashboardCard: View {
                 readinessFactor("Vitals", kinds: ["resting_heart_rate", "hrv_sdnn", "hrv_rmssd"], symbol: "heart.fill")
                 readinessFactor("Activity", kinds: ["workout", "active_energy"], symbol: "figure.walk")
             }
-            Text("Recovery review").font(.title2.bold())
-            Text("Based on changes from your own baseline").font(.caption).foregroundStyle(.secondary)
+            Text(uiText("Recovery review")).font(.title2.bold())
+            Text(uiText("Based on changes from your own baseline")).font(.caption).foregroundStyle(.secondary)
         case "vitals":
             let values = expanded ? evidence : evidence.enumerated().filter { index, item in !evidence.prefix(index).contains { $0["metric_id"] == item["metric_id"] } }.map { $0.element }
-            if values.isEmpty { Text("More readings needed").font(.title2.bold()) }
+            if values.isEmpty { Text(uiText("More readings needed")).font(.title2.bold()) }
             else {
                 ForEach(Array(values.enumerated()), id: \.offset) { _, value in
                     InsightVitalReading(value: value, tint: tint)
@@ -86,10 +86,10 @@ struct InsightDashboardCard: View {
             if let risk = cardiac["risk_percent"].numberValue {
                 Text("\(risk.formatted(.number.precision(.fractionLength(1))))%")
                     .font(.system(size: 44, weight: .bold)).foregroundStyle(tint)
-                Text("10-year total CVD risk").font(.subheadline)
+                Text(uiText("10-year total CVD risk")).font(.subheadline)
             } else {
-                Text("Complete your risk picture").font(.title2.bold())
-                Text("\(cardiac["missing"].arrayValue.count) inputs need review").font(.subheadline).foregroundStyle(.secondary)
+                Text(uiText("Complete your risk picture")).font(.title2.bold())
+                Text(uiText("\(cardiac["missing"].arrayValue.count) inputs need review")).font(.subheadline).foregroundStyle(.secondary)
             }
             let finding = cardiac["findings"].arrayValue.first
             if let finding {
@@ -97,13 +97,13 @@ struct InsightDashboardCard: View {
                     InsightSymbol(symbol: "exclamationmark.circle.fill", color: .orange)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(finding["title"].stringValue).font(.headline)
-                        Text(finding["text"].stringValue).font(.subheadline)
+                        Text(uiMessage(finding["text"].stringValue)).font(.subheadline)
                     }
                 }
             }
             HStack(spacing: 16) {
-                HStack(spacing: 6) { InsightSymbol(symbol: "heart.fill", color: .secondary); Text("Blood pressure") }
-                HStack(spacing: 6) { InsightSymbol(symbol: "drop.fill", color: .secondary); Text("Blood work") }
+                HStack(spacing: 6) { InsightSymbol(symbol: "heart.fill", color: .secondary); Text(uiText("Blood pressure")) }
+                HStack(spacing: 6) { InsightSymbol(symbol: "drop.fill", color: .secondary); Text(uiText("Blood work")) }
             }.font(.caption).foregroundStyle(.secondary)
         case "heart":
             if let reading = evidence.first(where: { $0["metric_id"] == .string("heart_rate") }) ?? evidence.first, let value = reading["latest"].numberValue {
@@ -118,11 +118,11 @@ struct InsightDashboardCard: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(reading["title"].stringValue).font(.headline)
                         dated(reading["latest_at"])
-                        Text("Daily reading").font(.caption).foregroundStyle(.secondary)
+                        Text(uiText("Daily reading")).font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 InsightSparkline(series: reading["series"].arrayValue, tint: tint).frame(height: expanded ? 150 : 70)
-            } else { Text("More heart readings needed").font(.title2.bold()) }
+            } else { Text(uiText("More heart readings needed")).font(.title2.bold()) }
         default:
             if let value = first["latest"].numberValue {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -135,12 +135,12 @@ struct InsightDashboardCard: View {
                 Text(first["title"].stringValue).font(.headline)
                 dated(first["latest_at"])
                 InsightSparkline(series: first["series"].arrayValue, tint: tint).frame(height: expanded ? 160 : 74)
-            } else { Text("More readings needed").font(.title2.bold()) }
+            } else { Text(uiText("More readings needed")).font(.title2.bold()) }
         }
     }
     @ViewBuilder private func dated(_ value: JSONValue) -> some View {
         if let at = value.numberValue {
-            Text(Date(timeIntervalSince1970: at).formatted(date: .abbreviated, time: .omitted))
+            Text(uiDate(Date(timeIntervalSince1970: at), dateStyle: .abbreviated, timeStyle: .omitted))
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -149,8 +149,8 @@ struct InsightDashboardCard: View {
         let changed = signals.contains { $0["cue"] != .string("no_review_cue") }
         return VStack(spacing: 10) {
             InsightSymbol(symbol: symbol, color: tint)
-            Text(title).font(.subheadline.weight(.semibold))
-            Text(signals.isEmpty ? "Need data" : changed ? "Review" : "No change cue")
+            Text(uiLabel(title)).font(.subheadline.weight(.semibold))
+            Text(signals.isEmpty ? uiText("Need data") : changed ? uiText("Review") : uiText("No change cue"))
                 .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }.frame(maxWidth: .infinity, minHeight: 105).padding(8)
             .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
@@ -178,7 +178,7 @@ struct InsightSparkline: View {
                                 y: (domain.upperBound - point["value"].numberValue!) / (domain.upperBound - domain.lowerBound) * max(1, geometry.size.height - 6))
                 }
             }
-        }.accessibilityLabel("Recorded measurements over time; full values and sources in details")
+        }.accessibilityLabel(Text(uiText("Recorded measurements over time; full values and sources in details")))
     }
 }
 
@@ -196,7 +196,7 @@ struct InsightVitalReading: View {
                 }
             }
             if let at = value["latest_at"].numberValue {
-                Text(Date(timeIntervalSince1970: at).formatted(date: .abbreviated, time: .omitted)).font(.caption2).foregroundStyle(.secondary)
+                Text(uiDate(Date(timeIntervalSince1970: at), dateStyle: .abbreviated, timeStyle: .omitted)).font(.caption2).foregroundStyle(.secondary)
             }
             if let low = value["baseline_low"].numberValue, let high = value["baseline_high"].numberValue, let latest = value["latest"].numberValue {
                 GeometryReader { geometry in
@@ -210,8 +210,8 @@ struct InsightVitalReading: View {
                         Circle().fill(tint).frame(width: 12, height: 12)
                             .offset(x: max(0, min(geometry.size.width - 12, (latest - domain.lowerBound) / span * geometry.size.width - 6)))
                     }
-                }.frame(height: 18).accessibilityLabel("Observed baseline \(low) to \(high); latest daily value \(latest)")
-            } else { Text("More baseline days needed").font(.caption).foregroundStyle(.secondary) }
+                }.frame(height: 18).accessibilityLabel(Text(uiText("Observed baseline \(low) to \(high); latest daily value \(latest)")))
+            } else { Text(uiText("More baseline days needed")).font(.caption).foregroundStyle(.secondary) }
         }
     }
 }
@@ -243,7 +243,7 @@ struct InsightSleepStages: View {
                     }
                 }
             }
-        }.accessibilityLabel("Recorded sleep stages: Awake, REM, Core, Deep and unspecified Asleep")
+        }.accessibilityLabel(Text(uiText("Recorded sleep stages: Awake, REM, Core, Deep and unspecified Asleep")))
     }
 }
 
@@ -265,26 +265,26 @@ struct InsightDetail: View {
                 InsightDashboardCard(model: model, panel: panel, response: response, expanded: true)
                 if panel["id"] == .string("cardiovascular") {
                     CardiovascularInsight(model: model, insight: response["cardiovascular"])
-                    Button("Risk context") { editingContext = true }.buttonStyle(.borderedProminent)
+                    Button(uiText("Risk context")) { editingContext = true }.buttonStyle(.borderedProminent)
                 } else if panel["id"] == .string("readiness") {
                     RecoveryInsight(model: model, insight: recoveryEvidence)
                 } else {
                     InsightHeading(insight: panel)
                     if panel["id"] == .string("sleep"), panel["source"] != .null {
                         Text(model.sourceLabel(panel["source"].stringValue, name: "")).font(.subheadline).foregroundStyle(.secondary)
-                        Text("Longest complete session on the latest recorded wake date").font(.caption).foregroundStyle(.secondary)
+                        Text(uiText("Longest complete session on the latest recorded wake date")).font(.caption).foregroundStyle(.secondary)
                     }
                     ForEach(Array(panel["evidence"].arrayValue.enumerated()), id: \.offset) { _, card in
                         InsightEvidencePlot(model: model, card: card)
                     }
                     if panel["evidence"].arrayValue.isEmpty {
-                        Text("Sync the corresponding measurements to see your history here.").foregroundStyle(.secondary)
+                        Text(uiText("Sync the corresponding measurements to see your history here.")).foregroundStyle(.secondary)
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(20)
         }
-        .navigationTitle(panel["title"].stringValue).navigationBarTitleDisplayMode(.inline)
-        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        .navigationTitle(uiMessage(panel["title"].stringValue)).navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .confirmationAction) { Button(uiText("Done")) { dismiss() } } }
         .sheet(isPresented: $editingContext) { NavigationStack { CardiovascularContextEditor(model: model) } }
     }
 }

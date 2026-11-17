@@ -25,11 +25,11 @@ private struct DocumentPreview: View {
                 }
                 else if let image = UIImage(contentsOfFile: location.url.path) {
                     ScrollView([.horizontal, .vertical]) { Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: 900).padding() }
-                } else { ContentUnavailableView("Preview unavailable", systemImage: "doc.questionmark") }
+                } else { ContentUnavailableView(uiText("Preview unavailable"), systemImage: "doc.questionmark") }
             }
-            .navigationTitle("Original · page \(location.page)")
+            .navigationTitle(uiText("Original · page \(location.page)"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(uiText("Done")) { dismiss() } } }
         }
     }
 }
@@ -136,23 +136,23 @@ struct CameraReportReview: View {
         NavigationStack {
             VStack(spacing: 16) {
                 if pages.images.isEmpty {
-                    ContentUnavailableView("No pages", systemImage: "doc", description: Text("All photos have been removed."))
+                    ContentUnavailableView(uiText("No pages"), systemImage: "doc", description: Text(uiText("All photos have been removed.")))
                 } else {
                     TabView(selection: $pages.selected) {
                         ForEach(pages.images.indices, id: \.self) { index in
                             Image(uiImage: pages.images[index])
                                 .resizable().scaledToFit().padding(.horizontal)
-                                .accessibilityLabel("Report page \(index + 1)")
+                                .accessibilityLabel(uiText("Report page \(index + 1)"))
                                 .tag(index)
                         }
                     }.tabViewStyle(.page(indexDisplayMode: .never))
-                    Text("Page \(pages.selected + 1) of \(pages.images.count)")
+                    Text(uiText("Page \(pages.selected + 1) of \(pages.images.count)"))
                         .accessibilityIdentifier("camera-page-count")
                     if pages.images.count > 1 {
                         Slider(value: Binding(get: { Double(pages.selected) }, set: { pages.selected = Int($0) }),
                                in: 0...Double(pages.images.count - 1), step: 1)
-                            .accessibilityLabel("Browse report pages")
-                            .accessibilityValue("Page \(pages.selected + 1) of \(pages.images.count)")
+                            .accessibilityLabel(uiText("Browse report pages"))
+                            .accessibilityValue(uiText("Page \(pages.selected + 1) of \(pages.images.count)"))
                             .padding(.horizontal)
                     }
                     ScrollViewReader { proxy in
@@ -165,23 +165,23 @@ struct CameraReportReview: View {
                                             .background(pages.selected == index ? Color.accentColor.opacity(0.2) : Color.clear)
                                             .clipShape(RoundedRectangle(cornerRadius: 6))
                                             .overlay(RoundedRectangle(cornerRadius: 6).stroke(pages.selected == index ? Color.accentColor : Color.clear, lineWidth: 2))
-                                    }.accessibilityLabel("Page \(index + 1)")
+                                    }.accessibilityLabel(uiText("Page \(index + 1)"))
                                         .accessibilityAddTraits(pages.selected == index ? .isSelected : [])
                                         .id(index)
                                 }
                             }.padding(.horizontal)
                         }.onChange(of: pages.selected) { _, index in proxy.scrollTo(index, anchor: .center) }
                     }
-                    Button("Delete Photo", systemImage: "trash", role: .destructive) { pages.deleteSelected() }
+                    Button(uiText("Delete Photo"), systemImage: "trash", role: .destructive) { pages.deleteSelected() }
                         .padding(.bottom)
                 }
             }
-            .navigationTitle("Review Photos")
+            .navigationTitle(uiText("Review Photos"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: cancel) }
+                ToolbarItem(placement: .cancellationAction) { Button(uiText("Cancel"), action: cancel) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Import") {
+                    Button(uiText("Import")) {
                         do { completion(.success(try pages.pdf())) }
                         catch { completion(.failure(error)) }
                     }.disabled(pages.images.isEmpty)

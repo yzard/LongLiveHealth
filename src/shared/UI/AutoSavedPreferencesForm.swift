@@ -16,11 +16,11 @@ struct AutoSavedPreferencesForm<Content: View>: View {
         Form {
             content(snapshot["preferences"], update)
                 .disabled(loading || saving || snapshot == .null)
-            if saving { ProgressView("Saving…") }
+            if saving { ProgressView(uiText("Saving…")) }
             if let failure {
                 Section {
-                    Text(failure).foregroundStyle(.red)
-                    Button("Reload current settings") { Task { await load() } }.disabled(saving)
+                    Text(uiMessage(failure)).foregroundStyle(.red)
+                    Button(uiText("Reload current settings")) { Task { await load() } }.disabled(saving)
                 }
             }
         }
@@ -28,7 +28,7 @@ struct AutoSavedPreferencesForm<Content: View>: View {
         .interactiveDismissDisabled(saving)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button { dismiss() } label: { Label("Back", systemImage: "chevron.left") }
+                Button { dismiss() } label: { Label(uiText("Back"), systemImage: "chevron.left") }
                     .disabled(saving)
             }
         }

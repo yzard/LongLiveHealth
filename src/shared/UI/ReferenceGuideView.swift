@@ -24,10 +24,10 @@ struct ReferenceGuideView: View {
         if guidance != .null {
             VStack(alignment: .leading, spacing: 6) {
                 if assessment != .null {
-                    Text("Latest measurement in this interval · \(assessment["label"].stringValue)")
+                    Text(uiText("Latest measurement in this interval · \(assessment["label"].stringValue)"))
                         .font(.subheadline).foregroundStyle(assessment["status"] == .string("in_range") ? Color.green : Color.primary)
                     if !assessment["reason"].stringValue.isEmpty { Text(assessment["reason"].stringValue).font(.caption).foregroundStyle(.secondary) }
-                    if assessment["kind"] == .string("report_reference") { Text("Source: \(sourceName.isEmpty ? "Original report reference interval" : sourceName)").font(.caption).foregroundStyle(.secondary) }
+                    if assessment["kind"] == .string("report_reference") { Text(uiText("Source: \(sourceName.isEmpty ? "Original report reference interval" : sourceName)")).font(.caption).foregroundStyle(.secondary) }
                 } else if !guidance["reason"].stringValue.isEmpty {
                     Text(guidance["reason"].stringValue).font(.caption).foregroundStyle(.secondary)
                 }
@@ -39,7 +39,7 @@ struct ReferenceGuideView: View {
                                     Text(population(rule)).font(.caption.bold())
                                     if rule["bands"].arrayValue.isEmpty { Text(interval(rule)).font(.caption) }
                                     ForEach(Array(rule["bands"].arrayValue.enumerated()), id: \.offset) { _, band in
-                                        Text("\(interval(band)) · \(band["label"].stringValue)").font(.caption)
+                                        Text("\(interval(band)) · \(uiLabel(band["label"].stringValue))").font(.caption)
                                     }
                                     if case .object(let context) = rule["context"], !context.isEmpty {
                                         Text(context.keys.sorted().map { "\($0.replacingOccurrences(of: "_", with: " ")): \(context[$0]?.stringValue ?? "")" }.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
@@ -77,7 +77,7 @@ struct ReferenceGuideButton: View {
                 .font(.body).frame(minWidth: 44, minHeight: 44)
         }
         .buttonStyle(.borderless)
-        .accessibilityLabel(Text("About Reference Levels"))
+        .accessibilityLabel(Text(uiText("About Reference Levels")))
     }
 }
 
@@ -93,12 +93,12 @@ struct ReferenceGuidePage: View {
                 ReferenceGuideView(guidance: guidance, assessment: assessment,
                     sourceName: model.sourceLabel(assessment["reference_origin"]["source_key"].stringValue,
                                                   name: assessment["reference_origin"]["name"].stringValue))
-                if let failure { Text(failure).foregroundStyle(.secondary) }
+                if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
                 if !assessment["reference_origin"]["report_id"].stringValue.isEmpty {
-                    Button("View original report") { Task { await openOriginal() } }
+                    Button(uiText("View original report")) { Task { await openOriginal() } }
                 }
             }.padding()
-        }.mobileNavigationTitle("Reference Levels").navigationBarTitleDisplayMode(.inline)
+        }.mobileNavigationTitle(uiText("Reference Levels")).navigationBarTitleDisplayMode(.inline)
             .originalReportPreview($preview)
     }
     private func openOriginal() async {

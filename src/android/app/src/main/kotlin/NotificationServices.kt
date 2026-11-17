@@ -46,7 +46,7 @@ class ReminderWorker(context: Context, parameters: WorkerParameters) : Coroutine
     override suspend fun doWork(): Result {
         val id = inputData.getString("id") ?: return Result.failure()
         val manager = applicationContext.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel("reminders", "Reminders", NotificationManager.IMPORTANCE_DEFAULT))
+        manager.createNotificationChannel(NotificationChannel("reminders", applicationContext.interfaceText("Reminders"), NotificationManager.IMPORTANCE_DEFAULT))
         if (!NotificationManagerCompat.from(applicationContext).areNotificationsEnabled()) return Result.failure()
         val notification = Notification.Builder(applicationContext, "reminders").setSmallIcon(android.R.drawable.ic_popup_reminder)
             .setContentTitle(inputData.getString("title")).setContentText(inputData.getString("body"))

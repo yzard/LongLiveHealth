@@ -11,12 +11,12 @@ struct MealPlannerView: View {
     struct Selection: Identifiable { let id = UUID(); let existing: JSONValue?; let values: [String: String] }
     var body: some View {
         List {
-            Section("Seven-day plan") {
-                DatePicker("Starting date", selection: $date, displayedComponents: .date)
-                InfoHelp(title: "Meal plans", message: "Planned meals do not count as actual intake. Choose a date when saving each plan.")
-                if let failure { Text(failure).foregroundStyle(.secondary) }
+            Section(uiText("Seven-day plan")) {
+                DatePicker(uiText("Starting date"), selection: $date, displayedComponents: .date)
+                InfoHelp(title: uiText("Meal plans"), message: uiText("Planned meals do not count as actual intake. Choose a date when saving each plan."))
+                if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
             }
-            Section("Plan from a saved recipe") {
+            Section(uiText("Plan from a saved recipe")) {
                 ForEach(Array(recipes.enumerated()), id: \.offset) { _, recipe in
                     Button(recipe["entry"]["content"]["name"].stringValue) {
                         var values = EntryDraft.decode(recipe["entry"])
@@ -24,33 +24,33 @@ struct MealPlannerView: View {
                         editing = Selection(existing: nil, values: values)
                     }
                 }
-                NavigationLink("Manage recipes", destination: FoodLibraryView(model: model))
+                NavigationLink(uiText("Manage recipes"), destination: FoodLibraryView(model: model))
             }
-            Section("Planned meals") {
+            Section(uiText("Planned meals")) {
                 ForEach(Array(result["plans"].arrayValue.enumerated()), id: \.offset) { _, plan in
                     VStack(alignment: .leading) {
                         Text(plan["entry"]["content"]["recipe"]["name"].stringValue)
                         Text(Date(timeIntervalSince1970: plan["at"].numberValue ?? 0).formatted())
-                        Text("\(plan["entry"]["content"]["planned_servings"].numberValue?.formatted() ?? "Unknown") servings · \(plan["entry"]["content"]["status"].stringValue)").font(.caption)
-                        Button("Edit or skip") { editing = Selection(existing: plan, values: [:]) }
-                        Button("Delete plan", role: .destructive) { deleting = plan }
+                        Text(uiText("\(plan["entry"]["content"]["planned_servings"].numberValue?.formatted() ?? "Unknown") servings · \(plan["entry"]["content"]["status"].stringValue)")).font(.caption)
+                        Button(uiText("Edit or skip")) { editing = Selection(existing: plan, values: [:]) }
+                        Button(uiText("Delete plan"), role: .destructive) { deleting = plan }
                     }
                 }
             }
-            Section("Shopping quantities") {
+            Section(uiText("Shopping quantities")) {
                 ForEach(Array(result["shopping"].arrayValue.enumerated()), id: \.offset) { _, item in
                     VStack(alignment: .leading) {
-                        Text("\(item["food"].stringValue): \(item["grams"].numberValue?.formatted() ?? "Unknown") g")
+                        Text(uiText("\(item["food"].stringValue): \(item["grams"].numberValue?.formatted() ?? "Unknown") g"))
                         Text(item["source"].stringValue).font(.caption)
                     }
                 }
                 if !result["shopping"].arrayValue.isEmpty {
-                    ShareLink("Share shopping list", item: result["shopping"].arrayValue.map { "\($0["food"].stringValue): \($0["grams"].numberValue?.formatted() ?? "Unknown") g (\($0["source"].stringValue))" }.joined(separator: "\n"))
+                    ShareLink(uiText("Share shopping list"), item: result["shopping"].arrayValue.map { "\($0["food"].stringValue): \($0["grams"].numberValue?.formatted() ?? "Unknown") g (\($0["source"].stringValue))" }.joined(separator: "\n"))
                 }
             }
-        }.confirmationDialog("Delete this meal plan?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
-            Button("Delete", role: .destructive) { if let plan = deleting { Task { await remove(plan) } } }
-        }.mobileNavigationTitle("Meal planner").initialTask(id: date) { await load() }.refreshable { await load() }
+        }.confirmationDialog(uiText("Delete this meal plan?"), isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
+            Button(uiText("Delete"), role: .destructive) { if let plan = deleting { Task { await remove(plan) } } }
+        }.mobileNavigationTitle(uiText("Meal planner")).initialTask(id: date) { await load() }.refreshable { await load() }
             .onChange(of: model.entryMutation) { _, _ in Task { await load() } }
             .sheet(item: $editing) { selection in NavigationStack { LogEditor(model: model, existing: selection.existing, initialKind: "meal_plan", initialValues: selection.values, initialDate: date) } }
     }

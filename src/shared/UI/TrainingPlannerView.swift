@@ -11,40 +11,40 @@ struct TrainingPlannerView: View {
     var body: some View {
         List {
             Section {
-                Picker("View", selection: $kind) { Text("Calendar").tag("calendar"); Text("Exercises").tag("exercise"); Text("Templates").tag("workout_template") }
-                if kind == "calendar" { DatePicker("Date", selection: $date, displayedComponents: .date) }
-                Button("Add " + (kind == "calendar" ? "planned workout" : kind.replacingOccurrences(of: "_", with: " "))) {
+                Picker(uiText("View"), selection: $kind) { Text(uiText("Calendar")).tag("calendar"); Text(uiText("Exercises")).tag("exercise"); Text(uiText("Templates")).tag("workout_template") }
+                if kind == "calendar" { DatePicker(uiText("Date"), selection: $date, displayedComponents: .date) }
+                Button(uiText("Add \(kind == "calendar" ? uiText("planned workout") : uiState(kind))")) {
                     editor = Selection(existing: nil, kind: kind == "calendar" ? "planned_workout" : kind, values: [:])
                 }
-                InfoHelp(title: "Training plans", message: "Plans and templates do not add completed training or load. Record the completed session in Daily logs.")
-                if let failure { Text(failure).foregroundStyle(.secondary) }
+                InfoHelp(title: uiText("Training plans"), message: uiText("Plans and templates do not add completed training or load. Record the completed session in Daily logs."))
+                if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
             }
-            if entries.isEmpty { Text("No entries in this view.").foregroundStyle(.secondary) }
+            if entries.isEmpty { Text(uiText("No entries in this view.")).foregroundStyle(.secondary) }
             ForEach(entries, id: \.identifier) { item in
                 Section {
                     let content = item["entry"]["content"]
                     Text(content["name"].stringValue.isEmpty ? (content["title"].stringValue.isEmpty ? content["activity"].stringValue : content["title"].stringValue) : content["name"].stringValue).font(.headline)
-                    Text(item["entry"]["kind"].stringValue.replacingOccurrences(of: "_", with: " ")).font(.caption)
+                    Text(uiState(item["entry"]["kind"].stringValue)).font(.caption)
                     if kind == "calendar" { Text(Date(timeIntervalSince1970: item["at"].numberValue ?? 0).formatted()) }
                     ForEach(EntryDraft.fields(item["entry"]["kind"].stringValue), id: \.key) { field in
-                        LabeledContent(field.label, value: EntryDraft.decode(item["entry"])[field.key] ?? "")
+                        LabeledContent(uiLabel(field.label), value: EntryDraft.decode(item["entry"])[field.key] ?? "")
                     }
                     if item["entry"]["kind"] == .string("planned_workout"), item["entry"]["content"]["status"] == .string("planned"), let at = item["at"].numberValue, let duration = item["entry"]["content"]["duration_minutes"].numberValue {
                         CalendarPlanButton(title: item["entry"]["content"]["title"].stringValue, start: Date(timeIntervalSince1970: at), durationMinutes: duration)
                     }
-                    Button("Edit") { editor = Selection(existing: item, kind: item["entry"]["kind"].stringValue, values: [:]) }
+                    Button(uiText("Edit")) { editor = Selection(existing: item, kind: item["entry"]["kind"].stringValue, values: [:]) }
                     if kind == "workout_template" {
-                        Button("Schedule a copy") {
+                        Button(uiText("Schedule a copy")) {
                             var values = EntryDraft.decode(item["entry"])
                             values["title"] = content["name"].stringValue
                             values["note"] = "Copied from template " + item["record_id"].stringValue + " revision " + String(Int(item["version"].numberValue ?? 0))
                             editor = Selection(existing: nil, kind: "planned_workout", values: values)
                         }
                     }
-                    Button("Delete", role: .destructive) { Task { await remove(item) } }
+                    Button(uiText("Delete"), role: .destructive) { Task { await remove(item) } }
                 }
             }
-        }.mobileNavigationTitle("Training planner")
+        }.mobileNavigationTitle(uiText("Training planner"))
             .initialTask(id: kind + date.formatted(.iso8601)) { await load() }
             .refreshable { await load() }
             .onChange(of: model.entryMutation) { _, change in if let change { entries = change.applying(to: entries) { kind == "calendar" ? (["planned_workout", "training", "training_day"].contains($0["entry"]["kind"].stringValue) && Calendar.current.isDate(Date(timeIntervalSince1970: $0["at"].numberValue ?? 0), inSameDayAs: date)) : $0["entry"]["kind"].stringValue == kind } } }

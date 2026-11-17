@@ -33,7 +33,7 @@ class ReportCaptureActivity : AppCompatActivity() {
         savedInstanceState?.getStringArrayList("pages")?.mapTo(pages) { File(it) }
         index = savedInstanceState?.getInt("index") ?: 0
         pending = savedInstanceState?.getString("pending")?.let { File(it) }
-        val layout = ReportPageLayout(this, "Camera report", cameraControls = true)
+        val layout = ReportPageLayout(this, interfaceText("Camera report"), cameraControls = true)
         label = layout.label
         image = layout.image
         slider = layout.slider.apply { setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -43,9 +43,9 @@ class ReportCaptureActivity : AppCompatActivity() {
         }) }
         controls = layout.controls
         fun button(title: String, action: () -> Unit) { layout.action(title, action) }
-        button("Camera") { capture() }
-        button("Delete") { if (pages.isNotEmpty()) { pages.removeAt(index).delete(); index = index.coerceAtMost(pages.lastIndex).coerceAtLeast(0); render() } }
-        button("Import") { if (pages.isNotEmpty()) export() }
+        button(interfaceText("Camera")) { capture() }
+        button(interfaceText("Delete")) { if (pages.isNotEmpty()) { pages.removeAt(index).delete(); index = index.coerceAtMost(pages.lastIndex).coerceAtLeast(0); render() } }
+        button(interfaceText("Import")) { if (pages.isNotEmpty()) export() }
         render()
     }
     override fun onSaveInstanceState(state: Bundle) {
@@ -60,7 +60,7 @@ class ReportCaptureActivity : AppCompatActivity() {
     }
     private fun render() {
         preview?.cancel()
-        label.text = if (pages.isEmpty()) "Take report photos" else "Page ${index + 1} of ${pages.size}"
+        label.text = if (pages.isEmpty()) interfaceText("Take report photos") else interfaceText("Page {0} of {1}", index + 1, pages.size)
         controls.getChildAt(1).isEnabled = pages.isNotEmpty()
         controls.getChildAt(2).isEnabled = pages.isNotEmpty()
         slider.isEnabled = pages.size > 1
@@ -74,7 +74,7 @@ class ReportCaptureActivity : AppCompatActivity() {
                 val bitmap = withContext(Dispatchers.IO) { decode(file) }
                 if (isActive) image.setImageBitmap(bitmap) else bitmap.recycle()
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { label.text = error.message ?: "Could not preview photo" }
+            catch (error: Exception) { label.text = interfaceText(error.message ?: "Could not preview photo") }
         }
     }
     private fun decode(file: File): android.graphics.Bitmap {
@@ -121,7 +121,7 @@ class ReportCaptureActivity : AppCompatActivity() {
                 pages.forEach { it.delete() }; finish()
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
-                label.text = error.message ?: "Could not create report"
+                label.text = interfaceText(error.message ?: "Could not create report")
                 for (i in 0 until controls.childCount) controls.getChildAt(i).isEnabled = true
             }
         }

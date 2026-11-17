@@ -9,30 +9,30 @@ struct FoodLookupView: View {
     @State var failure: String?
     var body: some View {
         List {
-            Section("Open Food Facts") {
-                TextField("Barcode", text: $barcode).keyboardType(.numberPad)
-                InfoHelp(title: "Barcode lookup", message: "Searching sends this barcode to Open Food Facts. Your health archive stays on your server.")
-                Button("Look up product") { Task { await lookup() } }.disabled(loading)
+            Section(uiText("Open Food Facts")) {
+                TextField(uiText("Barcode"), text: $barcode).keyboardType(.numberPad)
+                InfoHelp(title: uiText("Barcode lookup"), message: uiText("Searching sends this barcode to Open Food Facts. Your health archive stays on your server."))
+                Button(uiText("Look up product")) { Task { await lookup() } }.disabled(loading)
                 if loading { ProgressView() }
-                if let failure { Text(failure).foregroundStyle(.secondary) }
+                if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
             }
             if result["candidate"] != .null {
-                Section("Review the label") {
+                Section(uiText("Review the label")) {
                     Text(result["candidate"]["content"]["name"].stringValue).font(.headline)
                     Text(result["candidate"]["content"]["brand"].stringValue)
                     ForEach(result["candidate"]["content"]["nutrients_per_100g"].objectValue.keys.sorted(), id: \.self) { key in
-                        LabeledContent(key.replacingOccurrences(of: "_", with: " "), value: result["candidate"]["content"]["nutrients_per_100g"][key].numberValue?.formatted() ?? "Unknown")
+                        LabeledContent(key.replacingOccurrences(of: "_", with: " "), value: result["candidate"]["content"]["nutrients_per_100g"][key].numberValue?.formatted() ?? uiText("Unknown"))
                     }
-                    Toggle("I confirmed these values are per 100 grams", isOn: $massConfirmed)
-                    InfoHelp(title: "Nutrient units", message: "Do not use values per 100 milliliters without a known density conversion.")
+                    Toggle(uiText("I confirmed these values are per 100 grams"), isOn: $massConfirmed)
+                    InfoHelp(title: uiText("Nutrient units"), message: uiText("Do not use values per 100 milliliters without a known density conversion."))
                     if massConfirmed {
                         EditorLink("Correct fields and save food") { LogEditor(model: model, existing: nil, initialKind: "food", initialValues: values(), initialDate: Date()) }
                     }
                     Text(result["attribution"].stringValue).font(.caption)
-                    Link("Open Food Facts database license", destination: URL(string: "https://world.openfoodfacts.org/terms-of-use")!)
+                    Link(uiText("Open Food Facts database license"), destination: URL(string: "https://world.openfoodfacts.org/terms-of-use")!)
                 }
             }
-        }.mobileNavigationTitle("Find food by barcode")
+        }.mobileNavigationTitle(uiText("Find food by barcode"))
     }
     private func values() -> [String: String] {
         var candidate = result["candidate"]

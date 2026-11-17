@@ -11,12 +11,12 @@ struct MealGlucoseView: View {
     @State var failure: String?
     var body: some View {
         List {
-            Section("Time alignment") {
-                DatePicker("Date", selection: $date, displayedComponents: .date)
-                TextField("Maximum sample gap (seconds)", text: $maximumGap).keyboardType(.numberPad)
-                InfoHelp(title: "Sampling interval", message: "900 seconds is an initial display parameter. Match the actual source sampling protocol.")
-                Button("Apply sampling gap") { Task { await load() } }
-                if let failure { Text(failure).foregroundStyle(.secondary) }
+            Section(uiText("Time alignment")) {
+                DatePicker(uiText("Date"), selection: $date, displayedComponents: .date)
+                TextField(uiText("Maximum sample gap (seconds)"), text: $maximumGap).keyboardType(.numberPad)
+                InfoHelp(title: uiText("Sampling interval"), message: uiText("900 seconds is an initial display parameter. Match the actual source sampling protocol."))
+                Button(uiText("Apply sampling gap")) { Task { await load() } }
+                if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
             }
             ForEach(Array(result["series"]["sources"].arrayValue.enumerated()), id: \.offset) { _, source in
                 Section(model.sourceLabel(source["source"].stringValue)) {
@@ -34,25 +34,25 @@ struct MealGlucoseView: View {
                                 RuleMark(x: .value("Event", Date(timeIntervalSince1970: at))).foregroundStyle(event["entry"]["kind"] == .string("nutrition") ? .orange : .purple).lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
                             }
                         }
-                    }.frame(height: 230).accessibilityLabel("Glucose source measurements with meal and training times. No causal relationship is estimated.")
+                    }.frame(height: 230).accessibilityLabel(Text(uiText("Glucose source measurements with meal and training times. No causal relationship is estimated.")))
                     #endif
-                    Text("Orange: meal · Purple: training · Glucose: mg/dL").font(.caption)
-                    Text(source["state"].stringValue.replacingOccurrences(of: "_", with: " "))
-                    if let coverage = source["glucose_summary"]["coverage_fraction"].numberValue { Text("Observed interval coverage: \((coverage * 100).formatted())%") }
+                    Text(uiText("Orange: meal · Purple: training · Glucose: mg/dL")).font(.caption)
+                    Text(uiState(source["state"].stringValue))
+                    if let coverage = source["glucose_summary"]["coverage_fraction"].numberValue { Text(uiText("Observed interval coverage: \((coverage * 100).formatted())%")) }
                 }
             }
-            Section("Recorded events") {
+            Section(uiText("Recorded events")) {
                 ForEach(Array(result["events"].arrayValue.enumerated()), id: \.offset) { _, event in
                     VStack(alignment: .leading) {
-                        Text(Date(timeIntervalSince1970: event["at"].numberValue ?? 0).formatted(date: .omitted, time: .shortened))
-                        Text(event["entry"]["kind"] == .string("nutrition") ? event["entry"]["content"]["food"].stringValue : "Training")
-                        if let carbohydrate = event["entry"]["content"]["carbohydrate_g"].numberValue { Text("Recorded carbohydrate: \(carbohydrate.formatted()) g").font(.caption) }
+                        Text(uiDate(Date(timeIntervalSince1970: event["at"].numberValue ?? 0), dateStyle: .omitted, timeStyle: .shortened))
+                        Text(event["entry"]["kind"] == .string("nutrition") ? event["entry"]["content"]["food"].stringValue : uiText("Training"))
+                        if let carbohydrate = event["entry"]["content"]["carbohydrate_g"].numberValue { Text(uiText("Recorded carbohydrate: \(carbohydrate.formatted()) g")).font(.caption) }
                     }
                 }
-                NavigationLink("Correct recorded events", destination: DailyLogsView(model: model))
+                NavigationLink(uiText("Correct recorded events"), destination: DailyLogsView(model: model))
             }
-            Section { if !result["notes"].arrayValue.isEmpty { InfoHelp(title: "Interpretation", message: result["notes"].arrayValue.map(\.stringValue).joined(separator: "\n\n")) } }
-        }.mobileNavigationTitle("Meals and glucose").initialTask(id: date) { await load() }
+            Section { if !result["notes"].arrayValue.isEmpty { InfoHelp(title: uiText("Interpretation"), message: result["notes"].arrayValue.map(\.stringValue).joined(separator: "\n\n")) } }
+        }.mobileNavigationTitle(uiText("Meals and glucose")).initialTask(id: date) { await load() }
     }
     private func load() async {
         guard let client = model.client, let token = model.session?.token else { return }

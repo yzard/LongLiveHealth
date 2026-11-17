@@ -15,10 +15,10 @@ class TransferService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel(CHANNEL, "Health transfers", NotificationManager.IMPORTANCE_LOW))
+        manager.createNotificationChannel(NotificationChannel(CHANNEL, interfaceText("Health transfers"), NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         startForeground(910, Notification.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.stat_sys_upload)
-            .setContentTitle("Long Live Health").setContentText(leases.values.firstOrNull() ?: "Finishing transfer")
+            .setContentTitle("Long Live Health").setContentText(leases.values.firstOrNull() ?: interfaceText("Finishing transfer"))
             .setContentIntent(open).setOngoing(true).build())
         synchronized(lock) {
             active = this

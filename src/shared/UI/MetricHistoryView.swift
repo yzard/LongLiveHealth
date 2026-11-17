@@ -30,11 +30,11 @@ struct MetricHistoryView: View {
     var body: some View {
         MetricDetailScreen(title: metricName) {
             if loading {
-                ProgressView("Loading measurements")
+                ProgressView(uiText("Loading measurements"))
             } else if let failure {
-                Text(failure).foregroundStyle(.secondary)
+                Text(uiMessage(failure)).foregroundStyle(.secondary)
             } else if currentHistory != .null && points.isEmpty && records.isEmpty {
-                Text("No historical values yet.").foregroundStyle(.secondary)
+                Text(uiText("No historical values yet.")).foregroundStyle(.secondary)
             }
             if showsChart {
                 MetricChartSection {
@@ -46,23 +46,23 @@ struct MetricHistoryView: View {
                     }
                 }
             }
-            Section("About this metric") {
+            Section(uiText("About this metric")) {
                 MetricAboutView(id: metric["metric_id"].stringValue, name: metricName)
                 ForEach(Array(currentHistory["metric"]["loinc"].arrayValue.enumerated()), id: \.offset) { _, entry in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("LOINC \(entry["code"].stringValue)").font(.subheadline.weight(.semibold))
-                        Text(entry["official_name"] == .null ? "Official name unavailable" : entry["official_name"].stringValue)
+                        Text(uiText("LOINC \(entry["code"].stringValue)")).font(.subheadline.weight(.semibold))
+                        Text(entry["official_name"] == .null ? uiText("Official name unavailable") : entry["official_name"].stringValue)
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
             if showsChart {
                 Section {
-                    NavigationLink("Historical Values") {
+                    NavigationLink(uiText("Historical Values")) {
                         List {
                             MetricHistoricalValuesSection(model: model, records: records, points: points)
                         }
-                        .mobileNavigationTitle("Historical Values")
+                        .mobileNavigationTitle(uiText("Historical Values"))
                         .navigationBarTitleDisplayMode(.inline)
                     }
                 }
@@ -72,7 +72,7 @@ struct MetricHistoryView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("Edit") { editing = true }
+                Button(uiText("Edit")) { editing = true }
             }
         }
         .sheet(isPresented: $editing) {
@@ -117,25 +117,25 @@ struct EditLabMetricView: View {
 
     var body: some View {
         Form {
-            TextField("Metric name", text: $name)
-            if let failure { Text(failure).foregroundStyle(.red) }
+            TextField(uiText("Metric name"), text: $name)
+            if let failure { Text(uiMessage(failure)).foregroundStyle(.red) }
         }
-        .mobileNavigationTitle("Edit metric")
+        .mobileNavigationTitle(uiText("Edit metric"))
         .onAppear { name = initialName }
         .interactiveDismissDisabled(name != initialName || saving)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") {
+                Button(uiText("Cancel")) {
                     if name == initialName { dismiss() } else { discard = true }
                 }.disabled(saving)
             }
             ToolbarItem(placement: .confirmationAction) {
-                Button("Save") { Task { await save() } }
+                Button(uiText("Save")) { Task { await save() } }
                     .disabled(saving || enteredName.isEmpty || enteredName == initialName || enteredName.utf8.count > 256)
             }
         }
-        .confirmationDialog("Discard changes?", isPresented: $discard) {
-            Button("Discard", role: .destructive) { dismiss() }
+        .confirmationDialog(uiText("Discard changes?"), isPresented: $discard) {
+            Button(uiText("Discard"), role: .destructive) { dismiss() }
         }
     }
 
@@ -163,19 +163,19 @@ struct MetricHistoricalValuesSection: View {
     @State var failure: String?
 
     var body: some View {
-        Section("Historical values") {
+        Section(uiText("Historical values")) {
             if !incompatibleUnits.isEmpty {
-                Text("A chart is unavailable because these units cannot be converted to a common unit: \(incompatibleUnits.joined(separator: ", ")).")
+                Text(uiText("A chart is unavailable because these units cannot be converted to a common unit: \(incompatibleUnits.joined(separator: ", "))."))
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if let failure { Text(failure).foregroundStyle(.secondary) }
+            if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
             let ids = Set(records.map(\.historyPointID).filter { !$0.isEmpty })
             let all = records + points.filter { $0.historyPointID.isEmpty || !ids.contains($0.historyPointID) }
             ForEach(Array(HistoricalValue.newestFirst(all, timestamps: ["timestamp"], dates: ["sampled_at"]).enumerated()), id: \.offset) { _, record in
                 DisclosureGroup {
                     Text(model.sourceLabel(record: record)).font(.subheadline)
                     if !record["original_records"].arrayValue.isEmpty {
-                        DisclosureGroup("Original results (\(record["original_records"].arrayValue.count))") {
+                        DisclosureGroup(uiText("Original results (\(record["original_records"].arrayValue.count))")) {
                             ForEach(Array(record["original_records"].arrayValue.enumerated()), id: \.offset) { _, item in
                                 let quantity = item["observation"]["valueQuantity"]
                                 let unit = quantity["unit"].stringValue.isEmpty ? quantity["code"].stringValue : quantity["unit"].stringValue
@@ -184,8 +184,8 @@ struct MetricHistoricalValuesSection: View {
                         }
                     }
                     if !record["report_id"].stringValue.isEmpty {
-                        Button("View original report") { Task { await showSource(record) } }
-                        NavigationLink("Review report", destination: ReportView(model: model, reportID: record["report_id"].stringValue))
+                        Button(uiText("View original report")) { Task { await showSource(record) } }
+                        NavigationLink(uiText("Review report"), destination: ReportView(model: model, reportID: record["report_id"].stringValue))
                     }
                     if !record["status"].stringValue.isEmpty { Text(record["status"].stringValue.capitalized).font(.caption) }
                 } label: {

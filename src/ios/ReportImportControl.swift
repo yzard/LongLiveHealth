@@ -13,7 +13,7 @@ struct ReportImportControl: View {
     @State private var choosingPhoto = false
     @State private var photo: PhotosPickerItem?
     var body: some View {
-        Button("Upload", systemImage: "square.and.arrow.up") { choosingImport = true }.disabled(model.isBusy)
+        Button(uiText("Upload"), systemImage: "square.and.arrow.up") { choosingImport = true }.disabled(model.isBusy)
         .sheet(isPresented: $choosingImport, onDismiss: {
             switch importAction {
             case "file": importing = true
@@ -26,12 +26,12 @@ struct ReportImportControl: View {
             NavigationStack {
                 Form {
                     Section {
-                        Button("Import PDF", systemImage: "doc") { importAction = "file"; choosingImport = false }
-                        Button("Import Images", systemImage: "photo.on.rectangle") { importAction = "photo"; choosingImport = false }
-                        Button("Camera", systemImage: "camera") { importAction = "scan"; choosingImport = false }
+                        Button(uiText("Import PDF"), systemImage: "doc") { importAction = "file"; choosingImport = false }
+                        Button(uiText("Import Images"), systemImage: "photo.on.rectangle") { importAction = "photo"; choosingImport = false }
+                        Button(uiText("Camera"), systemImage: "camera") { importAction = "scan"; choosingImport = false }
                             .disabled(!VNDocumentCameraViewController.isSupported)
                     }
-                }.navigationTitle("Import Blood Work").toolbar { Button("Cancel") { choosingImport = false } }
+                }.navigationTitle(uiText("Import Blood Work")).toolbar { Button(uiText("Cancel")) { choosingImport = false } }
             }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { result in

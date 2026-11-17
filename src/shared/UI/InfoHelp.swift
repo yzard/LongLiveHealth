@@ -27,9 +27,9 @@ struct InfoHelpButton: View {
                 #endif
         }
         .buttonStyle(.borderless)
-        .accessibilityLabel(Text("About \(title)"))
+        .accessibilityLabel(Text(uiText("About \(title)")))
         #if !os(Android)
-        .accessibilityHint(Text("Shows an explanation"))
+        .accessibilityHint(Text(uiText("Shows an explanation")))
         #endif
         #if os(Android)
         .sheet(isPresented: $presented) { helpContents }
@@ -46,7 +46,7 @@ struct InfoHelpButton: View {
                 HStack {
                     Text(title).font(.headline)
                     Spacer()
-                    Button("Done") { presented = false }
+                    Button(uiText("Done")) { presented = false }
                 }
                 Text(message).font(.body).foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)

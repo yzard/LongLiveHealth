@@ -20,6 +20,7 @@ pub mod health_archive;
 pub(crate) mod health_batch;
 pub(crate) mod health_connect;
 pub mod insights;
+mod interface_language;
 pub mod jobs;
 mod lab_metric_metadata;
 pub mod laboratory;

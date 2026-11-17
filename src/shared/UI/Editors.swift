@@ -37,18 +37,18 @@ struct ObservationEditor: View {
         NavigationStack {
             editorSurface
                 .interactiveDismissDisabled()
-                .alert("Could not save", isPresented: Binding(
+                .alert(uiText("Could not save"), isPresented: Binding(
                     get: { error != nil }, set: { if !$0 { error = nil } }
                 )) {
-                    Button("OK", role: .cancel) { error = nil }
+                    Button(uiText("OK"), role: .cancel) { error = nil }
                 } message: {
-                    Text(error ?? "")
+                    Text(uiMessage(error ?? ""))
                 }
                 .originalReportPreview($preview)
-                .alert("Submit as printed?", isPresented: $submitAsPrinted) {
-                    Button("Cancel", role: .cancel) {}
-                    Button("Submit for History") { Task { await submit(as: "submitted") } }
-                } message: { Text("The result is saved as printed. It may be unavailable in metric charts.") }
+                .alert(uiText("Submit as printed?"), isPresented: $submitAsPrinted) {
+                    Button(uiText("Cancel"), role: .cancel) {}
+                    Button(uiText("Submit for History")) { Task { await submit(as: "submitted") } }
+                } message: { Text(uiText("The result is saved as printed. It may be unavailable in metric charts.")) }
         }
     }
     private var isReview: Bool { observation != .null }
@@ -59,7 +59,7 @@ struct ObservationEditor: View {
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
                     cancelButton
-                    Text("Review result")
+                    Text(uiText("Review result"))
                         .font(.headline)
                         .lineLimit(1)
                         .frame(maxWidth: .infinity)
@@ -90,7 +90,7 @@ struct ObservationEditor: View {
             #if !os(Android)
             if isReview {
                 ToolbarItem(placement: .principal) {
-                    Text("Review result")
+                    Text(uiText("Review result"))
                         .font(.headline)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
@@ -114,25 +114,25 @@ struct ObservationEditor: View {
     @ViewBuilder private var editorForm: some View {
         let form = Form { reviewSections }
         if isReview {
-            form.navigationTitle("Review result").navigationBarTitleDisplayMode(.inline)
+            form.navigationTitle(uiText("Review result")).navigationBarTitleDisplayMode(.inline)
         } else {
-            form.mobileNavigationTitle("Add result")
+            form.mobileNavigationTitle(uiText("Add result"))
         }
     }
 
     private var cancelButton: some View {
-        Button("Cancel") { dismiss() }
+        Button(uiText("Cancel")) { dismiss() }
             .disabled(saving)
     }
 
     private var saveButton: some View {
-        Button(isReview || status != "pending" ? "Save" : "Save Draft") { Task { await submit(as: status) } }
+        Button(isReview || status != "pending" ? uiText("Save") : uiText("Save Draft")) { Task { await submit(as: status) } }
             .accessibilityIdentifier("save-reviewed-result")
             .disabled(saveDisabled)
     }
 
     private var submitButton: some View {
-        Button("Submit", action: submitResult)
+        Button(uiText("Submit"), action: submitResult)
             .accessibilityIdentifier("submit-reviewed-result")
             .disabled(saveDisabled)
     }
@@ -203,23 +203,23 @@ struct ObservationEditor: View {
     }
 
     @ViewBuilder private var reviewSections: some View {
-        Section("Mapping") {
+        Section(uiText("Mapping")) {
             recommendedName
             HStack {
-                Text("Metric maps to")
-                SelectionPicker(title: "Metric maps to", selection: mapping, placeholder: "Unmapped",
+                Text(uiText("Metric maps to"))
+                SelectionPicker(title: uiText("Metric maps to"), selection: mapping, placeholder: uiText("Unmapped"),
                     choices: mappingChoices)
                     .labelsHidden()
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Button("Mark as New", action: markAsNew)
+                Button(uiText("Mark as New"), action: markAsNew)
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("mark-as-new-metric")
                     .disabled(!canMarkAsNew || creatingMetric || saving)
             }
             if creatingMetric {
-                TextField("Metric name", text: $newMetricName)
-                TextField("Standard unit", text: $newMetricUnit)
-                Button("Keep unmapped") { creatingMetric = false }
+                TextField(uiText("Metric name"), text: $newMetricName)
+                TextField(uiText("Standard unit"), text: $newMetricUnit)
+                Button(uiText("Keep unmapped")) { creatingMetric = false }
             } else {
                 candidateOptions
             }
@@ -229,20 +229,20 @@ struct ObservationEditor: View {
                 .filter { !$0.isEmpty }.joined(separator: " · ")
             let note = suggestion.isEmpty && metricSelection.isEmpty ? proposed : suggestion
             if !note.isEmpty {
-                Text("OCR suggestion: \(note)").font(.caption).foregroundStyle(.secondary)
+                Text(uiText("OCR suggestion: \(note)")).font(.caption).foregroundStyle(.secondary)
             }
             mappingIssues
         }
-        Section("As printed on the report") {
+        Section(uiText("As printed on the report")) {
             printedRows
-            if !validLOINC { Text("Enter a LOINC code such as 50560-2.").font(.caption).foregroundStyle(.red) }
+            if !validLOINC { Text(uiText("Enter a LOINC code such as 50560-2.")).font(.caption).foregroundStyle(.red) }
         }
         if !isReview && status == "pending" {
             Section { submitButton }
         }
-        Section("Source") {
+        Section(uiText("Source")) {
             if isReview {
-                Button("View Original Page") {
+                Button(uiText("View Original Page")) {
                     Task {
                         do { preview = try await source(Int(payload["source"]["page"].numberValue ?? 1)) }
                         catch { self.error = error.localizedDescription }
@@ -250,15 +250,15 @@ struct ObservationEditor: View {
                 }
             }
             Stepper("Page \(Int(payload["source"]["page"].numberValue ?? 1))", value: Binding(get: { Int(payload["source"]["page"].numberValue ?? 1) }, set: { payload["source"]["page"] = .number(Double($0)) }), in: 1...max(1, pageCount))
-            TextField("Exact source text", text: Binding(get: { payload["source"]["quote"].stringValue }, set: { payload["source"]["quote"] = .string($0) }), axis: .vertical)
-            field("Your notes", "notes")
+            TextField(uiText("Exact source text"), text: Binding(get: { payload["source"]["quote"].stringValue }, set: { payload["source"]["quote"] = .string($0) }), axis: .vertical)
+            field(uiText("Your notes"), "notes")
         }
     }
 
     @ViewBuilder private var candidateOptions: some View {
         let suggestions = observation["metric_suggestions"].arrayValue
         if !suggestions.isEmpty {
-            DisclosureGroup("Closest matches") {
+            DisclosureGroup(uiText("Closest matches")) {
                 ForEach(Array(suggestions.enumerated()), id: \.offset) { _, suggestion in
                     Button {
                         mapping.wrappedValue = suggestion["metric_id"].stringValue
@@ -278,14 +278,14 @@ struct ObservationEditor: View {
 
     @ViewBuilder private var printedRows: some View {
         // Fixed fields share the form's lazy list with the candidate rows on Android.
-        printedRow("Metric name", value: $printedName)
-        printedRow("Lab code", value: text("raw_lab_code"))
-        printedRow("LOINC code", value: $loincCode)
-        printedRow("Result", value: text("raw_result"))
-        printedRow("Unit", value: text("raw_unit"))
-        printedRow("Reference range", value: text("reference_range"))
-        printedRow("Report flag", value: text("report_flag"))
-        printedRow("Collection date", value: text("sampled_at"))
+        printedRow(uiText("Metric name"), value: $printedName)
+        printedRow(uiText("Lab code"), value: text("raw_lab_code"))
+        printedRow(uiText("LOINC code"), value: $loincCode)
+        printedRow(uiText("Result"), value: text("raw_result"))
+        printedRow(uiText("Unit"), value: text("raw_unit"))
+        printedRow(uiText("Reference range"), value: text("reference_range"))
+        printedRow(uiText("Report flag"), value: text("report_flag"))
+        printedRow(uiText("Collection date"), value: text("sampled_at"))
     }
 
     @ViewBuilder private func printedRow(_ label: String, value: Binding<String>) -> some View {
@@ -312,12 +312,12 @@ struct ObservationEditor: View {
         if !name.isEmpty && loincCode == observation["lab_test_code"].stringValue {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Recommended name (LOINC)").font(.caption).foregroundStyle(.secondary)
+                    Text(uiText("Recommended name (LOINC)")).font(.caption).foregroundStyle(.secondary)
                     Text(name).accessibilityIdentifier("review-result-loinc-name")
                 }.frame(maxWidth: .infinity, alignment: .leading)
-                Button("Use") { printedName = name }
+                Button(uiText("Use")) { printedName = name }
                     .buttonStyle(.bordered)
-                    .accessibilityLabel(Text("Use recommended name"))
+                    .accessibilityLabel(Text(uiText("Use recommended name")))
                     .accessibilityIdentifier("review-result-use-loinc-name")
                     .disabled(saving || printedName == name)
             }
@@ -336,7 +336,7 @@ struct ObservationEditor: View {
             }
             .map { $0["message"].stringValue }
         if !messages.isEmpty {
-            Text(messages.joined(separator: "\n")).font(.caption).foregroundStyle(.secondary)
+            Text(messages.map(uiMessage).joined(separator: "\n")).font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -395,21 +395,21 @@ struct ContextEditor: View {
     var body: some View {
         NavigationStack { Form {
             LabeledContent {
-                TextField("Source name", text: text("source_name"))
+                TextField(uiText("Source name"), text: text("source_name"))
                     .multilineTextAlignment(.trailing).autocorrectionDisabled()
             } label: {
-                InfoHelp(title: "Source", message: "The clinic, laboratory, or organization that issued this report.")
+                InfoHelp(title: uiText("Source"), message: uiText("The clinic, laboratory, or organization that issued this report."))
             }
-            LabeledContent("Report Title") {
-                TextField("Report title", text: text("report_title"), axis: .vertical)
+            LabeledContent(uiText("Report Title")) {
+                TextField(uiText("Report title"), text: text("report_title"), axis: .vertical)
                     .multilineTextAlignment(.trailing).autocorrectionDisabled()
             }
-            Picker("Fasting", selection: $fasting) { Text("Unknown").tag("unknown"); Text("Yes").tag("yes"); Text("No").tag("no") }
-            field("Recent exercise", "recent_exercise"); field("Illness", "illness"); field("Medications", "medications"); field("Notes", "notes")
-            if let error { Text(error).foregroundStyle(.red) }
-        }.mobileNavigationTitle("Report Info").toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }
-            ToolbarItem(placement: .confirmationAction) { Button("Save") { Task {
+            Picker(uiText("Fasting"), selection: $fasting) { Text(uiText("Unknown")).tag("unknown"); Text(uiText("Yes")).tag("yes"); Text(uiText("No")).tag("no") }
+            field(uiText("Recent exercise"), "recent_exercise"); field(uiText("Illness"), "illness"); field(uiText("Medications"), "medications"); field(uiText("Notes"), "notes")
+            if let error { Text(uiMessage(error)).foregroundStyle(.red) }
+        }.mobileNavigationTitle(uiText("Report Info")).toolbar {
+            ToolbarItem(placement: .cancellationAction) { Button(uiText("Cancel")) { dismiss() }.disabled(saving) }
+            ToolbarItem(placement: .confirmationAction) { Button(uiText("Save")) { Task {
                 saving = true; defer { saving = false }
                 context["fasting"] = fasting == "unknown" ? .null : .bool(fasting == "yes")
                 do { try await save(context); dismiss() } catch { self.error = error.localizedDescription }

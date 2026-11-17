@@ -16,12 +16,12 @@ import UIKit
         let controller = UIViewController()
         controller.view.backgroundColor = .systemBackground
         controller.view.accessibilityViewIsModal = true
-        let title = UILabel(); title.text = "Your health archive is locked"; title.font = .preferredFont(forTextStyle: .headline)
+        let title = UILabel(); title.text = uiText("Your health archive is locked"); title.font = .preferredFont(forTextStyle: .headline)
         title.adjustsFontForContentSizeCategory = true; title.numberOfLines = 0; title.textAlignment = .center
         let unlock = UIButton(type: .system)
-        unlock.setTitle("Unlock with Face ID / Touch ID", for: .normal)
+        unlock.setTitle(uiText("Unlock with Face ID / Touch ID"), for: .normal)
         unlock.addAction(UIAction { [weak model] _ in Task { await model?.unlock() } }, for: .touchUpInside)
-        let signOut = UIButton(type: .system); signOut.setTitle("Sign out", for: .normal)
+        let signOut = UIButton(type: .system); signOut.setTitle(uiText("Sign out"), for: .normal)
         signOut.addAction(UIAction { [weak model] _ in Task { await model?.logout() } }, for: .touchUpInside)
         unlock.isHidden = model.privacyCovered; signOut.isHidden = model.privacyCovered
         let stack = UIStackView(arrangedSubviews: [title, unlock, signOut]); stack.axis = .vertical; stack.spacing = 24

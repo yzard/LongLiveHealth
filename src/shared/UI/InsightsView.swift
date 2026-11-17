@@ -19,8 +19,8 @@ struct InsightsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                if loading { ProgressView("Reviewing your health data") }
-                if let failure { Text(failure).foregroundStyle(.secondary) }
+                if loading { ProgressView(uiText("Reviewing your health data")) }
+                if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
                 ForEach(Array((responseRevision == model.reportDataRevision ? response["dashboard"].arrayValue : []).enumerated()), id: \.offset) { _, panel in
                     Button {
                         selectedPanel = InsightPanelSelection(panel: panel)
@@ -30,7 +30,7 @@ struct InsightsView: View {
                 }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
         }
-        .mobileNavigationTitle("Insights")
+        .mobileNavigationTitle(uiText("Insights"))
         .initialTask(id: model.reportDataRevision) { await reload() }
         .refreshable { await reload() }
         .sheet(item: $selectedPanel) { selection in NavigationStack { InsightDetail(model: model, panel: selection.panel, response: response) } }
@@ -68,23 +68,23 @@ struct InsightHeading: View {
     @State var showingMethod = false
     var body: some View {
         HStack {
-            Text(insight["title"].stringValue).font(.title2.bold())
+            Text(uiMessage(insight["title"].stringValue)).font(.title2.bold())
             Spacer()
             Button { showingMethod = true } label: {
                 Image(systemName: MobileSymbol.name("info.circle")).frame(minWidth: 44, minHeight: 44)
-            }.buttonStyle(.borderless).accessibilityLabel("Assessment method and sources")
+            }.buttonStyle(.borderless).accessibilityLabel(Text(uiText("Assessment method and sources")))
         }
         .sheet(isPresented: $showingMethod) {
             NavigationStack {
                 List {
-                    Text(insight["method"].stringValue)
+                    Text(uiMessage(insight["method"].stringValue))
                     ForEach(Array(insight["references"].arrayValue.enumerated()), id: \.offset) { _, reference in
                         if let url = URL(string: reference["url"].stringValue) {
-                            Link(reference["title"].stringValue, destination: url)
+                            Link(uiLabel(reference["title"].stringValue), destination: url)
                         }
                     }
-                }.mobileNavigationTitle("Method & Sources")
-                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingMethod = false } } }
+                }.mobileNavigationTitle(uiText("Method & Sources"))
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button(uiText("Done")) { showingMethod = false } } }
             }
         }
     }
@@ -96,23 +96,23 @@ struct CardiovascularInsight: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             InsightHeading(insight: insight)
-            Text(insight["risk_label"].stringValue).font(.subheadline).foregroundStyle(.secondary)
+            Text(uiMessage(insight["risk_label"].stringValue)).font(.subheadline).foregroundStyle(.secondary)
             if let risk = insight["risk_percent"].numberValue {
                 Text("\(risk.formatted(.number.precision(.fractionLength(1))))%")
                     .font(.largeTitle.bold())
             } else {
-                Text("Not calculated").font(.title2.weight(.semibold))
+                Text(uiText("Not calculated")).font(.title2.weight(.semibold))
             }
-            Text(insight["explanation"].stringValue).font(.subheadline)
+            Text(uiMessage(insight["explanation"].stringValue)).font(.subheadline)
             ForEach(Array(insight["findings"].arrayValue.enumerated()), id: \.offset) { _, finding in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(finding["title"].stringValue).font(.headline)
-                    Text(finding["text"].stringValue).foregroundStyle(.orange)
+                    Text(uiMessage(finding["text"].stringValue)).foregroundStyle(.orange)
                 }
             }
             InsightMissing(values: insight["missing"])
-            ForEach(insight["actions"].arrayValue, id: \.stringValue) { Text($0.stringValue).font(.subheadline) }
-            DisclosureGroup("Measurements used") {
+            ForEach(insight["actions"].arrayValue, id: \.stringValue) { Text(uiMessage($0.stringValue)).font(.subheadline) }
+            DisclosureGroup(uiText("Measurements used")) {
                 ForEach(Array(insight["inputs"].arrayValue.enumerated()), id: \.offset) { _, input in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(input["title"].stringValue.isEmpty ? input["metric_id"].stringValue : input["title"].stringValue)
@@ -121,11 +121,11 @@ struct CardiovascularInsight: View {
                             Text("\(value.formatted(.number.precision(.fractionLength(0...2)))) \(HistoricalValue.displayUnit(input["unit"].stringValue, kind: input["metric_id"].stringValue))")
                             Text("\(HistoricalValue.collectionDate(timestamp: input["at"].numberValue, text: input["sampled_at"].stringValue, timeZone: .current)) · \(model.sourceLabel(input["source"].stringValue, name: input["source_name"].stringValue))")
                                 .font(.caption).foregroundStyle(.secondary)
-                        } else { Text(input["reason"].stringValue).font(.caption).foregroundStyle(.secondary) }
+                        } else { Text(uiMessage(input["reason"].stringValue)).font(.caption).foregroundStyle(.secondary) }
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6)
                 }
             }
-            DisclosureGroup("Cardiovascular history") {
+            DisclosureGroup(uiText("Cardiovascular history")) {
                 ForEach(Array(insight["cards"].arrayValue.enumerated()), id: \.offset) { _, card in
                     if !card["series"].arrayValue.isEmpty {
                         InsightEvidencePlot(model: model, card: card)
@@ -142,28 +142,28 @@ struct RecoveryInsight: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             InsightHeading(insight: insight)
-            Text(insight["status"].stringValue).font(.title3.weight(.semibold))
-            ForEach(insight["actions"].arrayValue, id: \.stringValue) { Text($0.stringValue).font(.subheadline) }
+            Text(uiMessage(insight["status"].stringValue)).font(.title3.weight(.semibold))
+            ForEach(insight["actions"].arrayValue, id: \.stringValue) { Text(uiMessage($0.stringValue)).font(.subheadline) }
             ForEach(Array(insight["signals"].arrayValue.enumerated()), id: \.offset) { _, signal in
                 VStack(alignment: .leading, spacing: 8) {
                     InsightEvidencePlot(model: model, card: signal)
                     HStack {
                         VStack(alignment: .leading) {
-                            Text("Previous 28 days").font(.caption).foregroundStyle(.secondary)
+                            Text(uiText("Previous 28 days")).font(.caption).foregroundStyle(.secondary)
                             Text(formatted(signal["baseline"], signal: signal)).font(.headline)
-                            Text("\(Int(signal["baseline_days"].numberValue ?? 0)) observed days").font(.caption)
+                            Text(uiText("\(Int(signal["baseline_days"].numberValue ?? 0)) observed days")).font(.caption)
                         }
                         Spacer()
                         VStack(alignment: .trailing) {
-                            Text("Last 7 days").font(.caption).foregroundStyle(.secondary)
+                            Text(uiText("Last 7 days")).font(.caption).foregroundStyle(.secondary)
                             Text(formatted(signal["recent"], signal: signal)).font(.headline)
-                            Text("\(Int(signal["recent_days"].numberValue ?? 0)) observed days").font(.caption)
+                            Text(uiText("\(Int(signal["recent_days"].numberValue ?? 0)) observed days")).font(.caption)
                         }
                     }
                     if signal["cue"] == .string("insufficient_comparable_days") {
-                        Text("More comparable days needed").font(.caption).foregroundStyle(.secondary)
+                        Text(uiText("More comparable days needed")).font(.caption).foregroundStyle(.secondary)
                     } else if let change = signal["change_percent"].numberValue {
-                        Text("\(change > 0 ? "+" : "")\(change.formatted(.number.precision(.fractionLength(1))))% vs personal baseline")
+                        Text(uiText("\(change > 0 ? "+" : "")\(change.formatted(.number.precision(.fractionLength(1))))% vs personal baseline"))
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }.padding(.vertical, 8)
@@ -188,8 +188,8 @@ struct InsightMissing: View {
     let values: JSONValue
     var body: some View {
         if !values.arrayValue.isEmpty {
-            DisclosureGroup("What’s missing (\(values.arrayValue.count))") {
-                ForEach(values.arrayValue, id: \.stringValue) { Text($0.stringValue).font(.subheadline).padding(.vertical, 4) }
+            DisclosureGroup(uiText("What’s missing (\(values.arrayValue.count))")) {
+                ForEach(values.arrayValue, id: \.stringValue) { Text(uiMessage($0.stringValue)).font(.subheadline).padding(.vertical, 4) }
             }
         }
     }
@@ -215,7 +215,7 @@ struct InsightEvidencePlot: View {
             Text(card["title"].stringValue).font(.headline)
             Text(model.sourceLabel(card["source"].stringValue, name: card["source_name"].stringValue)).font(.caption).foregroundStyle(.secondary)
             InsightHistoryPlot(series: plotSeries).frame(height: 140)
-            Text(card["unit"] == .string("seconds") ? "hours" : HistoricalValue.displayUnit(card["unit"].stringValue, kind: card["metric_id"].stringValue)).font(.caption).foregroundStyle(.secondary)
+            Text(card["unit"] == .string("seconds") ? uiText("hours") : HistoricalValue.displayUnit(card["unit"].stringValue, kind: card["metric_id"].stringValue)).font(.caption).foregroundStyle(.secondary)
         }.padding(.vertical, 6)
     }
 }
@@ -231,7 +231,7 @@ struct CardiovascularContextEditor: View {
         ("egfr_2021_confirmed", "eGFR uses CKD-EPI 2021 creatinine")
     ]
     var body: some View {
-        AutoSavedPreferencesForm(model: model, title: "Risk Context") { preferences, update in
+        AutoSavedPreferencesForm(model: model, title: uiText("Risk Context")) { preferences, update in
             Section {
                 ForEach(fields, id: \.0) { field in
                     Picker(field.1, selection: Binding(get: {
@@ -243,14 +243,14 @@ struct CardiovascularContextEditor: View {
                         context[field.0] = value == "unknown" ? .null : .bool(value == "yes")
                         update(["cardiovascular": context])
                     })) {
-                        Text("Not specified").tag("unknown")
-                        Text("Yes").tag("yes")
-                        Text("No").tag("no")
+                        Text(uiText("Not specified")).tag("unknown")
+                        Text(uiText("Yes")).tag("yes")
+                        Text(uiText("No")).tag("no")
                     }
                 }
             }
             Section {
-                InfoHelp(title: "Risk context", message: "Use your current known diagnoses and medicines. Do not infer diabetes from one glucose result, or assume no medication because none was imported. Check the kidney-test report for its eGFR equation. Age and biological sex come from Reference Settings.")
+                InfoHelp(title: uiText("Risk context"), message: uiText("Use your current known diagnoses and medicines. Do not infer diabetes from one glucose result, or assume no medication because none was imported. Check the kidney-test report for its eGFR equation. Age and biological sex come from Reference Settings."))
             }
         }
     }

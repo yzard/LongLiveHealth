@@ -36,9 +36,9 @@ struct ECGWaveformView: View {
                     }
                 }.frame(width: width, height: height).clipped()
                 HStack {
-                    Text("\(active.start.formatted(.number.precision(.fractionLength(1)))) s")
+                    Text(uiText("\(active.start.formatted(.number.precision(.fractionLength(1)))) s"))
                     Spacer()
-                    Text("\(active.end.formatted(.number.precision(.fractionLength(1)))) s · mV")
+                    Text(uiText("\(active.end.formatted(.number.precision(.fractionLength(1)))) s · mV"))
                 }.font(.caption2).frame(width: width).offset(y: height+7)
             }.frame(width: geometry.size.width, height: geometry.size.height)
                 .background(Color.clear)
@@ -59,8 +59,8 @@ struct ECGWaveformView: View {
         #if !os(Android)
         .accessibilityElement(children: .ignore)
         #endif
-        .accessibilityLabel("ECG voltage waveform, seconds and millivolts")
-        .accessibilityValue("\(visible.start.formatted(.number.precision(.fractionLength(2))))–\(visible.end.formatted(.number.precision(.fractionLength(2)))) seconds")
+        .accessibilityLabel(Text(uiText("ECG voltage waveform, seconds and millivolts")))
+        .accessibilityValue(uiText("\(visible.start.formatted(.number.precision(.fractionLength(2))))–\(visible.end.formatted(.number.precision(.fractionLength(2)))) seconds"))
         .accessibilityIdentifier("ecg-waveform")
     }
 }

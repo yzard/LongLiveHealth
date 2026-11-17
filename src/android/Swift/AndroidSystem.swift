@@ -49,6 +49,11 @@ enum SessionVault {
 }
 
 @MainActor enum MobilePlatform {
+    static var systemLanguageIdentifier: String { (try? AndroidSystem.invoke("language.system", "")) ?? "en" }
+    static func applyInterfaceLanguage(_ language: InterfaceLanguage) {
+        _ = try? AndroidSystem.invoke("language.apply", language.rawValue)
+    }
+
     static var protectedDataAvailable: Bool { (try? AndroidSystem.invoke("unlocked", "")) == "true" }
     static var isActive: Bool { (try? AndroidSystem.invoke("active", "")) == "true" }
     static func copy(_ value: String) { _ = try? AndroidSystem.invoke("clipboard.copy", value) }

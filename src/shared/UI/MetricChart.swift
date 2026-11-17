@@ -103,12 +103,14 @@ struct MetricChart: View {
         let start = row?["start_at"].numberValue ?? active.start
         let end = row?["end_at"].numberValue ?? active.start + active.length
         let formatter = DateIntervalFormatter()
+        formatter.locale = InterfaceLanguageSettings.shared.language.locale
         formatter.calendar = calendar
         formatter.timeZone = timeZone
         formatter.dateStyle = .medium
         formatter.timeStyle = active.period == .hour || (selected != nil && active.period == .day) ? .short : .none
         if selected != nil && active.period == .hour {
             let single = DateFormatter()
+            single.locale = InterfaceLanguageSettings.shared.language.locale
             single.calendar = calendar; single.timeZone = timeZone
             single.dateStyle = .medium; single.timeStyle = .short
             return single.string(from: Date(timeIntervalSince1970: start))
@@ -179,15 +181,15 @@ struct MetricChart: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Picker("Time range", selection: Binding(get: { active.period }, set: { period in
+            Picker(uiText("Time range"), selection: Binding(get: { active.period }, set: { period in
                 var value = active; value.select(period, calendar: calendar); window = value; selected = nil
             })) {
                 ForEach(ChartPeriod.allCases.filter { showsHour || $0 != .hour }, id: \.self) { period in
-                    Text(period.rawValue).accessibilityLabel(period.title).tag(period)
+                    Text(uiLabel(period.rawValue)).accessibilityLabel(Text(uiLabel(period.title))).tag(period)
                 }
             }.pickerStyle(.segmented)
             VStack(alignment: .leading, spacing: 3) {
-                Text(selected == nil ? "RANGE" : "SELECTED RANGE").font(.caption).foregroundStyle(.secondary)
+                Text(selected == nil ? uiText("RANGE") : uiText("SELECTED RANGE")).font(.caption).foregroundStyle(.secondary)
                 if !components.isEmpty && selected == nil {
                     ForEach(Array(components.filter { !hiddenComponents.contains($0["id"].stringValue) }.enumerated()), id: \.offset) { _, component in
                         let values = rows.filter { $0["component"] == component["id"] }
@@ -201,7 +203,7 @@ struct MetricChart: View {
                     }
                 } else {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text((selected ?? summary).map(valueLabel) ?? (hiddenSources.count == sourceKeys.count && !sourceKeys.isEmpty ? "No sources selected" : "No data"))
+                    Text((selected ?? summary).map(valueLabel) ?? (hiddenSources.count == sourceKeys.count && !sourceKeys.isEmpty ? uiText("No sources selected") : uiText("No data")))
                         .font(.system(size: 34, weight: .regular, design: .rounded)).minimumScaleFactor(0.6)
                         .accessibilityIdentifier("chart-range-value")
                     Text(displayUnit).font(.headline).foregroundStyle(.secondary)
@@ -311,7 +313,7 @@ struct MetricChart: View {
             }.frame(height: 250)
             if components.isEmpty, let latest, let at = latest["last_at"].numberValue, let value = latest["latest_value"].numberValue {
                 HStack {
-                    Text("Latest: \(Date(timeIntervalSince1970: at).formatted(date: calendar.isDateInToday(Date(timeIntervalSince1970: at)) ? .omitted : .abbreviated, time: .shortened))")
+                    Text(uiText("Latest: \(uiDate(Date(timeIntervalSince1970: at), dateStyle: calendar.isDateInToday(Date(timeIntervalSince1970: at)) ? .omitted : .abbreviated, timeStyle: .shortened))"))
                     Spacer()
                     Text("\(number(value)) \(displayUnit)")
                 }.font(.subheadline).padding(12).background(Color.secondary.opacity(0.16), in: Capsule())
@@ -337,22 +339,22 @@ struct MetricChart: View {
                     let levels = ReferenceLevels.levels(days: days, names: names)
                     if !levels.isEmpty {
                         HStack {
-                            Text("\(component["title"].stringValue) · Reference Levels").font(.subheadline)
+                            Text(uiText("\(component["title"].stringValue) · Reference Levels")).font(.subheadline)
                             ReferenceGuideButton {
                                 referenceSelection = ReferenceGuideSelection(guidance: component["reference_guidance"], assessment: ReferenceLevels.latestAssessment(days))
                             }
                         }
                         ForEach(Array(levels.enumerated()), id: \.offset) { _, level in
-                            HStack { Text(level["label"].stringValue); Spacer(); let count = Int(level["days"].numberValue ?? 0); Text(count == 0 ? "—" : "\(count) \(count == 1 ? "day" : "days")") }.font(.caption)
+                            HStack { Text(uiLabel(level["label"].stringValue)); Spacer(); let count = Int(level["days"].numberValue ?? 0); Text(count == 0 ? "—" : "\(count) \(count == 1 ? "day" : "days")") }.font(.caption)
                         }
-                    } else { Text("No reference level").font(.caption).foregroundStyle(.secondary) }
+                    } else { Text(uiText("No reference level")).font(.caption).foregroundStyle(.secondary) }
                 }
                 if !hiddenSources.contains(ranges["latest_reading"]["source"].stringValue), let at = ranges["latest_reading"]["at"].numberValue {
-                    Text("Latest record: \(Date(timeIntervalSince1970: at).formatted())").font(.caption).foregroundStyle(.secondary)
+                    Text(uiText("Latest record: \(Date(timeIntervalSince1970: at).formatted())")).font(.caption).foregroundStyle(.secondary)
                 }
             } else if !referenceLevels.isEmpty {
                 HStack(spacing: 4) {
-                    Text("Reference Levels").font(.subheadline)
+                    Text(uiText("Reference Levels")).font(.subheadline)
                     ReferenceGuideButton {
                         referenceSelection = ReferenceGuideSelection(guidance: guidance, assessment: (selected ?? rows.max { ($0["last_at"].numberValue ?? 0) < ($1["last_at"].numberValue ?? 0) })?["reference_assessment"] ?? .null)
                     }
@@ -360,7 +362,7 @@ struct MetricChart: View {
                 ForEach(Array(referenceLevels.enumerated()), id: \.offset) { _, level in
                     Button { selectedLevelID = level["id"].stringValue } label: {
                         HStack {
-                            Text(level["label"].stringValue)
+                            Text(uiLabel(level["label"].stringValue))
                             Spacer()
                             let count = Int(level["days"].numberValue ?? 0)
                             Text(count == 0 ? "—" : "\(count) \(count == 1 ? "day" : "days")")
@@ -370,7 +372,7 @@ struct MetricChart: View {
                     }.buttonStyle(.plain)
                 }
             } else {
-                Text("No reference level").font(.subheadline).foregroundStyle(.secondary)
+                Text(uiText("No reference level")).font(.subheadline).foregroundStyle(.secondary)
             }
             ForEach(Array(sourceKeys.enumerated()), id: \.element) { index, key in
                 Button {
@@ -400,7 +402,7 @@ struct MetricChart: View {
                     .accessibilityIdentifier("chart-source-" + key)
                     .accessibilityValue(hiddenSources.contains(key) ? "Hidden" : "Shown")
                     #if !os(Android)
-                    .accessibilityHint("Double tap to toggle this source in the chart")
+                    .accessibilityHint(uiText("Double tap to toggle this source in the chart"))
                     #endif
             }
 

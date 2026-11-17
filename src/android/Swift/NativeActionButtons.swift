@@ -7,7 +7,7 @@ struct CalendarPlanButton: View {
     @State var failure: String?
     var body: some View {
         VStack(alignment: .leading) {
-            Button("Review in Calendar") { Task {
+            Button(uiText("Review in Calendar")) { Task {
                 do { _ = try await AndroidSystem.perform("calendar.review", input: .object([
                     "title": .string(title), "start": .number(start.timeIntervalSince1970), "duration": .number(durationMinutes)
                 ])) } catch { failure = error.localizedDescription }

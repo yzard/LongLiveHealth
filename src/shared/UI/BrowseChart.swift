@@ -27,6 +27,7 @@ struct BrowseChart<Content: View>: View {
     }
     private var dateRange: String {
         let formatter = DateIntervalFormatter()
+        formatter.locale = InterfaceLanguageSettings.shared.language.locale
         formatter.calendar = chartCalendar
         formatter.timeZone = timeZone
         formatter.dateStyle = .medium
@@ -35,16 +36,16 @@ struct BrowseChart<Content: View>: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Picker("Time range", selection: selection) {
+            Picker(uiText("Time range"), selection: selection) {
                 ForEach(ChartPeriod.allCases.filter { $0 != .hour }, id: \.self) { period in
-                    Text(period.rawValue).accessibilityLabel(period.title).tag(period)
+                    Text(uiLabel(period.rawValue)).accessibilityLabel(Text(uiLabel(period.title))).tag(period)
                 }
             }.pickerStyle(.segmented)
             HStack(alignment: .firstTextBaseline) {
                 Text(dateRange).font(.subheadline.weight(.semibold))
                     .accessibilityIdentifier("chart-date-range")
                 Spacer()
-                Text(unit.isEmpty ? "Unit Not Specified" : HistoricalValue.displayUnit(unit, kind: "")).font(.caption).foregroundStyle(.secondary)
+                Text(unit.isEmpty ? uiText("Unit Not Specified") : HistoricalValue.displayUnit(unit, kind: "")).font(.caption).foregroundStyle(.secondary)
             }
             chart(window.start...(window.start + window.length), window.period)
                 #if !os(Android)

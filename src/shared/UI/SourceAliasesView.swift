@@ -12,9 +12,9 @@ struct SourceAliasesView: View {
     var body: some View {
         List {
             Section {
-                if loading { ProgressView("Loading sources") }
-                if let failure { Text(failure).foregroundStyle(.secondary) }
-                if !loading && keys.isEmpty { Text("Import or sync data to add sources.") }
+                if loading { ProgressView(uiText("Loading sources")) }
+                if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
+                if !loading && keys.isEmpty { Text(uiText("Import or sync data to add sources.")) }
             }
             Section {
                 ForEach(keys, id: \.self) { key in
@@ -27,7 +27,7 @@ struct SourceAliasesView: View {
                 }
             }
         }
-        .mobileNavigationTitle("Source Aliases")
+        .mobileNavigationTitle(uiText("Source Aliases"))
         .initialTask { await load() }
         .refreshable { await load() }
         .sheet(item: $editing) { source in NavigationStack { SourceAliasEditor(model: model, key: source.id) } }
@@ -55,21 +55,21 @@ struct SourceAliasEditor: View {
     @State var discard = false
     var body: some View {
         Form {
-            Section("Alias") {
-                TextField("Name", text: $alias).textInputAutocapitalization(.words)
+            Section(uiText("Alias")) {
+                TextField(uiText("Name"), text: $alias).textInputAutocapitalization(.words)
                     .accessibilityIdentifier("sourceAliasName")
-                InfoHelp(title: "Alias", message: "Leave empty to use the original name. Up to 100 characters.")
+                InfoHelp(title: uiText("Alias"), message: uiText("Leave empty to use the original name. Up to 100 characters."))
             }
-            Section("Original source") { CopyableText(key).font(.caption) }
-            if let failure { Section { Text(failure); Button("Reload current settings") { Task { await load(replaceDraft: false) } } } }
+            Section(uiText("Original source")) { CopyableText(key).font(.caption) }
+            if let failure { Section { Text(uiMessage(failure)); Button(uiText("Reload current settings")) { Task { await load(replaceDraft: false) } } } }
         }
-        .mobileNavigationTitle("Edit source alias")
+        .mobileNavigationTitle(uiText("Edit source alias"))
         .interactiveDismissDisabled(alias != initialAlias || saving)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Cancel") { if alias != initialAlias { discard = true } else { dismiss() } }.disabled(saving) }
-            ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save() } }.disabled(saving || snapshot == .null || alias.count > 100) }
+            ToolbarItem(placement: .cancellationAction) { Button(uiText("Cancel")) { if alias != initialAlias { discard = true } else { dismiss() } }.disabled(saving) }
+            ToolbarItem(placement: .confirmationAction) { Button(uiText("Save")) { Task { await save() } }.disabled(saving || snapshot == .null || alias.count > 100) }
         }
-        .confirmationDialog("Discard changes?", isPresented: $discard) { Button("Discard", role: .destructive) { dismiss() } }
+        .confirmationDialog(uiText("Discard changes?"), isPresented: $discard) { Button(uiText("Discard"), role: .destructive) { dismiss() } }
         .initialTask { await load(replaceDraft: true) }
     }
     private func load(replaceDraft: Bool) async {

@@ -36,7 +36,7 @@ class ReportPreviewActivity : AppCompatActivity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         enableEdgeToEdge()
-        layout = ReportPageLayout(this, "Original report", cameraControls = false)
+        layout = ReportPageLayout(this, interfaceText("Original report"), cameraControls = false)
         try {
             val file = File(requireNotNull(intent.getStringExtra("path")))
             val signature = ByteArray(5)
@@ -47,7 +47,7 @@ class ReportPreviewActivity : AppCompatActivity() {
                 showImage(file)
             }
         } catch (error: Exception) {
-            layout.label.text = error.message ?: "Could not open original report"
+            layout.label.text = interfaceText(error.message ?: "Could not open original report")
         }
     }
 
@@ -65,7 +65,7 @@ class ReportPreviewActivity : AppCompatActivity() {
         val requested = (intent.getIntExtra("page", 1) - 1).coerceIn(0, count - 1)
         val first = (state?.getInt("firstPage") ?: requested).coerceIn(0, count - 1)
         val initialRatio = pdf.openPage(first).use { it.height.toFloat() / it.width }
-        layout.label.text = "Page ${first + 1} of $count"
+        layout.label.text = interfaceText("Page {0} of {1}", first + 1, count)
 
         val list = ListView(this).apply {
             divider = ColorDrawable(Color.TRANSPARENT)
@@ -92,7 +92,7 @@ class ReportPreviewActivity : AppCompatActivity() {
                 // When the final page is shorter than the viewport, it cannot reach the top.
                 val index = if (firstVisible > 0 && view.lastVisiblePosition == total - 1 &&
                     !view.canScrollVertically(1)) total - 1 else firstVisible
-                val title = "Page ${index + 1} of $total"
+                val title = interfaceText("Page {0} of {1}", index + 1, total)
                 if (layout.label.text != title) layout.label.text = title
             }
         })
@@ -112,11 +112,11 @@ class ReportPreviewActivity : AppCompatActivity() {
                     BitmapFactory.decodeFile(file.path, options) ?: error("Could not open report image")
                 }
                 layout.image.setImageBitmap(bitmap)
-                layout.image.contentDescription = "Original report image"
+                layout.image.contentDescription = interfaceText("Original report image")
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                layout.label.text = error.message ?: "Could not open report image"
+                layout.label.text = interfaceText(error.message ?: "Could not open report image")
             }
         }
     }
@@ -206,11 +206,11 @@ class ReportPreviewActivity : AppCompatActivity() {
                         requestLayout()
                     }
                     setImageBitmap(bitmap)
-                    contentDescription = "Original page ${position + 1}"
+                    contentDescription = context.interfaceText("Original page {0}", position + 1)
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
-                    if (index == position) contentDescription = "Could not render page ${position + 1}"
+                    if (index == position) contentDescription = context.interfaceText("Could not render page {0}", position + 1)
                 }
             }
         }

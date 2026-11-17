@@ -17,10 +17,10 @@ struct DailyMetricView: View {
     var body: some View {
         MetricDetailScreen(title: metricTitle(metric["record_type"].stringValue)) {
             MetricChartSection {
-                if loading { ProgressView("Loading selected period") }
-                if let failure { Text(failure).foregroundStyle(.secondary) }
+                if loading { ProgressView(uiText("Loading selected period")) }
+                if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
                 if metric["current"]["state"] == .string("query_limit_exceeded") {
-                    Text("This history exceeds the daily query limit. Its records are saved, but the chart could not be loaded.").foregroundStyle(.secondary)
+                    Text(uiText("This history exceeds the daily query limit. Its records are saved, but the chart could not be loaded.")).foregroundStyle(.secondary)
                 }
                 MetricChart(model: model, guidance: displayed["reference_guidance"], ranges: displayed["chart_ranges"], unit: chartUnit, metricKind: metric["record_type"].stringValue,
                             divisor: ["sleep", "workout"].contains(metric["record_type"].stringValue) ? 3600 : 1,
@@ -28,22 +28,22 @@ struct DailyMetricView: View {
                     .environment(\.timeZone, .gmt)
 
             }
-            Section("About this metric") {
+            Section(uiText("About this metric")) {
                 MetricAboutView(id: metric["record_type"].stringValue, name: metricTitle(metric["record_type"].stringValue))
             }
             Section {
                 if metric["record_type"] == .string("sleep") {
-                    NavigationLink("Sleep Sessions") { SleepSessionsView(model: model) }
+                    NavigationLink(uiText("Sleep Sessions")) { SleepSessionsView(model: model) }
                 }
-                NavigationLink("Historical Values") {
+                NavigationLink(uiText("Historical Values")) {
                     List {
-                        Section("Daily records") {
+                        Section(uiText("Daily records")) {
                             ForEach(HistoricalValue.dailyRows(displayed["history"].arrayValue)) { row in
                                 HistoricalValueRow(timestamp: nil, dateText: row.value["date"].stringValue,
                                     source: model.sourceLabel(row.value["source"].stringValue), value: metricValue(row.value, kind: metric["record_type"].stringValue))
                             }
                         }
-                    }.mobileNavigationTitle("Historical Values").navigationBarTitleDisplayMode(.inline)
+                    }.mobileNavigationTitle(uiText("Historical Values")).navigationBarTitleDisplayMode(.inline)
                 }
             }
 

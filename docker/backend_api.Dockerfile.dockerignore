@@ -4,6 +4,10 @@
 !src/backend_api/**
 !src/frontend/
 !src/frontend/**
+!src/shared/
+!src/shared/Core/
+!src/shared/Core/Resources/
+!src/shared/Core/Resources/InterfaceChinese.json
 !docker/
 !docker/entrypoint.sh
 

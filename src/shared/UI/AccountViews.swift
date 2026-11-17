@@ -9,21 +9,21 @@ struct PasswordChangeView: View {
     @State var confirmation = ""
     var body: some View {
         Form {
-            InfoHelp(title: "Password security", message: required ? "Change the initial password before using your archive." : "Changing your password signs out every device. Sign in again with your new password.")
-            SecureField("Current password", text: $current).textContentType(.password)
-            SecureField("New password (at least 12 characters)", text: $replacement).textContentType(.newPassword)
-            SecureField("Confirm new password", text: $confirmation).textContentType(.newPassword)
-            Button("Change password and sign out") {
+            InfoHelp(title: uiText("Password security"), message: required ? uiText("Change the initial password before using your archive.") : uiText("Changing your password signs out every device. Sign in again with your new password."))
+            SecureField(uiText("Current password"), text: $current).textContentType(.password)
+            SecureField(uiText("New password (at least 12 characters)"), text: $replacement).textContentType(.newPassword)
+            SecureField(uiText("Confirm new password"), text: $confirmation).textContentType(.newPassword)
+            Button(uiText("Change password and sign out")) {
                 Task {
                     await model.changePassword(current: current, replacement: replacement)
                     if model.session == nil { current = ""; replacement = ""; confirmation = ""; dismiss() }
                 }
             }.disabled(model.isBusy || model.isHealthSyncRunning || current.isEmpty || replacement.utf8.count < 12 || replacement.utf8.count > 1024 || replacement != confirmation || current == replacement)
-            if required { Button("Sign out") { Task { await model.logout() } }.disabled(model.isBusy) }
+            if required { Button(uiText("Sign out")) { Task { await model.logout() } }.disabled(model.isBusy) }
         }
-        .mobileNavigationTitle("Change password")
+        .mobileNavigationTitle(uiText("Change password"))
         .interactiveDismissDisabled(required || !current.isEmpty || !replacement.isEmpty || !confirmation.isEmpty)
-        .toolbar { if !required { Button("Cancel", role: .cancel) { dismiss() }.disabled(model.isBusy) } }
+        .toolbar { if !required { Button(uiText("Cancel"), role: .cancel) { dismiss() }.disabled(model.isBusy) } }
     }
 }
 
@@ -37,25 +37,25 @@ struct UserManagementView: View {
     @State var failure: String?
     var body: some View {
         List {
-            if let failure { Text(failure).foregroundStyle(.red) }
+            if let failure { Text(uiMessage(failure)).foregroundStyle(.red) }
             ForEach(users, id: \.identifier) { user in
                 HStack {
                     Text(user["username"].stringValue)
                     Spacer()
-                    if user["is_admin"].boolValue { Text("Administrator").foregroundStyle(.secondary) }
-                    else { Button("Delete", role: .destructive) { deleting = user } }
+                    if user["is_admin"].boolValue { Text(uiText("Administrator")).foregroundStyle(.secondary) }
+                    else { Button(uiText("Delete"), role: .destructive) { deleting = user } }
                 }
             }
-        }.mobileNavigationTitle("Users")
+        }.mobileNavigationTitle(uiText("Users"))
             .task { if !loaded { await load() } }
             .refreshable { await load() }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
-                ToolbarItem(placement: .primaryAction) { Button("Add user") { creating = true } }
+                ToolbarItem(placement: .cancellationAction) { Button(uiText("Done")) { dismiss() } }
+                ToolbarItem(placement: .primaryAction) { Button(uiText("Add user")) { creating = true } }
             }
             .sheet(isPresented: $creating) { NavigationStack { CreateUserView(model: model) { user in users.append(user) } } }
-            .confirmationDialog("Delete this user and all their server data?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
-                if let user = deleting { Button("Delete \(user["username"].stringValue)", role: .destructive) { Task { await remove(user) } } }
+            .confirmationDialog(uiText("Delete this user and all their server data?"), isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
+                if let user = deleting { Button(uiText("Delete \(user["username"].stringValue)"), role: .destructive) { Task { await remove(user) } } }
             }
     }
     private func load() async {
@@ -88,13 +88,13 @@ struct CreateUserView: View {
     @State var failure: String?
     var body: some View {
         Form {
-            TextField("Username", text: $username).textInputAutocapitalization(.never).autocorrectionDisabled()
-            SecureField("Password (at least 12 characters)", text: $password).textContentType(.newPassword)
-            if let failure { Text(failure).foregroundStyle(.red) }
-            Button("Create user") { Task { await save() } }.disabled(saving || username.isEmpty || password.utf8.count < 12)
-        }.mobileNavigationTitle("Add user").disabled(saving)
+            TextField(uiText("Username"), text: $username).textInputAutocapitalization(.never).autocorrectionDisabled()
+            SecureField(uiText("Password (at least 12 characters)"), text: $password).textContentType(.newPassword)
+            if let failure { Text(uiMessage(failure)).foregroundStyle(.red) }
+            Button(uiText("Create user")) { Task { await save() } }.disabled(saving || username.isEmpty || password.utf8.count < 12)
+        }.mobileNavigationTitle(uiText("Add user")).disabled(saving)
             .interactiveDismissDisabled(saving || !username.isEmpty || !password.isEmpty)
-            .toolbar { Button("Cancel", role: .cancel) { dismiss() }.disabled(saving) }
+            .toolbar { Button(uiText("Cancel"), role: .cancel) { dismiss() }.disabled(saving) }
     }
     private func save() async {
         saving = true; defer { saving = false }

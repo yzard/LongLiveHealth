@@ -14,30 +14,30 @@ struct TrainingImportsView: View {
     var body: some View {
         List {
             Section {
-                Button("Import a training file") { importing = true }.disabled(busy)
-                InfoHelp(title: "Supported files", message: "GPX 1.1, one TCX 2 activity, or one FIT session, up to 4 MiB. Your archive retains the complete original file.")
+                Button(uiText("Import a training file")) { importing = true }.disabled(busy)
+                InfoHelp(title: uiText("Supported files"), message: uiText("GPX 1.1, one TCX 2 activity, or one FIT session, up to 4 MiB. Your archive retains the complete original file."))
                 if busy { ProgressView() }
-                if let failure { Text(failure).foregroundStyle(.secondary) }
+                if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
             }
-            Section("Imported activities") {
-                if imports.isEmpty && !busy { Text("No imported activities.") }
+            Section(uiText("Imported activities")) {
+                if imports.isEmpty && !busy { Text(uiText("No imported activities.")) }
                 ForEach(Array(imports.enumerated()), id: \.offset) { _, item in
                     VStack(alignment: .leading, spacing: 6) {
                         NavigationLink(item["filename"].stringValue) { TrainingDetailView(model: model, reference: item) }.font(.headline)
                         if let at = item["start_at"].numberValue { Text(Date(timeIntervalSince1970: at).formatted()).font(.caption) }
-                        if let distance = item["distance_m"].numberValue { Text("\((distance / 1000).formatted()) km") } else { Text("Distance unknown") }
+                        if let distance = item["distance_m"].numberValue { Text(uiText("\((distance / 1000).formatted()) km")) } else { Text(uiText("Distance unknown")) }
                         Text(model.sourceLabel("file_import:" + item["source_id"].stringValue)).font(.caption)
-                        Button("Delete imported activity", role: .destructive) { deleting = item }.disabled(busy)
+                        Button(uiText("Delete imported activity"), role: .destructive) { deleting = item }.disabled(busy)
                     }
                 }
-                if cursor != .null { Button("Load more activities") { Task { await load(reset: false) } }.disabled(busy) }
+                if cursor != .null { Button(uiText("Load more activities")) { Task { await load(reset: false) } }.disabled(busy) }
             }
             Section {
-                NavigationLink("View original archive records", destination: HealthView(model: model))
-                NavigationLink("Export originals and revisions", destination: SettingsView(model: model))
-                InfoHelp(title: "Activity calculations", message: "GPX distance uses coordinates within segments. TCX distance uses source lap totals. Elapsed duration can include pauses.")
+                NavigationLink(uiText("View original archive records"), destination: HealthView(model: model))
+                NavigationLink(uiText("Export originals and revisions"), destination: SettingsView(model: model))
+                InfoHelp(title: uiText("Activity calculations"), message: uiText("GPX distance uses coordinates within segments. TCX distance uses source lap totals. Elapsed duration can include pauses."))
             }
-        }.mobileNavigationTitle("Training imports")
+        }.mobileNavigationTitle(uiText("Training imports"))
             .initialTask { await load(reset: true) }.refreshable { await load(reset: true) }
             #if os(Android)
             .onChange(of: importing) { _, value in
@@ -57,8 +57,8 @@ struct TrainingImportsView: View {
                 }
             }
             #endif
-            .confirmationDialog("Delete this activity and its original archive? Separate exports and backups remain unchanged.", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
-                Button("Delete imported activity", role: .destructive) { if let item = deleting { Task { await remove(item) } } }
+            .confirmationDialog(uiText("Delete this activity and its original archive? Separate exports and backups remain unchanged."), isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) {
+                Button(uiText("Delete imported activity"), role: .destructive) { if let item = deleting { Task { await remove(item) } } }
             }
     }
     private func load(reset: Bool) async {

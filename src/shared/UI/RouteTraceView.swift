@@ -26,8 +26,8 @@ struct RouteTraceView: View {
                         path.addEllipse(in: CGRect(x: x-1.5, y: y-1.5, width: 3, height: 3))
                     }
                 }.fill(Color.teal)
-                VStack { Text("N ↑").font(.caption); Spacer(); Text("Recorded GPS positions").font(.caption).foregroundStyle(.secondary) }
+                VStack { Text(uiText("N ↑")).font(.caption); Spacer(); Text(uiText("Recorded GPS positions")).font(.caption).foregroundStyle(.secondary) }
             }
-        }.accessibilityLabel("Recorded workout route, north up")
+        }.accessibilityLabel(Text(uiText("Recorded workout route, north up")))
     }
 }

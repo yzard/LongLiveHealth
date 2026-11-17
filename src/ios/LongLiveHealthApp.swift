@@ -36,28 +36,29 @@ struct RootView: View {
             else if model.mustChangePassword { NavigationStack { PasswordChangeView(model: model, required: true) } }
             else {
                 TabView(selection: $model.selectedTab) {
-                    NavigationStack { InsightsView(model: model) }.tabItem { Label("Insights", systemImage: "sparkles") }.tag("Insights")
-                    NavigationStack { BrowseView(model: model) }.tabItem { Label("Browse", systemImage: "list.bullet") }.tag("Browse")
-                    NavigationStack(path: $model.dataPath) { DataCenterView(model: model) }.tabItem { Label("Data", systemImage: "externaldrive") }.tag("Data")
+                    NavigationStack { InsightsView(model: model) }.tabItem { Label(uiText("Insights"), systemImage: "sparkles") }.tag("Insights")
+                    NavigationStack { BrowseView(model: model) }.tabItem { Label(uiText("Browse"), systemImage: "list.bullet") }.tag("Browse")
+                    NavigationStack(path: $model.dataPath) { DataCenterView(model: model) }.tabItem { Label(uiText("Data"), systemImage: "externaldrive") }.tag("Data")
                 }
                 .id(model.session?.userID)
                 .initialTask { await model.resumeForeground() }
             }
         }
+        .environment(\.locale, InterfaceLanguageSettings.shared.language.locale)
         .onAppear { AppLockShield.shared.update(model: model) }
         .onChange(of: model.isLocked) { _, _ in AppLockShield.shared.update(model: model) }
         .onChange(of: model.privacyCovered) { _, _ in AppLockShield.shared.update(model: model) }
         .sheet(isPresented: Binding(get: { model.showSharedReportImport && !model.isLocked && !model.privacyCovered }, set: { model.showSharedReportImport = $0 })) { SharedReportImportView(model: model) }
         .safeAreaInset(edge: .bottom) {
             if let notice = model.offlineNotice, model.session != nil {
-                Label(notice, systemImage: "wifi.slash").font(.caption).padding(8).frame(maxWidth: .infinity).background(.regularMaterial)
+                Label(uiMessage(notice), systemImage: "wifi.slash").font(.caption).padding(8).frame(maxWidth: .infinity).background(.regularMaterial)
             }
         }
         .overlay(alignment: .top) { if model.isBusy && !model.isHealthSyncRunning {
-            ProgressView("Working…").padding(10).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)).accessibilityLabel("Processing your request")
+            ProgressView(uiText("Working…")).padding(10).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)).accessibilityLabel(uiText("Processing your request"))
         } }
-        .alert("Could not complete the action", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
-            Button("OK") { model.errorMessage = nil }
-        } message: { Text(model.errorMessage ?? "") }
+        .alert(uiText("Could not complete the action"), isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
+            Button(uiText("OK")) { model.errorMessage = nil }
+        } message: { Text(uiMessage(model.errorMessage ?? "")) }
     }
 }

@@ -21,8 +21,8 @@ struct NumberMapEditor: View {
         ("sodium_mg", "Sodium (mg)"), ("added_sugars_tsp_eq", "Added sugar (teaspoon equivalents)")
     ]
     var body: some View {
-        DisclosureGroup("Amounts and units") {
-            InfoHelp(title: "Amounts", message: "Leave unknown amounts blank. Enter zero only when the source confirms zero.")
+        DisclosureGroup(uiText("Amounts and units")) {
+            InfoHelp(title: uiText("Amounts"), message: uiText("Leave unknown amounts blank. Enter zero only when the source confirms zero."))
             ForEach(definitions, id: \.0) { key, label in
                 TextField(label, text: Binding(get: { values[key] ?? "" }, set: { amount in
                     var updated = values

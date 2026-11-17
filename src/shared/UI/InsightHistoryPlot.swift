@@ -38,6 +38,6 @@ struct InsightHistoryPlot: View {
                 .frame(width: width).offset(y: height + 3)
             }
         }
-        .accessibilityLabel(Text("Long-term measurements plotted by collection date"))
+        .accessibilityLabel(Text(uiText("Long-term measurements plotted by collection date")))
     }
 }

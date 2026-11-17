@@ -12,24 +12,24 @@ struct RemindersView: View {
     var body: some View {
         List {
             Section {
-                Button("Add reminder") { editor = Selection(item: nil) }
-                Button("Synchronize device notifications") { Task { await schedule() } }.disabled(busy)
-                Text(status).font(.caption)
-                InfoHelp(title: "Reminder scheduling", message: "This device schedules up to 50 upcoming reminders within 31 days. Open this page to refresh after server edits or before the horizon expires.")
-                InfoHelp(title: "Quiet hours and clock changes", message: "Quiet hours suppress reminders. A missing daylight-saving time is skipped; a repeated time uses its first occurrence.")
+                Button(uiText("Add reminder")) { editor = Selection(item: nil) }
+                Button(uiText("Synchronize device notifications")) { Task { await schedule() } }.disabled(busy)
+                Text(uiMessage(status)).font(.caption)
+                InfoHelp(title: uiText("Reminder scheduling"), message: uiText("This device schedules up to 50 upcoming reminders within 31 days. Open this page to refresh after server edits or before the horizon expires."))
+                InfoHelp(title: uiText("Quiet hours and clock changes"), message: uiText("Quiet hours suppress reminders. A missing daylight-saving time is skipped; a repeated time uses its first occurrence."))
             }
             ForEach(reminders, id: \.identifier) { item in
                 Section(item["entry"]["content"]["title"].stringValue) {
                     Text(item["entry"]["content"]["local_time"].stringValue + " · " + item["timezone"].stringValue)
-                    Text(item["entry"]["content"]["enabled"].boolValue ? "Enabled" : "Disabled")
-                    Button("Edit") { editor = Selection(item: item) }
-                    Button("Delete", role: .destructive) { Task { await remove(item) } }.disabled(busy)
+                    Text(item["entry"]["content"]["enabled"].boolValue ? uiText("Enabled") : uiText("Disabled"))
+                    Button(uiText("Edit")) { editor = Selection(item: item) }
+                    Button(uiText("Delete"), role: .destructive) { Task { await remove(item) } }.disabled(busy)
                 }
             }
-            Section("Upcoming occurrences") {
+            Section(uiText("Upcoming occurrences")) {
                 ForEach(Array(occurrences.prefix(100).enumerated()), id: \.offset) { _, item in Text(item["date"].stringValue + " " + item["local_time"].stringValue + " · " + item["title"].stringValue + " · " + item["state"].stringValue) }
             }
-        }.mobileNavigationTitle("Reminders").initialTask { await load() }.refreshable { await load() }
+        }.mobileNavigationTitle(uiText("Reminders")).initialTask { await load() }.refreshable { await load() }
             .onChange(of: model.entryMutation) { _, _ in Task { await load(); await clearScheduled() } }
             .sheet(item: $editor) { selection in
                 NavigationStack { LogEditor(model: model, existing: selection.item, initialKind: "reminder", initialValues: [:], initialDate: Date()) }

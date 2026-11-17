@@ -35,6 +35,96 @@ nonisolated final class SmokeTests: XCTestCase {
         }
         if name == "Settings", !app.navigationBars["Settings"].exists { app.buttons["Settings"].firstMatch.tap() }
     }
+    @MainActor func testInterfaceLanguageSwitchesTabsAndReportActions() async throws {
+        for route in ["test/reset", "test/seed-report", "test/report-review-names"] {
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:18765/api/v1/\(route)")!)
+            request.httpMethod = "POST"
+            let (_, response) = try await URLSession.shared.data(for: request)
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        }
+        let app = XCUIApplication()
+        app.launch()
+        dismissPasswordPrompts(app)
+        if app.buttons["Sign in"].exists {
+            let server = app.textFields["http://192.168.1.20:8080"]
+            server.tap()
+            let current = server.value as? String ?? ""
+            if current != "http://192.168.1.20:8080" {
+                server.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
+            }
+            server.typeText("http://127.0.0.1:18765")
+            app.textFields["Username"].tap()
+            app.textFields["Username"].typeText("simulator")
+            app.secureTextFields["Password"].tap()
+            app.secureTextFields["Password"].typeText("test-password")
+            app.buttons["Sign in"].tap()
+            dismissPasswordPrompts(app)
+        }
+
+        func settings(data: String, title: String) {
+            let tab = app.tabBars.buttons[data]
+            XCTAssertTrue(tab.waitForExistence(timeout: 12))
+            tab.tap()
+            if !app.navigationBars[title].exists {
+                let open = app.buttons["open-settings"]
+                XCTAssertTrue(open.waitForExistence(timeout: 8))
+                open.tap()
+            }
+            XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 8))
+        }
+
+        func selectLanguage(_ name: String) {
+            let picker = app.descendants(matching: .any)
+                .matching(identifier: "settings-interface-language").firstMatch
+            reveal(app, picker)
+            XCTAssertTrue(picker.isHittable)
+            picker.tap()
+            let choice = app.buttons[name].firstMatch
+            XCTAssertTrue(choice.waitForExistence(timeout: 6))
+            choice.tap()
+        }
+
+        func checkReview(chinese: Bool) {
+            let settingsTitle = chinese ? "设置" : "Settings"
+            if app.navigationBars[settingsTitle].exists { app.navigationBars[settingsTitle].buttons.firstMatch.tap() }
+            let reports = app.buttons[chinese ? "血液检查" : "Blood Work"]
+            XCTAssertTrue(reports.waitForExistence(timeout: 8))
+            reports.tap()
+            let report = app.buttons["report-row-fixture-report"]
+            XCTAssertTrue(report.waitForExistence(timeout: 12))
+            XCTAssertTrue(report.label.contains("Example Laboratory"))
+            report.tap()
+            let review = app.buttons["report-result-status-action"].firstMatch
+            reveal(app, review)
+            XCTAssertTrue(review.isHittable)
+            review.tap()
+            let title = chinese ? "审核结果" : "Review result"
+            XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 8))
+            XCTAssertEqual(app.buttons["save-reviewed-result"].label, chinese ? "保存" : "Save")
+            XCTAssertEqual(app.buttons["submit-reviewed-result"].label, chinese ? "提交" : "Submit")
+            let cancel = app.buttons[chinese ? "取消" : "Cancel"].firstMatch
+            XCTAssertTrue(cancel.isHittable)
+            cancel.tap()
+        }
+
+        let chineseInitially = app.tabBars.buttons["数据"].exists
+        settings(data: chineseInitially ? "数据" : "Data", title: chineseInitially ? "设置" : "Settings")
+        if !chineseInitially { selectLanguage("中文") }
+        XCTAssertTrue(app.navigationBars["设置"].waitForExistence(timeout: 8))
+        XCTAssertEqual(app.tabBars.buttons.allElementsBoundByIndex.map(\.label), ["健康洞察", "浏览", "数据"])
+        checkReview(chinese: true)
+
+        app.terminate()
+        app.launch()
+        dismissPasswordPrompts(app)
+        XCTAssertTrue(app.tabBars.buttons["数据"].waitForExistence(timeout: 12))
+        settings(data: "数据", title: "设置")
+        selectLanguage("English")
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 8))
+        XCTAssertEqual(app.tabBars.buttons.allElementsBoundByIndex.map(\.label), ["Insights", "Browse", "Data"])
+        checkReview(chinese: false)
+    }
+
     @MainActor func testIntegratedInsightsShowMissingRiskAndSeparateRecoverySources() throws {
         let app = XCUIApplication(); app.launch()
         dismissPasswordPrompts(app)

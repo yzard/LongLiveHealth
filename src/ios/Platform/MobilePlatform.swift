@@ -6,6 +6,9 @@ import Security
 
 /// System services remain native while the application state and workflows are shared.
 @MainActor enum MobilePlatform {
+    static var systemLanguageIdentifier: String { Locale.preferredLanguages.first ?? "en" }
+    static func applyInterfaceLanguage(_ language: InterfaceLanguage) {}
+
     static var protectedDataAvailable: Bool { UIApplication.shared.isProtectedDataAvailable }
     static var isActive: Bool { UIApplication.shared.applicationState == .active }
     static let biometricLabel = "Face ID / Touch ID unlock"
@@ -20,6 +23,7 @@ import Security
     }
     static func authenticate(reason: String, requireBiometrics: Bool) async throws -> Bool {
         let context = LAContext()
+        context.localizedCancelTitle = uiText("Cancel")
         var failure: NSError?
         if requireBiometrics && !context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &failure) {
             throw failure ?? APIError.status(400, "Set up Face ID or Touch ID in iPhone Settings first") as NSError

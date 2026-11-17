@@ -14,30 +14,30 @@ struct SleepSessionsView: View {
     private var selectedInterval: DateInterval { period.interval(containing: selectedDate, calendar: .current) }
     private let stages = ["In bed", "Asleep, unspecified", "Awake", "Core", "Deep", "REM"]
     var body: some View {
-        MetricDetailScreen(title: "Sleep") {
+        MetricDetailScreen(title: uiText("Sleep")) {
             MetricChartSection {
-                Picker("Time range", selection: $period) {
+                Picker(uiText("Time range"), selection: $period) {
                     ForEach(ChartPeriod.allCases.filter { $0 != .hour }, id: \.self) { Text($0.rawValue).tag($0) }
                 }.pickerStyle(.segmented)
-                DatePicker("Date", selection: $selectedDate, displayedComponents: [.date])
-                if loading { ProgressView("Loading selected period") }
-                InfoHelp(title: "Sleep observations", message: "Gaps do not establish wakefulness. Confirm main sleep or naps without replacing source observations.")
+                DatePicker(uiText("Date"), selection: $selectedDate, displayedComponents: [.date])
+                if loading { ProgressView(uiText("Loading selected period")) }
+                InfoHelp(title: uiText("Sleep observations"), message: uiText("Gaps do not establish wakefulness. Confirm main sleep or naps without replacing source observations."))
             }
             ForEach(HistoricalValue.sleepSessions(result["sources"].arrayValue)) { sessionRow in
                 let session = sessionRow.value
                 DisclosureGroup {
                     if let seconds = session["asleep_seconds"].numberValue {
-                        Text("\(MetricPresentation.duration(seconds)) asleep").font(.headline)
-                    } else { Text(session["state"].stringValue.replacingOccurrences(of: "_", with: " ")) }
+                        Text(uiText("\(MetricPresentation.duration(seconds)) asleep")).font(.headline)
+                    } else { Text(uiState(session["state"].stringValue)) }
                     if let efficiency = session["efficiency"].numberValue {
-                        Text("Observed sleep efficiency: \((efficiency * 100).formatted())%")
-                    } else { Text("Efficiency needs complete in-bed evidence.").font(.caption) }
-                    Text(session["classification"].stringValue.replacingOccurrences(of: "_", with: " "))
-                    Text(session["correction_state"].stringValue.replacingOccurrences(of: "_", with: " ")).font(.caption)
-                    if let seconds = session["user_asleep_seconds"].numberValue { Text("User estimate: \(MetricPresentation.duration(seconds))") }
+                        Text(uiText("Observed sleep efficiency: \((efficiency * 100).formatted())%"))
+                    } else { Text(uiText("Efficiency needs complete in-bed evidence.")).font(.caption) }
+                    Text(uiState(session["classification"].stringValue))
+                    Text(uiState(session["correction_state"].stringValue)).font(.caption)
+                    if let seconds = session["user_asleep_seconds"].numberValue { Text(uiText("User estimate: \(MetricPresentation.duration(seconds))")) }
                     if session["corrections"].arrayValue.count <= 1 {
-                        Button("Confirm or correct sleep") { correction = SleepCorrectionSelection(source: session["source"].stringValue, session: session) }
-                    } else { Text("Delete duplicate corrections in Daily logs before confirming again.").font(.caption) }
+                        Button(uiText("Confirm or correct sleep")) { correction = SleepCorrectionSelection(source: session["source"].stringValue, session: session) }
+                    } else { Text(uiText("Delete duplicate corrections in Daily logs before confirming again.")).font(.caption) }
                     BrowseChart(timestamps: session["timeline"].arrayValue.flatMap { [$0["start_at"].numberValue, $0["end_at"].numberValue].compactMap { $0 } }, unit: "Sleep stage", initialPeriod: .day) { range, _ in
                     #if os(Android)
                     AndroidSleepPlot(records: session["timeline"].arrayValue, range: range)
@@ -61,25 +61,25 @@ struct SleepSessionsView: View {
                         source: model.sourceLabel(session["source"].stringValue), value: session["asleep_seconds"].numberValue.map(MetricPresentation.duration) ?? "—")
                 }
             }
-            if result != .null && result["sources"].arrayValue.isEmpty { Text("No supported sleep records in this range.") }
-            Section("About this metric") {
+            if result != .null && result["sources"].arrayValue.isEmpty { Text(uiText("No supported sleep records in this range.")) }
+            Section(uiText("About this metric")) {
                 MetricAboutView(id: "sleep_sessions", name: "Sleep sessions")
             }
-            Section("Seven-day sleep regularity") {
-                InfoHelp(title: "Sleep regularity", message: "Every minute needs an explicit sleep or wake state. Missing daytime intervals are unknown.")
+            Section(uiText("Seven-day sleep regularity")) {
+                InfoHelp(title: uiText("Sleep regularity"), message: uiText("Every minute needs an explicit sleep or wake state. Missing daytime intervals are unknown."))
                 ForEach(HistoricalValue.keyedRows(regularity["sources"].arrayValue, namespace: "sleep-regularity")) { sourceRow in
                     let source = sourceRow.value
                     VStack(alignment: .leading) {
                         Text(model.sourceLabel(source["source"].stringValue))
-                        Text(source["value"].numberValue.map { "\($0.formatted()) SRI" } ?? "Not available").font(.headline)
-                        Text("\(Int(source["known_minutes"].numberValue ?? 0))/10080 known minute states").font(.caption)
-                        Text(source["state"].stringValue.replacingOccurrences(of: "_", with: " ")).font(.caption)
+                        Text(source["value"].numberValue.map { "\($0.formatted()) SRI" } ?? uiText("Not available")).font(.headline)
+                        Text(uiText("\(Int(source["known_minutes"].numberValue ?? 0))/10080 known minute states")).font(.caption)
+                        Text(uiState(source["state"].stringValue)).font(.caption)
                     }
                 }
-                if !regularity["notes"].arrayValue.isEmpty { InfoHelp(title: "Regularity method", message: regularity["notes"].arrayValue.map(\.stringValue).joined(separator: "\n\n")) }
+                if !regularity["notes"].arrayValue.isEmpty { InfoHelp(title: uiText("Regularity method"), message: regularity["notes"].arrayValue.map(\.stringValue).joined(separator: "\n\n")) }
             }
-            Section("Method") {
-                InfoHelp(title: "Session grouping", message: "Sessions group intervals separated by at most 90 minutes. This engineering threshold does not classify main sleep or naps.")
+            Section(uiText("Method")) {
+                InfoHelp(title: uiText("Session grouping"), message: uiText("Sessions group intervals separated by at most 90 minutes. This engineering threshold does not classify main sleep or naps."))
                 Text(result["algorithm_version"].stringValue).font(.caption)
             }
         }.task(id: selectedInterval) { await reload() }.refreshable { await reload() }
@@ -130,18 +130,18 @@ struct SleepCorrectionEditor: View {
     @State var initialized = false
     var body: some View {
         Form {
-            InfoHelp(title: "Sleep estimate", message: "Source intervals remain unchanged. Your estimate does not create sleep stages or change SRI.")
-            Picker("Classification", selection: $classification) {
-                Text("Unclassified").tag("unclassified_session")
-                Text("Main sleep").tag("main_sleep")
-                Text("Nap").tag("nap")
+            InfoHelp(title: uiText("Sleep estimate"), message: uiText("Source intervals remain unchanged. Your estimate does not create sleep stages or change SRI."))
+            Picker(uiText("Classification"), selection: $classification) {
+                Text(uiText("Unclassified")).tag("unclassified_session")
+                Text(uiText("Main sleep")).tag("main_sleep")
+                Text(uiText("Nap")).tag("nap")
             }
-            TextField("User estimated sleep minutes (optional)", text: $minutes).keyboardType(.decimalPad)
-            TextField("Reason or context", text: $note, axis: .vertical)
-            if let failure { Text(failure).foregroundStyle(.secondary) }
-            Button("Save sleep confirmation") { Task { await save() } }.disabled(saving || note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        }.mobileNavigationTitle("Sleep confirmation")
-            .toolbar { Button("Cancel") { dismiss() } }
+            TextField(uiText("User estimated sleep minutes (optional)"), text: $minutes).keyboardType(.decimalPad)
+            TextField(uiText("Reason or context"), text: $note, axis: .vertical)
+            if let failure { Text(uiMessage(failure)).foregroundStyle(.secondary) }
+            Button(uiText("Save sleep confirmation")) { Task { await save() } }.disabled(saving || note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }.mobileNavigationTitle(uiText("Sleep confirmation"))
+            .toolbar { Button(uiText("Cancel")) { dismiss() } }
             .interactiveDismissDisabled()
             .onAppear {
                 guard !initialized else { return }; initialized = true

@@ -24,21 +24,21 @@ struct HealthView: View {
                         Task { await model.synchronizeHealth(requestAccess: true, requestSelectedAccess: false, automatic: false); await reload() }
                     } label: {
                         HStack(spacing: 8) {
-                            Text("Sync Now")
+                            Text(uiText("Sync Now"))
                             if model.isHealthSyncRunning { ProgressView().accessibilityHidden(true) }
                         }.frame(minHeight: 44)
                     }.disabled(model.isHealthSyncRunning).accessibilityValue(model.isHealthSyncRunning ? "Syncing" : "")
                     Spacer(minLength: 8)
                     if model.isHealthSyncRunning {
                         Button { model.pauseHealthSync() } label: {
-                            Text("Pause Sync").frame(minHeight: 44)
+                            Text(uiText("Pause Sync")).frame(minHeight: 44)
                         }
                         if model.keepHealthScreenAwake {
-                            InfoHelpButton(title: "Screen awake", message: "Screen stays awake while syncing on this page.")
+                            InfoHelpButton(title: uiText("Screen awake"), message: uiText("Screen stays awake while syncing on this page."))
                         }
                     }
                 }.buttonStyle(.borderless)
-                Text(model.health.status).font(.caption).fixedSize(horizontal: false, vertical: true)
+                Text(uiMessage(model.health.status)).font(.caption).fixedSize(horizontal: false, vertical: true)
                 if let activity = model.health.activity, model.health.isSyncing {
                     #if os(iOS)
                     TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -58,26 +58,26 @@ struct HealthView: View {
                     #endif
                 }
                 #if os(iOS)
-                Button("Select prescriptions and medications") { Task { await model.synchronizeHealth(requestAccess: true, requestSelectedAccess: true, automatic: false); await reload() } }.disabled(model.isHealthSyncRunning)
+                Button(uiText("Select prescriptions and medications")) { Task { await model.synchronizeHealth(requestAccess: true, requestSelectedAccess: true, automatic: false); await reload() } }.disabled(model.isHealthSyncRunning)
                 #endif
                 if let note = model.backgroundHealth.registrationError { Text(note).font(.caption).foregroundStyle(.secondary) }
             }
-            Section("Sync Error") {
+            Section(uiText("Sync Error")) {
                 let errors = coverage.filter { $0["status"] == .string("error") }
-                if errors.isEmpty { Text("No sync errors").foregroundStyle(.secondary) }
+                if errors.isEmpty { Text(uiText("No sync errors")).foregroundStyle(.secondary) }
                 ForEach(Array(errors.enumerated()), id: \.offset) { _, entry in
                     SyncCoverageRow(entry: entry)
                 }
             }
             Section {
-                NavigationLink("All Sync Coverage Categories") {
+                NavigationLink(uiText("All Sync Coverage Categories")) {
                     List {
                         ForEach(Array(coverage.filter { $0["status"] == .string("error") }.enumerated()), id: \.offset) { _, entry in SyncCoverageRow(entry: entry) }
                         ForEach(Array(coverage.filter { $0["status"] != .string("error") }.enumerated()), id: \.offset) { _, entry in SyncCoverageRow(entry: entry) }
-                    }.mobileNavigationTitle("Sync Coverage")
+                    }.mobileNavigationTitle(uiText("Sync Coverage"))
                 }
             }
-        }.mobileNavigationTitle(MobilePlatform.healthProviderName).initialTask { await reload() }.refreshable { await reload() }
+        }.mobileNavigationTitle(uiLabel(MobilePlatform.healthProviderName)).initialTask { await reload() }.refreshable { await reload() }
             .onChange(of: model.isHealthSyncRunning) { _, running in if !running { Task { await reload() } } }
             .onAppear { isVisible = true }
             #if os(iOS)
@@ -106,13 +106,13 @@ struct SyncCoverageRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(HealthSyncProgress.name(entry["record_type"].stringValue))
-            Text(entry["status"].stringValue.replacingOccurrences(of: "_", with: " ").capitalized)
+            Text(uiState(entry["status"].stringValue))
                 .font(.caption).foregroundStyle(entry["status"] == .string("error") ? Color.red : Color.secondary)
             if let last = entry["last_success_at"].numberValue {
-                Text("Last successful query: \(Date(timeIntervalSince1970: last).formatted())").font(.caption)
+                Text(uiText("Last successful query: \(Date(timeIntervalSince1970: last).formatted())")).font(.caption)
             }
             if let first = entry["visible_start_at"].numberValue, let last = entry["visible_end_at"].numberValue {
-                Text("Archived platform range: \(Date(timeIntervalSince1970: first).formatted(date: .abbreviated, time: .omitted)) – \(Date(timeIntervalSince1970: last).formatted(date: .abbreviated, time: .omitted))").font(.caption)
+                Text(uiText("Archived platform range: \(uiDate(Date(timeIntervalSince1970: first), dateStyle: .abbreviated, timeStyle: .omitted)) – \(uiDate(Date(timeIntervalSince1970: last), dateStyle: .abbreviated, timeStyle: .omitted))")).font(.caption)
             }
         }
     }

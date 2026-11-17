@@ -10,9 +10,9 @@ import java.util.concurrent.TimeUnit
 class HealthSyncWorker(context: Context, parameters: WorkerParameters) : CoroutineWorker(context, parameters) {
     override suspend fun doWork(): Result {
         val manager = applicationContext.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel("health-transfers", "Health transfers", NotificationManager.IMPORTANCE_LOW))
+        manager.createNotificationChannel(NotificationChannel("health-transfers", applicationContext.interfaceText("Health transfers"), NotificationManager.IMPORTANCE_LOW))
         val notification = Notification.Builder(applicationContext, "health-transfers").setSmallIcon(android.R.drawable.stat_sys_upload)
-            .setContentTitle("Long Live Health").setContentText("Syncing health data").setOngoing(true).build()
+            .setContentTitle("Long Live Health").setContentText(applicationContext.interfaceText("Syncing health data")).setOngoing(true).build()
         setForeground(if (Build.VERSION.SDK_INT >= 29) ForegroundInfo(911, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC) else ForegroundInfo(911, notification))
         running = true
         return try {
