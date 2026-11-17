@@ -13,7 +13,7 @@ struct DataCenterView: View {
     @State var selected: DataPage?
     var body: some View {
         AdaptiveDetailLayout(selected: selected != nil) {
-            NavigationStack { menu }
+            NavigationStack { Sidebar(center: self) }
         } detail: {
             if let selected {
                 NavigationStack {
@@ -28,6 +28,14 @@ struct DataCenterView: View {
             else { EmptyContent(title: uiText("Choose a data tool"), symbol: "externaldrive") }
         }.onChange(of: model.dataPath) { _, path in
             if let last = path.last { selected = last == .reports ? .reports : .health }
+        }
+    }
+
+    private struct Sidebar: View {
+        let center: DataCenterView
+
+        var body: some View {
+            center.menu
         }
     }
     #else

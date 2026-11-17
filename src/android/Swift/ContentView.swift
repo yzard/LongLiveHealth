@@ -25,9 +25,15 @@ struct ContentView: View {
                 NavigationStack { PasswordChangeView(model: model, required: true) }
             } else {
                 TabView(selection: $model.selectedTab) {
-                    NavigationStack { InsightsView(model: model) }.tabItem { Label(uiText("Insights"), systemImage: MobileSymbol.name("sparkles")) }.tag("Insights")
-                    BrowseView(model: model).tabItem { Label(uiText("Browse"), systemImage: MobileSymbol.name("list.bullet")) }.tag("Browse")
-                    DataCenterView(model: model).tabItem { Label(uiText("Data"), systemImage: MobileSymbol.name("externaldrive")) }.tag("Data")
+                    NavigationStack { InsightsView(model: model) }.tabItem {
+                        Label { TabTitle(key: "Insights") } icon: { Image(systemName: MobileSymbol.name("sparkles")) }
+                    }.tag("Insights")
+                    BrowseView(model: model).tabItem {
+                        Label { TabTitle(key: "Browse") } icon: { Image(systemName: MobileSymbol.name("list.bullet")) }
+                    }.tag("Browse")
+                    DataCenterView(model: model).tabItem {
+                        Label { TabTitle(key: "Data") } icon: { Image(systemName: MobileSymbol.name("externaldrive")) }
+                    }.tag("Data")
                 }.initialTask { await model.resumeForeground() }
             }
         }.tint(.teal)
@@ -42,5 +48,14 @@ struct ContentView: View {
                     do { try await Task.sleep(for: .seconds(30)) } catch { return }
                 }
             }
+    }
+}
+
+/// Skip keeps the tab items alive while their navigation stacks change.
+private struct TabTitle: View {
+    let key: String
+
+    var body: some View {
+        Text(uiLabel(key))
     }
 }

@@ -913,12 +913,55 @@ def paired_charts():
     print("PASS: dedicated ECG waveform and switching recordings")
 
 
+def interface_language():
+    app = "dev.longlivehealth.android"
+    english = ("Insights", "Browse", "Data")
+    chinese = ("健康洞察", "浏览", "数据")
+
+    def restart():
+        adb("shell", "am", "force-stop", app)
+        adb("shell", "am", "start", "-W", "-n", app + "/health.app.MainActivity")
+
+    def change_language(current, choice, expected):
+        tap(current[2])
+        settings = [n for n in tree().iter("node") if n.get("resource-id") == "open-settings"]
+        assert settings, "Missing Settings action"
+        tap_node(settings[0])
+        for _ in range(5):
+            pickers = [n for n in tree().iter("node") if n.get("resource-id") == "settings-interface-language"]
+            if pickers:
+                tap_node(pickers[-1])
+                break
+            width, height = map(int, re.findall(r"(\d+)x(\d+)", adb("shell", "wm", "size"))[-1])
+            adb("shell", "input", "swipe", str(width * 3 // 4), str(height * 3 // 4),
+                str(width * 3 // 4), str(height // 3), "350")
+        else:
+            raise AssertionError("Missing language picker")
+        tap(choice)
+        for label in expected:
+            wait_for(label)
+
+    restart()
+    wait_for(english[0])
+    change_language(english, "中文", chinese)
+    restart()
+    for label in chinese:
+        wait_for(label)
+    change_language(chinese, "English", english)
+    restart()
+    for label in english:
+        wait_for(label)
+    print("PASS: switching languages updates all tabs and survives restart")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("inspect", "login", "tap", "navigation", "insight-cards", "browse-switch", "camera", "selectors", "chart-scroll", "original-preview", "rescan", "blood-work", "report-date", "report-scroll", "report-metric-review", "report-mapping-layout", "report-status-actions", "report-status-chart", "report-settings", "edge-scroll", "paired-charts"))
+    parser.add_argument("action", choices=("inspect", "language", "login", "tap", "navigation", "insight-cards", "browse-switch", "camera", "selectors", "chart-scroll", "original-preview", "rescan", "blood-work", "report-date", "report-scroll", "report-metric-review", "report-mapping-layout", "report-status-actions", "report-status-chart", "report-settings", "edge-scroll", "paired-charts"))
     parser.add_argument("text", nargs="?")
     args = parser.parse_args()
-    if args.action == "inspect":
+    if args.action == "language":
+        interface_language()
+    elif args.action == "inspect":
         inspect()
     elif args.action == "paired-charts":
         paired_charts()
