@@ -31,7 +31,7 @@ struct DataCenterView: View {
         }
     }
 
-    private struct Sidebar: View {
+    struct Sidebar: View {
         let center: DataCenterView
 
         var body: some View {

@@ -52,7 +52,7 @@ struct ContentView: View {
 }
 
 /// Skip keeps the tab items alive while their navigation stacks change.
-private struct TabTitle: View {
+struct TabTitle: View {
     let key: String
 
     var body: some View {
