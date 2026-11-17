@@ -94,7 +94,17 @@ import Testing
             if attempts == 1 { throw URLError(.networkConnectionLost) }
         }
         #expect(attempts == 2 && model.errorMessage == nil)
-        await model.performRecoverable(automatic: false) { throw URLError(.networkConnectionLost) }
+        let client = try #require(model.client)
+        #expect(model.client === client)
+        for code: URLError.Code in [.secureConnectionFailed, .serverCertificateUntrusted] {
+            await model.performRecoverable(automatic: true) { throw URLError(code) }
+            #expect(model.errorMessage == nil)
+            #expect(model.offlineNotice?.contains("securely connect") == true)
+            #expect(model.session?.token == saved.token)
+        }
+        await model.refresh(automatic: true)
+        #expect(model.offlineNotice == nil)
+        await model.performRecoverable(automatic: false) { throw URLError(.secureConnectionFailed) }
         #expect(model.errorMessage != nil)
         model.errorMessage = nil
         await model.performRecoverable(automatic: true) { throw CancellationError() }

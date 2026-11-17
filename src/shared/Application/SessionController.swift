@@ -5,16 +5,21 @@ import Foundation
     private(set) var saved: StoredSession
     private var renewal: Task<StoredSession, Error>?
     private var retired = false
+    private var activeClient: APIClient?
 
     init(_ saved: StoredSession) { self.saved = saved }
 
     func client() -> APIClient {
-        APIClient(server: saved.server, token: saved.token, uploadTransport: MobilePlatform.uploadTransport, authorization: { [self] force in
-            try await credential(force: force)
+        if let activeClient { return activeClient }
+        let client = APIClient(server: saved.server, token: nil, uploadTransport: MobilePlatform.uploadTransport, authorization: { [weak self] force in
+            guard let self else { throw CancellationError() }
+            return try await self.credential(force: force)
         })
+        activeClient = client
+        return client
     }
 
-    func retire() { retired = true; renewal?.cancel(); renewal = nil }
+    func retire() { retired = true; renewal?.cancel(); renewal = nil; activeClient = nil }
 
     func setBiometricUnlock(_ enabled: Bool) throws {
         var next = saved; next.biometricUnlock = enabled

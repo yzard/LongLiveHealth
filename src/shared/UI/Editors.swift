@@ -35,14 +35,8 @@ struct ObservationEditor: View {
     }
     var body: some View {
         NavigationStack {
-            Form { reviewSections }
-                .mobileNavigationTitle(observation == .null ? "Add result" : "Review result")
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button(status == "pending" ? "Save Draft" : "Save") { Task { await submit(as: status) } }.disabled(saveDisabled)
-                    }
-                }.interactiveDismissDisabled()
+            editorSurface
+                .interactiveDismissDisabled()
                 .alert("Could not save", isPresented: Binding(
                     get: { error != nil }, set: { if !$0 { error = nil } }
                 )) {
@@ -57,6 +51,102 @@ struct ObservationEditor: View {
                 } message: { Text("The result is saved as printed. It may be unavailable in metric charts.") }
         }
     }
+    private var isReview: Bool { observation != .null }
+
+    @ViewBuilder private var editorSurface: some View {
+        #if os(Android)
+        if isReview {
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    cancelButton
+                    Text("Review result")
+                        .font(.headline)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity)
+                    saveButton
+                    if status == "pending" {
+                        submitButton.buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .background(.background)
+                Divider()
+                Form { reviewSections }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .toolbar(.hidden, for: .navigationBar)
+        } else {
+            nativeEditor
+        }
+        #else
+        nativeEditor
+        #endif
+    }
+
+    private var nativeEditor: some View {
+        editorForm.toolbar {
+            ToolbarItem(placement: .cancellationAction) { cancelButton }
+            #if !os(Android)
+            if isReview {
+                ToolbarItem(placement: .principal) {
+                    Text("Review result")
+                        .font(.headline)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .accessibilityAddTraits(.isHeader)
+                }
+            }
+            #endif
+            ToolbarItem(placement: .confirmationAction) {
+                HStack(spacing: 12) {
+                    saveButton
+                    #if !os(Android)
+                    if isReview && status == "pending" {
+                        submitButton.fontWeight(.semibold)
+                    }
+                    #endif
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var editorForm: some View {
+        let form = Form { reviewSections }
+        if isReview {
+            form.navigationTitle("Review result").navigationBarTitleDisplayMode(.inline)
+        } else {
+            form.mobileNavigationTitle("Add result")
+        }
+    }
+
+    private var cancelButton: some View {
+        Button("Cancel") { dismiss() }
+            .disabled(saving)
+    }
+
+    private var saveButton: some View {
+        Button(isReview || status != "pending" ? "Save" : "Save Draft") { Task { await submit(as: status) } }
+            .accessibilityIdentifier("save-reviewed-result")
+            .disabled(saveDisabled)
+    }
+
+    private var submitButton: some View {
+        Button("Submit", action: submitResult)
+            .accessibilityIdentifier("submit-reviewed-result")
+            .disabled(saveDisabled)
+    }
+
+    private func submitResult() {
+        let unitConflict = payload["raw_unit"] == observation["payload"]["raw_unit"]
+            && observation["browse_issues"].arrayValue.contains { $0["code"] == .string("unsupported_unit") }
+        if !creatingMetric && (metricSelection.isEmpty || unitConflict) {
+            submitAsPrinted = true
+        } else {
+            Task { await submit(as: "submitted") }
+        }
+    }
+
     private var status: String {
         let saved = observation["status"].stringValue
         return saved.isEmpty ? "pending" : saved
@@ -144,23 +234,14 @@ struct ObservationEditor: View {
             mappingIssues
         }
         Section("As printed on the report") {
-            printedRows(editable: true)
+            printedRows
             if !validLOINC { Text("Enter a LOINC code such as 50560-2.").font(.caption).foregroundStyle(.red) }
         }
-        if status == "pending" {
-            Section {
-                Button("Submit") {
-                    let unitConflict = payload["raw_unit"] == observation["payload"]["raw_unit"]
-                        && observation["browse_issues"].arrayValue.contains { $0["code"] == .string("unsupported_unit") }
-                    if !creatingMetric && (metricSelection.isEmpty || unitConflict) { submitAsPrinted = true }
-                    else { Task { await submit(as: "submitted") } }
-                }
-                    .accessibilityIdentifier("submit-reviewed-result")
-                    .disabled(saveDisabled)
-            }
+        if !isReview && status == "pending" {
+            Section { submitButton }
         }
         Section("Source") {
-            if observation != .null {
+            if isReview {
                 Button("View Original Page") {
                     Task {
                         do { preview = try await source(Int(payload["source"]["page"].numberValue ?? 1)) }
@@ -195,29 +276,34 @@ struct ObservationEditor: View {
         }
     }
 
-    @ViewBuilder private func printedRows(editable: Bool) -> some View {
+    @ViewBuilder private var printedRows: some View {
         // Fixed fields share the form's lazy list with the candidate rows on Android.
-        printedRow("Metric name", value: $printedName, editable: editable)
-        printedRow("Lab code", value: text("raw_lab_code"), editable: editable)
-        printedRow("LOINC code", value: $loincCode, editable: editable)
-        printedRow("Result", value: text("raw_result"), editable: editable)
-        printedRow("Unit", value: text("raw_unit"), editable: editable)
-        printedRow("Reference range", value: text("reference_range"), editable: editable)
-        printedRow("Report flag", value: text("report_flag"), editable: editable)
-        printedRow("Collection date", value: text("sampled_at"), editable: editable)
+        printedRow("Metric name", value: $printedName)
+        printedRow("Lab code", value: text("raw_lab_code"))
+        printedRow("LOINC code", value: $loincCode)
+        printedRow("Result", value: text("raw_result"))
+        printedRow("Unit", value: text("raw_unit"))
+        printedRow("Reference range", value: text("reference_range"))
+        printedRow("Report flag", value: text("report_flag"))
+        printedRow("Collection date", value: text("sampled_at"))
     }
 
-    private func printedRow(_ label: String, value: Binding<String>, editable: Bool) -> some View {
-        LabeledContent(label) {
-            if editable {
-                TextField("—", text: value, axis: .vertical)
-                    .multilineTextAlignment(.trailing)
-                    .autocorrectionDisabled()
-                    .accessibilityLabel(Text(label))
-            } else {
-                Text(value.wrappedValue.isEmpty ? "—" : value.wrappedValue)
-                    .multilineTextAlignment(.trailing)
+    @ViewBuilder private func printedRow(_ label: String, value: Binding<String>) -> some View {
+        let field = TextField("—", text: value, axis: .vertical)
+            .multilineTextAlignment(.trailing)
+            .autocorrectionDisabled()
+            .accessibilityLabel(Text(label))
+        if isReview {
+            HStack(alignment: .firstTextBaseline, spacing: 18) {
+                Text(label)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(minWidth: 120, alignment: .leading)
+                field.frame(maxWidth: .infinity, alignment: .trailing)
             }
+            .padding(.vertical, 3)
+        } else {
+            LabeledContent(label) { field }
         }
     }
 

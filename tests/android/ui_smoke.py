@@ -532,7 +532,7 @@ def report_metric_review():
                 tap("Closest matches")
                 wait_for("Blood glucose")
                 tap("Blood glucose")
-                wait_for("Save Draft")
+                wait_for("Save")
             if negative:
                 warnings = labels()
                 assert any("Unit mismatch · mg/dL" in label for label in warnings)
@@ -562,7 +562,7 @@ def report_metric_review():
                 adb("shell", "input", "text", "mg/L")
                 adb("shell", "input", "keyevent", "KEYCODE_BACK")
                 wait_for("mg/L")
-            tap("Save Draft")
+            tap("Save")
             wait_for("0 results ready to submit" if negative else "1 result ready to submit")
             saved = control("reports/get")["observations"][0]
             assert saved["payload"]["metric_id"] == ("urine_appearance" if negative else "glucose")
@@ -583,7 +583,7 @@ def report_metric_review():
             wait_for("Mark as New")
             wait_for("OCR suggestion: Zyphorin panel activity · mmol/L")
             tap("Mark as New")
-            wait_for("Save Draft")
+            wait_for("Save")
             assert any(n.get("class") == "android.widget.EditText" for n in tree().iter("node"))
             tap("Cancel")
             wait_for(issue)
@@ -592,8 +592,8 @@ def report_metric_review():
             wait_for("Review result")
             wait_for("Mark as New")
             tap("Mark as New")
-            wait_for("Save Draft")
-            tap("Save Draft")
+            wait_for("Save")
+            tap("Save")
             wait_for("1 result ready to submit")
             tap("1 result ready to submit")
             wait_for("Zyphorin activity")
@@ -741,7 +741,7 @@ def report_status_actions(check_chart=False):
     tap("Submit")
     wait_for("Could not save")
     tap("OK")
-    wait_for("Save Draft")
+    wait_for("Save")
     assert next(row for row in control("reports/get")["observations"]
                 if row["observation_id"] == original[-1]["observation_id"])["status"] == "pending"
     tap("Submit")

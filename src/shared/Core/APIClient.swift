@@ -83,7 +83,7 @@ public nonisolated final class APIClient: Sendable {
     private func readResponse(for request: URLRequest, retryInterruptedRead: Bool) async throws -> (Data, URLResponse) {
         do {
             return try await session.data(for: request)
-        } catch where retryInterruptedRead && Self.isInterruptedRead(error) {
+        } catch where retryInterruptedRead && (Self.isInterruptedRead(error) || (error as? URLError)?.code == .secureConnectionFailed) {
             try Task.checkCancellation()
             do {
                 return try await session.data(for: request)

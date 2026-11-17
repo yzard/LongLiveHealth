@@ -881,12 +881,27 @@ nonisolated final class SmokeTests: XCTestCase {
                 .matching(NSPredicate(format: "value == %@", printed)).firstMatch
             reveal(app, field)
             XCTAssertTrue(field.exists)
+            let printedLabel = app.staticTexts["Metric name"].firstMatch
+            XCTAssertTrue(printedLabel.isHittable)
+            XCTAssertGreaterThanOrEqual(field.frame.minX - printedLabel.frame.maxX, 12)
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
             for label in ["Metric name", "Lab code", "LOINC code", "Result", "Unit",
                           "Reference range", "Report flag", "Collection date"] {
                 let caption = app.staticTexts[label].firstMatch
                 reveal(app, caption)
                 XCTAssertTrue(caption.exists, "Missing printed-field label: \(label)")
             }
+            let bar = app.navigationBars["Review result"]
+            let save = app.buttons["save-reviewed-result"]
+            let submit = app.buttons["submit-reviewed-result"]
+            let cancel = app.buttons["Cancel"]
+            let bottom = app.staticTexts["Source"].firstMatch
+            reveal(app, bottom)
+            XCTAssertTrue(bar.isHittable && cancel.isHittable && save.isHittable && submit.isHittable)
+            XCTAssertLessThan(cancel.frame.midX, save.frame.midX)
+            XCTAssertLessThan(save.frame.maxX, submit.frame.minX)
             tapButton(app, "Cancel")
             XCTAssertTrue(title.waitForExistence(timeout: 5))
         }
@@ -908,7 +923,7 @@ nonisolated final class SmokeTests: XCTestCase {
         reveal(app, appearance)
         appearance.tap()
         XCTAssertTrue(app.navigationBars["Review result"].waitForExistence(timeout: 5))
-        tapButton(app, "Save Draft")
+        tapButton(app, "Save")
         XCTAssertTrue(app.navigationBars["Review result"].waitForNonExistence(timeout: 5))
         for _ in 0..<3 where !ready.isHittable { app.swipeDown() }
         XCTAssertTrue(ready.label.contains("2 results ready to submit"))
@@ -922,7 +937,7 @@ nonisolated final class SmokeTests: XCTestCase {
         let newResult = app.buttons["report-result-new"]
         reveal(app, newResult); newResult.tap()
         XCTAssertTrue(app.navigationBars["Review result"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Save Draft"].exists)
+        XCTAssertTrue(app.buttons["Save"].exists)
         app.buttons["mark-as-new-metric"].tap()
         XCTAssertTrue(app.navigationBars["Review result"].waitForExistence(timeout: 5))
         let submit = app.buttons["submit-reviewed-result"]

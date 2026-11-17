@@ -613,6 +613,13 @@ final class AppModel {
                     try await operation()
                     return
                 } catch let error as URLError where automatic && [
+                    .secureConnectionFailed, .serverCertificateHasBadDate, .serverCertificateUntrusted,
+                    .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid,
+                    .clientCertificateRejected, .clientCertificateRequired
+                ].contains(error.code) {
+                    offlineNotice = "Could not securely connect to your server. Your login and pending imports are saved."
+                    return
+                } catch let error as URLError where automatic && [
                     .timedOut, .notConnectedToInternet, .networkConnectionLost,
                     .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed
                 ].contains(error.code) {

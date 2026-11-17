@@ -47,6 +47,49 @@ nonisolated final class LiveReportLayoutTests: XCTestCase {
 
     }
 
+    @MainActor func testReviewToolbarStaysVisibleOnDevice() throws {
+        guard ProcessInfo.processInfo.environment["LLH_LIVE_DEVICE_AUDIT"] == "1" else {
+            throw XCTSkip("Requires a signed-in physical device")
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+        let data = app.tabBars.buttons["Data"]
+        XCTAssertTrue(data.waitForExistence(timeout: 20))
+        XCTAssertFalse(app.alerts["Could not complete the action"].exists)
+        data.tap()
+        let bloodWork = app.buttons.containing(.staticText, identifier: "Blood Work").firstMatch
+        XCTAssertTrue(bloodWork.waitForExistence(timeout: 10))
+        bloodWork.tap()
+        let report = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "report-row-", "2019-"
+        )).firstMatch
+        for _ in 0..<8 where !report.isHittable { app.swipeUp() }
+        XCTAssertTrue(report.isHittable)
+        report.tap()
+        let review = app.buttons.matching(NSPredicate(
+            format: "identifier == %@ AND label == %@", "report-result-status-action", "Review"
+        )).firstMatch
+        XCTAssertTrue(review.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.alerts["Could not complete the action"].exists)
+        review.tap()
+        let bar = app.navigationBars["Review result"]
+        let cancel = app.buttons["Cancel"]
+        let save = app.buttons["save-reviewed-result"]
+        let submit = app.buttons["submit-reviewed-result"]
+        XCTAssertTrue(bar.waitForExistence(timeout: 5))
+        XCTAssertEqual(save.label, "Save")
+        let initial = [cancel.frame, save.frame, submit.frame]
+        let bottom = app.buttons["View Original Page"]
+        for _ in 0..<6 where !bottom.isHittable { app.swipeUp() }
+        XCTAssertTrue(bottom.isHittable)
+        XCTAssertTrue(cancel.isHittable && save.isHittable && submit.isHittable && bar.isHittable)
+        XCTAssertEqual(initial, [cancel.frame, save.frame, submit.frame])
+        XCTAssertLessThan(save.frame.minX, submit.frame.minX)
+        cancel.tap()
+        XCTAssertTrue(app.buttons["report-info"].waitForExistence(timeout: 5))
+    }
+
     @MainActor func testInstalledReportLayout() throws {
         guard ProcessInfo.processInfo.environment["LLH_LIVE_DEVICE_AUDIT"] == "1" else {
             throw XCTSkip("Requires a signed-in physical device")
