@@ -784,7 +784,6 @@ nonisolated final class SmokeTests: XCTestCase {
         }
         _ = try await control("test/reset")
         _ = try await control("test/seed-report")
-        _ = try await control("test/expand-report")
         let app = XCUIApplication(); app.launch(); dismissPasswordPrompts(app)
         if app.buttons["Sign in"].exists {
             let server = app.textFields["http://192.168.1.20:8080"]
@@ -807,7 +806,7 @@ nonisolated final class SmokeTests: XCTestCase {
         report.tap()
         let count = app.descendants(matching: .any).matching(identifier: "report-marker-count").firstMatch
         XCTAssertTrue(count.waitForExistence(timeout: 10))
-        XCTAssertEqual(count.value as? String, "126")
+        XCTAssertEqual(count.value as? String, "1")
         let top = XCTAttachment(screenshot: app.screenshot()); top.lifetime = .keepAlways; add(top)
         let original = app.buttons["report-original"]
         let manual = app.buttons["report-add-result"]
@@ -823,9 +822,21 @@ nonisolated final class SmokeTests: XCTestCase {
         rescan.tap()
         XCTAssertTrue(app.alerts["Rescan report?"].waitForExistence(timeout: 3))
         app.alerts.buttons["Cancel"].tap()
-        XCTAssertEqual(count.value as? String, "126")
+        XCTAssertEqual(count.value as? String, "1")
 
-        XCTAssertFalse(app.buttons["Duplicate or revised report"].exists)
+        let confirmed = app.staticTexts["Confirmed Results"]
+        XCTAssertTrue(confirmed.exists)
+        rescan.tap()
+        XCTAssertTrue(app.alerts["Rescan report?"].staticTexts.matching(NSPredicate(
+            format: "label CONTAINS %@", "returns every result in this report to Pending"
+        )).firstMatch.exists)
+        app.alerts.buttons["Rescan"].tap()
+        XCTAssertTrue(confirmed.waitForNonExistence(timeout: 10))
+        let data = try await control("reports/get")
+        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let rows = try XCTUnwrap(document["observations"] as? [[String: Any]])
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?["status"] as? String, "pending")
     }
 
     @MainActor func testLargeReportCountAndSourceEditing() async throws {

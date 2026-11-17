@@ -355,8 +355,11 @@ async fn extraction_replay_refreshes_untouched_drafts_and_preserves_reviewed_row
             .iter()
             .find(|row| row.observation_id == before.observation_id)
             .unwrap();
-        assert_eq!(after.status, before.status);
-        assert_eq!(after.revision, before.revision);
+        assert_eq!(after.status, "pending");
+        assert_eq!(
+            after.revision,
+            before.revision + i64::from(before.status == "confirmed")
+        );
         assert_eq!(
             serde_json::to_value(&after.payload).unwrap(),
             serde_json::to_value(&before.payload).unwrap()
@@ -618,11 +621,7 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
         .await
         .unwrap();
     assert_eq!(rows.len(), 2);
-    assert_eq!(
-        rows.iter().filter(|row| row.status == "confirmed").count(),
-        1
-    );
-    assert_eq!(rows.iter().filter(|row| row.status == "pending").count(), 1);
+    assert!(rows.iter().all(|row| row.status == "pending"));
     assert_eq!(
         state
             .database

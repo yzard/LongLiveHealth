@@ -40,7 +40,7 @@ python tests/docker/collection_dates.py --data-dir /path/to/api-data
 
 ## Report rescan
 
-Health Report shows View Original, Add Result, Rescan and Delete in one action row on both mobile platforms. Rescan keeps confirmed and manually edited results and refreshes untouched pending drafts. The original file and report context remain. New results stay pending until the user confirms them.
+Health Report shows View Original, Add Result, Rescan and Delete in one action row on both mobile platforms. Rescan returns all confirmed results in that report to Pending as soon as it queues extraction. Those results leave Browse and charts until confirmed again. The original file, report context and manual edits are kept, and untouched OCR drafts can be refreshed. Confirmation remains unavailable during the rescan.
 
 `POST /api/v1/reports/rescan` accepts `report_id` and `expected_revision`, authenticates the owner and returns 409 for an active extraction or stale revision. The worker reconciles new OCR evidence with the existing rows after processing succeeds. Duplicate detection uses the report source, measurement identity, collection date, and result. Failed jobs can use the normal retry action. The mobile page follows the new job even when opened before a rescan.
 

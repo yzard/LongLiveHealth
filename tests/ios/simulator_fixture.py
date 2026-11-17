@@ -197,6 +197,11 @@ class Handler(BaseHTTPRequestHandler):
             row['reported_negative_bound'] = '<0.1 mg/dL'
             row['browse_issues'] = [{'code': 'negative_with_unit', 'scope': 'review',
                                      'message': 'Reported negative threshold: <0.1 mg/dL.'}]
+        if route == 'reports/rescan':
+            for row in observations:
+                if row['report_id'] == body.get('report_id') and row['status'] == 'confirmed':
+                    row.update(status='pending', revision=row['revision'] + 1)
+            reports[0]['revision'] += 1
         if route == 'reports/delete':
             reports[:] = [item for item in reports if item['report_id'] != body.get('report_id')]
             observations[:] = [item for item in observations if item['report_id'] != body.get('report_id')]
@@ -303,6 +308,7 @@ class Handler(BaseHTTPRequestHandler):
                 'must_change_password': False,
             },
             'server/status': {'status': 'ok'},
+            'reports/rescan': {'job': {'job_id': 'fixture-rescan', 'file_id': body.get('report_id'), 'status': 'queued'}},
             'reports/list': {'reports': reports},
             'jobs/list': {'jobs': []},
             'metrics/list': {

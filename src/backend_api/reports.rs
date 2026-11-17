@@ -823,7 +823,22 @@ impl Database {
             .bind(&job_id)
             .execute(&mut *transaction)
             .await?;
+        let returned_to_pending = sqlx::query(queries::RETURN_RESCAN_RESULTS_TO_PENDING)
+            .bind(user_id)
+            .bind(report_id)
+            .bind(now()?)
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+        if returned_to_pending != 0 {
+            invalidate_report_projections(&mut transaction, user_id).await?;
+        }
         transaction.commit().await?;
+        if returned_to_pending != 0
+            && let Err(error) = self.reconcile_report_drafts().await
+        {
+            tracing::warn!(code=%error, "rescan queued; draft reconciliation failed");
+        }
         self.job(user_id, &job_id).await
     }
 
@@ -1163,6 +1178,20 @@ impl Database {
         };
         let native_links = lab_metric_metadata::clinical_links(&clinical);
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        if request
+            .observations
+            .iter()
+            .any(|row| row.status == ReviewStatus::Confirmed)
+            && sqlx::query_scalar::<_, bool>(queries::REPORT_ACTIVE_RESCAN)
+                .bind(user_id)
+                .bind(&request.report_id)
+                .fetch_one(&mut *transaction)
+                .await?
+        {
+            return Err(AppError::Conflict(
+                "Wait for the rescan to finish before confirming",
+            ));
+        }
         let updated = sqlx::query(queries::UPDATE_REPORT)
             .bind(context)
             .bind(user_id)
@@ -1471,18 +1500,7 @@ impl Database {
                 .execute(&mut *transaction)
                 .await?;
         }
-        sqlx::query(queries::TOUCH_USER_DATA)
-            .bind(user_id)
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query(queries::INVALIDATE_ANALYSES)
-            .bind(user_id)
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query(queries::INVALIDATE_EXPORTS)
-            .bind(user_id)
-            .execute(&mut *transaction)
-            .await?;
+        invalidate_report_projections(&mut transaction, user_id).await?;
         if queue_analysis {
             sqlx::query(queries::QUEUE_REPORT_ANALYSIS)
                 .bind(user_id)
@@ -1624,21 +1642,27 @@ impl Database {
                 .execute(&mut *transaction)
                 .await?;
         }
-        sqlx::query(queries::TOUCH_USER_DATA)
-            .bind(user_id)
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query(queries::INVALIDATE_ANALYSES)
-            .bind(user_id)
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query(queries::INVALIDATE_EXPORTS)
-            .bind(user_id)
-            .execute(&mut *transaction)
-            .await?;
+        invalidate_report_projections(&mut transaction, user_id).await?;
         transaction.commit().await?;
         Ok(())
     }
+}
+
+async fn invalidate_report_projections(
+    transaction: &mut sqlx::SqliteTransaction<'_>,
+    user_id: &str,
+) -> Result<(), AppError> {
+    for query in [
+        queries::TOUCH_USER_DATA,
+        queries::INVALIDATE_ANALYSES,
+        queries::INVALIDATE_EXPORTS,
+    ] {
+        sqlx::query(query)
+            .bind(user_id)
+            .execute(&mut **transaction)
+            .await?;
+    }
+    Ok(())
 }
 
 pub(crate) fn history_record(observation: &Observation) -> Value {

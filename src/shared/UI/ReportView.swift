@@ -47,7 +47,7 @@ struct ReportView: View {
         .alert("Rescan report?", isPresented: $rescanConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Rescan", role: .destructive) { Task { await rescan() } }
-        } message: { Text("Rescan updates unedited drafts and keeps confirmed results and manual edits. New results stay pending for review.") }
+        } message: { Text("Rescan returns every result in this report to Pending. Results are removed from Browse and charts until confirmed again.") }
         .alert("Delete report?", isPresented: $deleting) {
             Button("Cancel", role: .cancel) {}
             Button("Delete report", role: .destructive) { Task { await model.perform {
@@ -418,7 +418,7 @@ struct ReportView: View {
         }
     }
     private func confirmAll() async {
-        guard !confirmingAll, !savingReview, !extracting else { return }
+        guard !confirmingAll, !savingReview, !rescanning, !extracting else { return }
         confirmingAll = true; confirmationError = nil
         defer { confirmingAll = false }
         do {

@@ -296,6 +296,24 @@ SELECT o.payload_json, json_extract(r.context_json, '$.source_name') AS source_n
                     AND d.current_revision = o.current_revision
                     AND (d.candidate_key IS NULL OR d.ocr_revision != d.current_revision)))
 "#;
+pub const RETURN_RESCAN_RESULTS_TO_PENDING: &str = r#"
+INSERT INTO draft.observations (
+    observation_id, user_id, report_id, current_revision, status, payload_json, updated_at, candidate_key
+)
+SELECT observation_id, user_id, report_id, current_revision + 1, 'pending', payload_json, ?3, candidate_key
+  FROM review_observations
+ WHERE user_id = ?1 AND report_id = ?2 AND status = 'confirmed'
+ON CONFLICT(observation_id) DO UPDATE SET
+    current_revision = excluded.current_revision,
+    payload_json = excluded.payload_json,
+    updated_at = excluded.updated_at
+"#;
+pub const REPORT_ACTIVE_RESCAN: &str = r#"
+SELECT EXISTS (
+    SELECT 1 FROM jobs j JOIN report_rescan_jobs r ON r.job_id = j.job_id
+     WHERE j.user_id = ? AND j.file_id = ? AND j.status IN ('queued', 'running')
+)
+"#;
 pub const MARK_RESCAN_JOB: &str = "INSERT INTO report_rescan_jobs (job_id) VALUES (?)";
 pub const INSERT_PAGE: &str = "INSERT INTO extraction_pages (user_id, report_id, run_id, page_number, status, content, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
 pub const EXTRACTION_PAGES: &str = "SELECT run_id, page_number, status, content, model, created_at FROM extraction_pages WHERE user_id = ? AND report_id = ? ORDER BY created_at DESC, run_id, page_number";
