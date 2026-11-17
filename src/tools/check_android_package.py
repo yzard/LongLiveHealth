@@ -55,7 +55,14 @@ def validate_package(abis, methods, symbols):
         raise ValueError('ARM64 app library is missing JNI exports: ' + ', '.join(sorted(missing)))
 
 
+def validate_release_package(badging):
+    if 'application-debuggable' in {line.strip() for line in badging.splitlines()}:
+        raise ValueError('Android delivery requires a non-debuggable Release APK')
+
+
 def inspect_package(apk, dexdump):
+    badging = subprocess.check_output([str(dexdump.with_name("aapt")), "dump", "badging", str(apk)], text=True)
+    validate_release_package(badging)
     methods = []
     with zipfile.ZipFile(apk) as archive, tempfile.TemporaryDirectory() as temp:
         abis = {name.split('/')[1] for name in archive.namelist() if name.startswith('lib/') and name.endswith('.so')}

@@ -222,15 +222,14 @@ open class MainActivity: AppCompatActivity {
 internal fun SyncSystemBarsWithTheme() {
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
-    val transparent = AndroidColor.TRANSPARENT
-    val style = if (dark) {
-        SystemBarStyle.dark(transparent)
-    } else {
-        SystemBarStyle.light(transparent, transparent)
-    }
-
     val activity = androidx.activity.compose.LocalActivity.current as? ComponentActivity
-    DisposableEffect(style) {
+    DisposableEffect(activity, dark) {
+        val transparent = AndroidColor.TRANSPARENT
+        val style = if (dark) {
+            SystemBarStyle.dark(transparent)
+        } else {
+            SystemBarStyle.light(transparent, transparent)
+        }
         activity?.enableEdgeToEdge(
             statusBarStyle = style,
             navigationBarStyle = style

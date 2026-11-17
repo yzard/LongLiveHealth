@@ -4,7 +4,7 @@ import json
 import sys
 import unittest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / 'src/tools'))
-from check_android_package import required_methods, validate_package
+from check_android_package import required_methods, validate_package, validate_release_package
 
 
 class AndroidPackageTests(unittest.TestCase):
@@ -23,6 +23,12 @@ class AndroidPackageTests(unittest.TestCase):
             self.assertTrue(data.startswith(b'\x89PNG\r\n\x1a\n'))
             self.assertEqual(hashlib.sha256(data).hexdigest(), row['sha256'])
             self.assertIn('/' + manifest['revision'] + '/png/', row['url'])
+
+    def test_debuggable_apk_is_rejected_before_delivery(self):
+        release = "package: name='dev.longlivehealth.android' versionCode='85'\napplication-label:'Long Live Health'\n"
+        validate_release_package(release)
+        with self.assertRaisesRegex(ValueError, 'non-debuggable Release APK'):
+            validate_release_package(release + 'application-debuggable\n')
 
     def test_stale_native_library_is_rejected_against_actual_dex_declarations(self):
         methods = required_methods('''<api><package name="health.app"><class name="BrowseView"><method name="Swift_initState_healthDefinitions" native="true"><parameter type="long"/></method><method name="Evaluate" native="false"/></class></package></api>''')

@@ -47,17 +47,17 @@ docker run --rm -i -v "$WORK:/workspace" -v "$BUILD_WORK_DIR/android/gradle:/roo
     -e BUILD_UID="$(id -u)" -e BUILD_GID="$(id -g)" \
     -w /workspace longlivehealth-android-toolchain:6.3.2 bash -seu <<'ANDROID_BUILD'
 trap 'chown -R "$BUILD_UID:$BUILD_GID" /workspace /root/.gradle' EXIT
-skip export --no-ios --debug --debug-info line-tables --host-build transpile --module HealthApp --swift /usr/bin/swift --arch aarch64
+skip export --no-ios --release --host-build transpile --module HealthApp --swift /usr/bin/swift --arch aarch64
 # Build ARM64 explicitly rather than reusing the Docker host architecture.
 mapfile -t modules < <(find .build/plugins/outputs -maxdepth 6 -path "*/skipstone/HealthApp/build.gradle.kts")
 [[ ${#modules[@]} == 1 ]] || { echo "Expected one generated HealthApp Gradle module" >&2; exit 1; }
 native="$(dirname "${modules[0]}")/build"
-SKIP_BRIDGE=1 TARGET_OS_ANDROID=1 skip android build --dir "$native/jni-libs" --package-path /workspace --configuration debug --product HealthApp --scratch-path "$native/swift" --arch aarch64 -Xcc -fPIC -Xswiftc -DSKIP_BRIDGE -Xswiftc -DTARGET_OS_ANDROID
+SKIP_BRIDGE=1 TARGET_OS_ANDROID=1 skip android build --dir "$native/jni-libs" --package-path /workspace --configuration release --product HealthApp --scratch-path "$native/swift" --arch aarch64 -Xcc -fPIC -Xswiftc -DSKIP_BRIDGE -Xswiftc -DTARGET_OS_ANDROID
 cd Android
-SKIP_BRIDGE_ANDROID_BUILD_DISABLED=1 gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
-python3 /checks/check_android_package.py /workspace/.build/Android/app/outputs/apk/debug/app-debug.apk --dexdump /opt/android-sdk/build-tools/36.0.0/dexdump
+SKIP_BRIDGE_ANDROID_BUILD_DISABLED=1 gradle --no-daemon :app:testReleaseUnitTest :app:lintRelease :app:assembleRelease
+python3 /checks/check_android_package.py /workspace/.build/Android/app/outputs/apk/release/app-release.apk --dexdump /opt/android-sdk/build-tools/36.0.0/dexdump
 ANDROID_BUILD
-APK="$WORK/.build/Android/app/outputs/apk/debug/app-debug.apk"
+APK="$WORK/.build/Android/app/outputs/apk/release/app-release.apk"
 [[ -s "$APK" ]] || { echo 'Android build did not produce an APK.' >&2; exit 1; }
 cp "$APK" "$ROOT/dist/android/longlivehealth.apk.new"
 chmod 644 "$ROOT/dist/android/longlivehealth.apk.new"

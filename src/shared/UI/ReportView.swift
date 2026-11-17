@@ -4,6 +4,9 @@ struct ReportView: View {
     var model: AppModel
     let reportID: String
     @State var document: JSONValue = .null
+    @State var ready: [JSONValue] = []
+    @State var needsReview: [JSONValue] = []
+    @State var confirmed: [JSONValue] = []
     @State var editor: EditTarget?
     @State var healthWriter: EditTarget?
     @State var preview: DocumentLocation?
@@ -14,6 +17,7 @@ struct ReportView: View {
     @State var confirmingAll = false
     @State var savingReview = false
     @State var confirmationError: String?
+    @State var readyVisible = false
     @Environment(\.scenePhase) var scenePhase
     @Environment(\.dismiss) var dismiss
 
@@ -39,11 +43,19 @@ struct ReportView: View {
         .navigationBarTitleDisplayMode(.inline)
         .initialTask { await reload() }
         .task(id: model.jobs.first { $0["file_id"].stringValue == reportID }?["job_id"].stringValue) { await followExtraction() }
+        #if !os(Android)
         .refreshable { await reload() }
+        #endif
         .originalReportPreview($preview)
         .sheet(item: $editor) { target in reviewEditor(target) }
         .sheet(item: $healthWriter) { target in ReviewedGlucoseWriter(model: model, observation: target.observation) }
         .sheet(isPresented: $contextVisible) { ContextEditor(context: document["context"]) { context in try await save(observations: [], context: context) } }
+        #if os(Android)
+        .navigationDestination(isPresented: $readyVisible) {
+            ReadyToConfirmView(model: model, reportID: reportID, document: $document,
+                reviewEditor: reviewEditor, confirmReadyResult: confirmReadyResult)
+        }
+        #endif
         .alert("Rescan report?", isPresented: $rescanConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Rescan", role: .destructive) { Task { await rescan() } }
@@ -103,20 +115,18 @@ struct ReportView: View {
         if confirmationError != nil { review.append(.error) }
         if observations.isEmpty && validation.isEmpty { review.append(.empty) }
 
-        let needsReview = validation.map { ReportRow.validation($0) } + observations.filter {
-            $0["status"] == .string("pending") && !ReportReview.canBulkConfirm($0)
-        }.map { ReportRow.observation($0) }
-        let confirmed = observations.filter { $0["status"] == .string("confirmed") }
-            .map { ReportRow.observation($0) }
+        let needsReviewRows = validation.map { ReportRow.validation($0) }
+            + needsReview.map { ReportRow.observation($0) }
         var result = [
             ReportSection(id: "info", title: nil, rows: information),
             ReportSection(id: "review", title: "Review Results", rows: review)
         ]
-        if !needsReview.isEmpty {
-            result.append(ReportSection(id: "manual", title: "Needs Review", rows: needsReview))
+        if !needsReviewRows.isEmpty {
+            result.append(ReportSection(id: "manual", title: "Needs Review", rows: needsReviewRows))
         }
         if !confirmed.isEmpty {
-            result.append(ReportSection(id: "confirmed", title: "Confirmed Results", rows: confirmed))
+            result.append(ReportSection(id: "confirmed", title: "Confirmed Results",
+                rows: confirmed.map { ReportRow.observation($0) }))
         }
         if ["pages", "extraction_inputs", "extraction_outputs"].contains(where: { !document[$0].arrayValue.isEmpty }) {
             result.append(ReportSection(id: "ocr-output", title: nil, rows: [.ocrOutput]))
@@ -132,10 +142,27 @@ struct ReportView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(scrollItems) { item in
                     switch item {
+                    case .summary:
+                        VStack(alignment: .leading, spacing: 8) {
+                            reportRow(.info)
+                            reportRow(.markerCount)
+                            reportRow(.actions)
+                            reportSectionHeader("Review Results")
+                            reportRow(.review)
+                            if failedJob != nil { reportRow(.retry) }
+                            if !document["relation"]["preferred_report_id"].stringValue.isEmpty {
+                                reportRow(.relationship)
+                                reportRow(.unlink)
+                            }
+                            if confirmationError != nil { reportRow(.error) }
+                            if document["observations"].arrayValue.isEmpty
+                                && document["validation_issues"].arrayValue.isEmpty { reportRow(.empty) }
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 8)
                     case .header(_, let title):
                         reportSectionHeader(title)
-                    case .row(let row, let first, let last):
-                        reportListRow(row, first: first, last: last)
+                    case .row(let row, let last):
+                        reportListRow(row, last: last)
                     }
                 }
             }
@@ -156,25 +183,25 @@ struct ReportView: View {
 
     #if os(Android)
     private enum ReportScrollItem: Identifiable {
+        case summary
         case header(String, String?)
-        case row(ReportRow, first: Bool, last: Bool)
+        case row(ReportRow, last: Bool)
 
         var id: String {
             switch self {
+            case .summary: "summary"
             case .header(let id, _): "section-\(id)"
-            case .row(let row, _, _): row.id
+            case .row(let row, _): row.id
             }
         }
     }
 
     private var scrollItems: [ReportScrollItem] {
-        var items: [ReportScrollItem] = []
-        for section in sections {
-            if section.id != "info" {
-                items.append(.header(section.id, section.title))
-            }
+        var items: [ReportScrollItem] = [.summary]
+        for section in sections where section.id != "info" && section.id != "review" {
+            items.append(.header(section.id, section.title))
             for (index, row) in section.rows.enumerated() {
-                items.append(.row(row, first: index == 0, last: index == section.rows.count - 1))
+                items.append(.row(row, last: index == section.rows.count - 1))
             }
         }
         return items
@@ -190,7 +217,7 @@ struct ReportView: View {
         }
     }
 
-    private func reportListRow(_ row: ReportRow, first: Bool, last: Bool) -> some View {
+    private func reportListRow(_ row: ReportRow, last: Bool) -> some View {
         VStack(spacing: 0) {
             reportRow(row)
                 .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
@@ -198,9 +225,6 @@ struct ReportView: View {
             if !last { Divider() }
         }
         .background(Color(.systemBackground))
-        .clipShape(UnevenRoundedRectangle(topLeadingRadius: first ? 8 : 0,
-            bottomLeadingRadius: last ? 8 : 0, bottomTrailingRadius: last ? 8 : 0,
-            topTrailingRadius: first ? 8 : 0))
     }
     #endif
 
@@ -222,7 +246,11 @@ struct ReportView: View {
             .accessibilityIdentifier("report-info")
         case .markerCount:
             let count = document["observations"].arrayValue.count
-            LabeledContent("Total Markers", value: "\(count)")
+            HStack {
+                Text("Total Markers")
+                Spacer()
+                Text("\(count)").foregroundStyle(.secondary)
+            }
                 .accessibilityIdentifier("report-marker-count").accessibilityValue("\(count)")
         case .actions:
             reportActions
@@ -274,13 +302,17 @@ struct ReportView: View {
         .disabled(document == .null || model.isBusy)
     }
 
-    private var ready: [JSONValue] {
-        document["observations"].arrayValue.filter { ReportReview.canBulkConfirm($0) }
-    }
-
     private var reviewActions: some View {
         let observations = ready
         return HStack {
+            #if os(Android)
+            Button { readyVisible = true } label: {
+                Text(observations.count == 1 ? "1 result ready to confirm" : "\(observations.count) results ready to confirm")
+                    .foregroundStyle(.primary).frame(maxWidth: .infinity, alignment: .leading)
+            }.buttonStyle(.borderless)
+            .accessibilityIdentifier("ready-to-confirm-results")
+            .disabled(observations.isEmpty)
+            #else
             NavigationLink {
                 ReadyToConfirmView(model: model, reportID: reportID, document: $document,
                     reviewEditor: reviewEditor, confirmReadyResult: confirmReadyResult)
@@ -290,6 +322,7 @@ struct ReportView: View {
             }.buttonStyle(.borderless)
             .accessibilityIdentifier("ready-to-confirm-results")
             .disabled(observations.isEmpty)
+            #endif
             Spacer(minLength: 8)
             Button(confirmingAll ? "Confirming…" : "Confirm") { Task { await confirmAll() } }
                 .buttonStyle(.borderless)
@@ -398,10 +431,15 @@ struct ReportView: View {
         }
     }
     private func reportAction(_ title: String, icon: String) -> some View {
+        #if os(Android)
+        Text(title).font(.caption).lineLimit(1)
+            .frame(maxWidth: .infinity, minHeight: 44)
+        #else
         VStack(spacing: 5) {
             Image(systemName: MobileSymbol.name(icon)).font(.body)
             Text(title).font(.caption).lineLimit(1).minimumScaleFactor(0.8)
         }.frame(maxWidth: .infinity, minHeight: 44)
+        #endif
     }
     private var extracting: Bool {
         model.jobs.contains { $0["file_id"].stringValue == reportID && ["queued", "running"].contains($0["status"].stringValue) }
@@ -418,7 +456,7 @@ struct ReportView: View {
             model.jobs.removeAll { $0["file_id"].stringValue == reportID }
             model.jobs.insert(response["job"], at: 0)
             try model.archive?.remove(name: "report-\(reportID).json")
-            document = try await model.report(reportID)
+            _ = adoptReport(try await model.report(reportID))
         }
     }
     private func confirmAll() async {
@@ -493,7 +531,15 @@ struct ReportView: View {
     private func adoptReport(_ snapshot: JSONValue) -> Bool {
         guard let revision = snapshot["report"]["revision"].numberValue,
               revision >= (document["report"]["revision"].numberValue ?? 0) else { return false }
-        if document != snapshot { document = snapshot }
+        if document != snapshot {
+            let observations = snapshot["observations"].arrayValue
+            ready = observations.filter(ReportReview.canBulkConfirm)
+            needsReview = observations.filter {
+                $0["status"] == .string("pending") && !ReportReview.canBulkConfirm($0)
+            }
+            confirmed = observations.filter { $0["status"] == .string("confirmed") }
+            document = snapshot
+        }
         if let index = model.reports.firstIndex(where: { $0["report_id"].stringValue == reportID }) {
             model.reports[index] = snapshot["report"]
             model.reports[index]["context"] = snapshot["context"]

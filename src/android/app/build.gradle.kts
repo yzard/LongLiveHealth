@@ -41,6 +41,8 @@ android {
         // versionName = MARKETING_VERSION
     }
 
+    testBuildType = "release"
+
     buildFeatures {
         buildConfig = true
     }
@@ -84,9 +86,15 @@ android {
             signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
-            isDebuggable = false // can be set to true for debugging release build, but needs to be false when uploading to store
+            isDebuggable = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
+    }
+}
+
+androidComponents {
+    beforeVariants(selector().withBuildType("debug")) { variant ->
+        variant.enable = false
     }
 }
 
