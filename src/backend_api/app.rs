@@ -19,6 +19,10 @@ pub struct AppState {
 
 impl AppState {
     pub async fn open(config: Config) -> Result<Self, AppError> {
+        let (version, terms, mappings) = tokio::task::spawn_blocking(crate::loinc::check_archive)
+            .await
+            .map_err(|_| AppError::Internal)??;
+        tracing::info!(version, terms, mappings, "LOINC reference loaded");
         config.validate()?;
         tokio::fs::create_dir_all(&config.data_dir).await?;
         let lock_path = config.data_dir.join("server.lock");

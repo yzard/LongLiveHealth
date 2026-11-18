@@ -78,6 +78,14 @@ impl ObservationPayload {
         test_code(self)
     }
 
+    fn submission_loinc(&self) -> Option<&str> {
+        if matches!(self.unmapped_choice, Some(UnmappedChoice::New(_))) {
+            self.mapping_loinc()
+        } else {
+            crate::laboratory::split_test_code(&self.raw_name).1
+        }
+    }
+
     pub fn validate(&self, pages: i64) -> Result<(), AppError> {
         if crate::laboratory::is_administrative_name(&self.raw_name) {
             return Err(AppError::Invalid(
@@ -1195,11 +1203,9 @@ impl Database {
                 .as_deref()
                 .is_some_and(lab_metric_metadata::is_clinical_id)
                 || (item.status == ReportResultStatus::Submitted
-                    && (item.payload.metric_id.is_some()
-                        || matches!(item.payload.unmapped_choice, Some(UnmappedChoice::New(_))))
                     && item
                         .payload
-                        .mapping_loinc()
+                        .submission_loinc()
                         .is_some_and(|code| crate::laboratory::loinc_metric(code).is_none()))
         });
         let clinical = if needs_clinical_catalog {
@@ -1364,7 +1370,11 @@ impl Database {
                     (uuid::Uuid::new_v4().to_string(), 1, None, None)
                 };
             // Capture the code before a new definition becomes an ordinary metric ID.
-            let mapping_code = observation.payload.mapping_loinc().map(str::to_owned);
+            let mapping_code = observation.payload.submission_loinc().map(str::to_owned);
+            let new_definition = matches!(
+                observation.payload.unmapped_choice,
+                Some(UnmappedChoice::New(_))
+            );
             if observation.status == ReportResultStatus::Submitted {
                 match observation.payload.unmapped_choice.as_ref() {
                     Some(UnmappedChoice::New(metric)) => {
@@ -1437,47 +1447,38 @@ impl Database {
                 && previous.as_ref().is_none_or(|(status, payload)| {
                     status != "submitted"
                         || payload.metric_id != observation.payload.metric_id
-                        || test_code(payload) != test_code(&observation.payload)
+                        || payload.submission_loinc() != mapping_code.as_deref()
                 })
             {
-                if let Some(metric_id) = observation.payload.metric_id.as_deref() {
-                    // Explicit mappings come from the reviewer. OCR cannot supply this field.
+                let payload = &mut observation.payload;
+                let resolved = payload.metric_id.as_deref().or_else(|| {
+                    resolve_report_mapping(payload, "pending", source, &custom_metrics, &metadata)
+                });
+                if let Some(id) = resolved {
+                    let save_mapping = payload.metric_id.is_none()
+                        && (id.starts_with("custom:")
+                            || learned_for_pending(payload, &metadata).is_some());
+                    let id = id.to_owned();
                     lab_metric_metadata::link_submitted(
                         &mut transaction,
                         user_id,
                         &mut metadata,
                         &native_links,
-                        metric_id,
+                        &id,
                         mapping_code.as_deref(),
+                        new_definition,
                     )
                     .await?;
-                } else {
-                    let resolved = resolve_report_mapping(
-                        &observation.payload,
-                        "pending",
-                        source,
-                        &custom_metrics,
-                        &metadata,
-                    );
-                    match resolved {
-                        Some(id)
-                            if id.starts_with("custom:")
-                                || learned_for_pending(&observation.payload, &metadata)
-                                    .is_some() =>
-                        {
-                            // Preserve account-specific associations across renames and rescans.
-                            observation.payload.metric_id = Some(id.to_owned());
-                        }
-                        None if candidate_key.is_some()
-                            || test_code(&observation.payload)
-                                .is_some_and(|code| metadata.links.contains_key(code)) =>
-                        {
-                            return Err(AppError::Invalid(
-                                "Choose a metric mapping or mark the result as new before submitting",
-                            ));
-                        }
-                        _ => {}
+                    if save_mapping {
+                        // Preserve account-specific associations across renames and rescans.
+                        payload.metric_id = Some(id);
                     }
+                } else if candidate_key.is_some()
+                    || test_code(payload).is_some_and(|code| metadata.links.contains_key(code))
+                {
+                    return Err(AppError::Invalid(
+                        "Choose a metric mapping or mark the result as new before submitting",
+                    ));
                 }
             }
             let statement = match observation.status {
@@ -1835,11 +1836,9 @@ impl Database {
                         .ocr_metric_candidate
                         .as_deref()
                         .is_some_and(lab_metric_metadata::is_clinical_id)
-                        || ((payload.metric_id.is_some()
-                            || matches!(payload.unmapped_choice, Some(UnmappedChoice::New(_))))
-                            && payload.mapping_loinc().is_some_and(|code| {
-                                crate::laboratory::loinc_metric(code).is_none()
-                            }))))
+                        || payload
+                            .submission_loinc()
+                            .is_some_and(|code| crate::laboratory::loinc_metric(code).is_none())))
         };
         let clinical = if rows.iter().any(|row| {
             serde_json::from_str(&row.payload_json).is_ok_and(|payload| {
@@ -1867,7 +1866,8 @@ impl Database {
                 custom_metrics.push(lab_metric_metadata::clinical_metric(&group)?);
             }
         }
-        self.cpu
+        let (mut observations, metadata, native_links) = self
+            .cpu
             .run(move || {
                 let mut observations = rows
                     .into_iter()
@@ -1899,9 +1899,47 @@ impl Database {
                         }
                     }
                 }
-                Ok(observations)
+                Ok((observations, metadata, native_links))
             })
-            .await
+            .await?;
+        if include_suggestions {
+            // The submit transaction checks the same rule against the current metric links.
+            for row in observations
+                .iter_mut()
+                .filter(|row| row.status == "pending")
+            {
+                let Some(id) = row.resolved_metric_id.as_deref() else {
+                    continue;
+                };
+                let Some(code) = row.payload.submission_loinc() else {
+                    continue;
+                };
+                let existing = metadata.codes_for_metric(
+                    id,
+                    lab_metric_metadata::native_codes_for_metric(&native_links, id),
+                );
+                if existing.is_empty()
+                    || existing.contains(code)
+                    || row
+                        .browse_issues
+                        .iter()
+                        .any(|issue| issue.code == "loinc_metric_conflict")
+                {
+                    continue;
+                }
+                if let Err(error) = crate::loinc::validate_replacement(code, &existing) {
+                    let (code, message) = error
+                        .loinc_mapping_message(crate::interface_language::Language::current())
+                        .ok_or(error)?;
+                    row.browse_issues.push(BrowseIssue {
+                        code,
+                        scope: "review",
+                        message,
+                    });
+                }
+            }
+        }
+        Ok(observations)
     }
 }
 

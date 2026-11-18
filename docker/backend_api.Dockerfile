@@ -9,6 +9,7 @@ COPY src/frontend/ /workspace/src/frontend/
 COPY src/shared/Core/Resources/InterfaceChinese.json /workspace/src/shared/Core/Resources/InterfaceChinese.json
 COPY src/backend_api/ /workspace/src/backend_api/
 COPY tests/backend_api/ /workspace/tests/backend_api/
+COPY dist/loinc/Loinc.zip /app/loinc/Loinc.zip
 # BuildKit keeps dependency compilation and registry downloads across source edits.
 # Export the binary outside the cache mount so the final image can copy it.
 RUN --mount=type=cache,id=longlivehealth-cargo-registry,target=/usr/local/cargo/registry \
@@ -25,9 +26,11 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata gosu poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /workspace/dist/backend_api/longlivehealth /app/longlivehealth
+COPY --from=builder /app/loinc/Loinc.zip /app/loinc/Loinc.zip
 COPY dist/android/longlivehealth.apk /app/downloads/longlivehealth.apk
 COPY docker/entrypoint.sh /app/entrypoint.sh
 RUN chmod 755 /app/entrypoint.sh
+RUN /app/longlivehealth --data-dir /data check-loinc
 ENV PUID=1000 PGID=1000 UMASK=077 TZ=UTC
 EXPOSE 8080
 ENTRYPOINT ["/app/entrypoint.sh", "/app/longlivehealth"]

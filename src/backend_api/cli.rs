@@ -67,6 +67,7 @@ pub enum Command {
         #[arg(long)]
         input: PathBuf,
     },
+    CheckLoinc,
     IndexHeartSamples,
     IndexRecoveryHrv,
     IndexAppleQuantities,
@@ -116,6 +117,11 @@ pub async fn run(cli: Cli) -> Result<(), AppError> {
     }
     if let Command::ReassessReferenceViews { input } = &cli.command {
         return crate::reference_capture::reassess(input).await;
+    }
+    if matches!(cli.command, Command::CheckLoinc) {
+        let (version, terms, mappings) = crate::loinc::check_archive()?;
+        println!("LOINC {version}: {terms} terms, {mappings} MapTo rows");
+        return Ok(());
     }
     let config = Config::load(&cli.data_dir)?;
     if matches!(cli.command, Command::CheckConfig) {

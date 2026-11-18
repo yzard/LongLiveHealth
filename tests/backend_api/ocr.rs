@@ -104,10 +104,16 @@ fn page_preparation_is_bounded_inline_and_preserves_untrusted_text_evidence() {
         metrics: vec![owned],
         browse_metric_index: Default::default(),
         printed_aliases: Default::default(),
-        loinc_codes: [(
-            "custom:owned".into(),
-            ["1234-5".into()].into_iter().collect(),
-        )]
+        loinc_codes: [
+            (
+                "custom:owned".into(),
+                ["1234-5".into()].into_iter().collect(),
+            ),
+            (
+                "total_cholesterol".into(),
+                ["2565-0".into(), "14647-2".into()].into_iter().collect(),
+            ),
+        ]
         .into_iter()
         .collect(),
     };
@@ -125,6 +131,7 @@ fn page_preparation_is_bounded_inline_and_preserves_untrusted_text_evidence() {
     assert!(prompt.contains("Keep printed fields unconverted"));
     assert!(prompt.contains("ocr_normalization"));
     assert!(prompt.contains("ocr_new_metric"));
+    assert!(prompt.contains("One catalog metric can have multiple linked LOINC codes"));
     let data: Value =
         serde_json::from_str(messages[1]["content"][0]["text"].as_str().unwrap()).unwrap();
     let catalog = data["laboratory_metric_catalog"].as_array().unwrap();
@@ -155,14 +162,24 @@ fn page_preparation_is_bounded_inline_and_preserves_untrusted_text_evidence() {
             .unwrap()[4],
         json!(["1234-5"])
     );
-    assert!(
+    assert_eq!(
         catalog
             .iter()
             .find(|entry| entry[0] == "total_cholesterol")
-            .unwrap()[4]
-            .as_array()
-            .unwrap()
-            .contains(&json!("2093-3"))
+            .unwrap()[4],
+        json!(["14647-2", "2093-3", "2565-0"])
+    );
+    assert_eq!(
+        data["catalog_loinc_names"]["14647-2"],
+        "Cholesterol [Moles/volume] in Serum or Plasma"
+    );
+    assert_eq!(
+        data["catalog_loinc_names"]["1989-3"],
+        "25-hydroxyvitamin D3 [Mass/volume] in Serum or Plasma"
+    );
+    assert_eq!(
+        data["catalog_loinc_names"]["49054-0"],
+        "25-hydroxyvitamin D2 [Mass/volume] in Serum or Plasma"
     );
     assert!(prompt.contains("Search all names and aliases"));
     assert_eq!(data["page"], 3);

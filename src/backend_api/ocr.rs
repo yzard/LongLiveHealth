@@ -300,13 +300,24 @@ pub fn prepare_messages(
         .filter_map(|code| crate::loinc::long_common_name(code).map(|name| (code, name)))
         .take(256)
         .collect();
+    let laboratory_metric_catalog = crate::laboratory::ocr_metric_catalog(
+        &catalog.metrics,
+        &catalog.loinc_codes,
+        &catalog.printed_aliases,
+    );
+    let catalog_loinc_names: BTreeMap<_, _> = laboratory_metric_catalog
+        .iter()
+        .flat_map(|entry| entry.4.iter().copied())
+        .filter_map(|code| crate::loinc::long_common_name(code).map(|name| (code, name)))
+        .collect();
     let evidence = json!({
         "page": page,
         "text_layer": text_layer,
         "report_collection_date": report_collection_date,
         "printed_loinc_names": printed_loinc_names,
+        "catalog_loinc_names": catalog_loinc_names,
         "source_qualified_aliases": crate::laboratory_names::SOURCE_QUALIFIED_ALIASES,
-        "laboratory_metric_catalog": crate::laboratory::ocr_metric_catalog(&catalog.metrics, &catalog.loinc_codes, &catalog.printed_aliases),
+        "laboratory_metric_catalog": laboratory_metric_catalog,
         "browse_metric_index": catalog.browse_metric_index,
     });
     Ok(json!([
@@ -324,7 +335,7 @@ pub fn wrap_completion(
     let parsed = serde_json::from_str::<serde_json::Value>(&reply.response_body).ok();
     let choice = parsed.as_ref().and_then(|v| v["choices"].get(0));
     let content = choice.and_then(|v| v["message"]["content"].as_str());
-    let mut envelope = json!({"model":model,"engine":"strata","prompt_version":"laboratory-page-v20","content":content,"raw_response_body":reply.response_body});
+    let mut envelope = json!({"model":model,"engine":"strata","prompt_version":"laboratory-page-v22","content":content,"raw_response_body":reply.response_body});
     let mut status = reply.status_code;
     if (200..300).contains(&status) {
         let rows = content.and_then(ModelPage::parse);

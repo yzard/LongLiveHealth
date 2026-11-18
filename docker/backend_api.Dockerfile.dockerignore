@@ -23,3 +23,5 @@
 !dist/
 !dist/android/
 !dist/android/longlivehealth.apk
+!dist/loinc/
+!dist/loinc/Loinc.zip

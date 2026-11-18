@@ -20,6 +20,16 @@ fi
 source "$PROJECT_ROOT/src/development/build_lifecycle.sh"
 start_build "$PROJECT_ROOT"
 cd "$PROJECT_ROOT"
+LOINC_PACKAGE="$PROJECT_ROOT/dist/loinc/Loinc.zip"
+if [[ -n "${LOINC_RELEASE_ZIP:-}" ]]; then
+    mkdir -p "$(dirname "$LOINC_PACKAGE")"
+    cp "$LOINC_RELEASE_ZIP" "$BUILD_WORK_DIR/Loinc.zip"
+    mv -f "$BUILD_WORK_DIR/Loinc.zip" "$LOINC_PACKAGE"
+fi
+if [[ ! -s "$LOINC_PACKAGE" ]]; then
+    echo 'Set LOINC_RELEASE_ZIP to the official LOINC release ZIP.' >&2
+    exit 2
+fi
 python3 "$PROJECT_ROOT/tests/tools/test_apple_catalog.py"
 python3 "$PROJECT_ROOT/tests/tools/test_mobile_api_contract.py"
 python3 "$PROJECT_ROOT/tests/development/playground.py"

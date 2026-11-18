@@ -4,7 +4,7 @@ use longlivehealth::reports::ReportResultStatus;
 use longlivehealth::reports::{ReportResultChange, ReportSubmission, TrendRequest, trends};
 
 #[tokio::test]
-async fn loinc_lookup_returns_the_bundled_name_with_authentication() {
+async fn loinc_lookup_returns_the_official_name_with_authentication() {
     use axum::http::StatusCode;
     use serde_json::json;
 
@@ -32,6 +32,142 @@ async fn loinc_lookup_returns_the_bundled_name_with_authentication() {
 
     let (status, _) = crate::request(&router, path, Some(&token), json!({"code": "bad"})).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn report_submissions_require_an_official_direct_replacement_to_add_loinc_codes() {
+    use axum::http::StatusCode;
+    use serde_json::json;
+
+    let (directory, state) = fixture().await;
+    let user = add_user(&state, "alice").await;
+    let report = archive(&state, "alice").await;
+    let token = crate::token(&state, "alice").await;
+    let router = longlivehealth::app::create_application(state.clone());
+    let submit_path = "/api/v1/reports/submit";
+    let cholesterol = |code: &str, metric_id: Option<&str>| {
+        let mut payload = observation_payload();
+        payload.metric_id = metric_id.map(str::to_owned);
+        payload.raw_name = format!("Total cholesterol ({code})");
+        payload.raw_result = "160".into();
+        payload.raw_unit = Some("mg/dL".into());
+        payload.source.quote = format!("Total cholesterol ({code}) 160 mg/dL");
+        payload
+    };
+    let target = Some("total_cholesterol");
+    let (status, same) = crate::request(
+        &router,
+        submit_path,
+        Some(&token),
+        json!({
+            "report_id": report, "expected_revision": 1,
+            "observations": [{"status": "submitted", "payload": cholesterol("2093-3", target)}]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{same}");
+    let revision = same["report"]["revision"].as_i64().unwrap();
+
+    let no_map = cholesterol("14647-2", None);
+    let (status, draft) = crate::request(
+        &router,
+        submit_path,
+        Some(&token),
+        json!({
+            "report_id": report, "expected_revision": revision,
+            "observations": [{"status": "pending", "payload": no_map}]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{draft}");
+    let revision = draft["report"]["revision"].as_i64().unwrap();
+    let pending = draft["observations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["status"] == "pending")
+        .unwrap();
+    let issues = pending["browse_issues"].as_array().unwrap();
+    let issue = issues
+        .iter()
+        .find(|issue| issue["code"] == "loinc_mapping_unverified")
+        .unwrap();
+    let message = issue["message"].as_str().unwrap();
+    assert!(message.contains("14647-2") && message.contains("2093-3"));
+    assert!(message.contains("MapTo.csv") && message.contains("no direct replacement"));
+
+    let (status, rejected_batch) = crate::request(
+        &router,
+        submit_path,
+        Some(&token),
+        json!({
+            "report_id": report, "expected_revision": revision,
+            "observations": [
+                {"status": "submitted", "payload": cholesterol("2565-0", target)},
+                {"status": "submitted", "payload": pending["payload"],
+                 "observation_id": pending["observation_id"], "expected_revision": pending["revision"]}
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{rejected_batch}");
+    assert_eq!(rejected_batch["error"]["code"], "loinc_mapping_unverified");
+    assert_eq!(observation_counts(directory.path()).await, (1, 1));
+    assert_eq!(
+        state.database.report(&user.user_id, &report).await.unwrap()["report"]["revision"],
+        revision
+    );
+
+    let (status, mapped) = crate::request(
+        &router,
+        submit_path,
+        Some(&token),
+        json!({
+            "report_id": report, "expected_revision": revision,
+            "observations": [{"status": "submitted", "payload": cholesterol("2565-0", target)}]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{mapped}");
+    let (status, catalog) =
+        crate::request(&router, "/api/v1/metrics/list", Some(&token), json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{catalog}");
+    let metric = catalog["metrics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|metric| metric["metric_id"] == "total_cholesterol")
+        .unwrap();
+    let codes: Vec<_> = metric["loinc"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|loinc| loinc["code"].as_str().unwrap())
+        .collect();
+    assert_eq!(codes, ["2093-3", "2565-0"]);
+
+    let mut d2 = observation_payload();
+    d2.raw_name = "Vitamin D, 25-OH (49054-0)".into();
+    d2.raw_unit = Some("ng/mL".into());
+    d2.metric_id = Some("vitamin_d_25_oh_d3".into());
+    let (status, conflict) = crate::request(
+        &router,
+        submit_path,
+        Some(&token),
+        json!({
+            "report_id": report,
+            "expected_revision": mapped["report"]["revision"],
+            "observations": [{"status": "submitted", "payload": d2}]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{conflict}");
+    assert!(
+        conflict["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("LOINC is already linked to another Browse metric")
+    );
 }
 
 #[tokio::test]

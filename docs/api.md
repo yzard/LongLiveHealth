@@ -284,7 +284,7 @@ https://hl7.org/fhir/us/core/STU9/Observation-cbc-leukocytes.html .
 items discovered from imported clinical Observations/components and submitted
 report metrics. `metrics/list` includes the built-in and account-defined laboratory metrics and the account's Apple Health clinical metrics for report review.
 
-`metrics/rename` saves the display name for an existing Blood Work metric in the account's Browse catalog. Apple Health and submitted report results continue to reference the same `metric_id`. `metric.loinc` in the history response lists the associated codes with `code` and `official_name` (null if the bundled LOINC dictionary lacks the name).
+`metrics/rename` saves the display name for an existing Blood Work metric in the account's Browse catalog. Apple Health and submitted report results continue to reference the same `metric_id`. `metric.loinc` in the history response lists the associated codes with `code` and `official_name` (null if the official LOINC release lacks the name).
 
 Submitting an explicit report mapping records the printed LOINC for the selected metric when available. A code already assigned to a different metric produces a review error and preserves the original assignment. OCR jobs read the current names, units, IDs and LOINC associations from the account's catalog when they start.
 Clinical identity uses LOINC (across providers), otherwise provider-scoped coding;
@@ -415,6 +415,14 @@ consume submitted observations only.
 observation table. The Ready to Submit batch sends only pending results with a verified mapping and no current review issues, up to 2,000 per request. Needs Review results are submitted individually from their detail view. After commit, matching older drafts are removed. Reverting a result to pending first persists the draft, then removes the old official row. Cleanup is repeatable and runs at startup as well: a process
 interruption between copying and cleanup cannot delete the sole durable copy.
 Existing pending rows are moved into the draft store without re-running OCR. Previously rejected observations become pending, retain their payload and ID, and open in Needs Review.
+
+When a submission adds a distinct LOINC to a metric that already has LOINC codes,
+the server requires an unambiguous direct replacement in the packaged official
+LOINC `MapTo.csv`. Either code may be the deprecated member of the pair. Review
+can display the same validation before submission. Unverified mappings return
+400 with `loinc_mapping_unverified`, the report code, the database codes and the
+reference version. The API loads the reference release before accepting requests. The failed submission does not change the report or
+its drafts.
 
 A pending result saves an existing metric in `payload.metric_id`. With that ID
 unset, `payload.unmapped_choice` can be `{"kind":"unmapped"}` or

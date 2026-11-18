@@ -103,21 +103,8 @@ impl Metadata {
         let Some(id) = metric["metric_id"].as_str() else {
             return;
         };
-        let codes: BTreeSet<_> = LOINC_METRICS
-            .iter()
-            .filter_map(|&(code, metric)| (metric == id).then_some(code))
-            .chain(self.links.iter().filter_map(|(code, metric)| {
-                (metric == id && loinc_metric(code).is_none()).then_some(code.as_str())
-            }))
-            .chain(native_codes.into_iter().flatten().map(String::as_str))
-            .chain(
-                self.named_reports
-                    .get(id)
-                    .and_then(|metric| metric.loinc_code.as_deref()),
-            )
-            .collect();
         metric["loinc"] = json!(
-            codes
+            self.codes_for_metric(id, native_codes.into_iter().flatten().map(String::as_str))
                 .into_iter()
                 .map(|code| json!({
                     "code": code,
@@ -125,6 +112,26 @@ impl Metadata {
                 }))
                 .collect::<Vec<_>>()
         );
+    }
+
+    pub(crate) fn codes_for_metric<'a>(
+        &'a self,
+        id: &str,
+        native_codes: impl Iterator<Item = &'a str>,
+    ) -> BTreeSet<&'a str> {
+        LOINC_METRICS
+            .iter()
+            .filter_map(|&(code, metric)| (metric == id).then_some(code))
+            .chain(self.links.iter().filter_map(|(code, metric)| {
+                (metric == id && loinc_metric(code).is_none()).then_some(code.as_str())
+            }))
+            .chain(native_codes)
+            .chain(
+                self.named_reports
+                    .get(id)
+                    .and_then(|metric| metric.loinc_code.as_deref()),
+            )
+            .collect()
     }
 
     pub fn linked_codes_by_metric(&self) -> BTreeMap<String, BTreeSet<String>> {
@@ -182,6 +189,15 @@ pub(crate) fn clinical_links(
     links
 }
 
+pub(crate) fn native_codes_for_metric<'a>(
+    links: &'a BTreeMap<String, BTreeSet<String>>,
+    id: &'a str,
+) -> impl Iterator<Item = &'a str> {
+    links
+        .iter()
+        .filter_map(|(code, ids)| ids.contains(id).then_some(code.as_str()))
+}
+
 pub(crate) async fn link_submitted(
     transaction: &mut Transaction<'_, Sqlite>,
     user_id: &str,
@@ -189,27 +205,32 @@ pub(crate) async fn link_submitted(
     native_links: &BTreeMap<String, BTreeSet<String>>,
     id: &str,
     code: Option<&str>,
+    allow_unlisted_first_code: bool,
 ) -> Result<(), AppError> {
     let Some(code) = code else {
         return Ok(());
     };
-    if let Some(existing) =
-        loinc_metric(code).or_else(|| metadata.links.get(code).map(String::as_str))
-    {
-        if existing == id {
-            return Ok(());
-        }
-        return Err(AppError::Invalid(
-            "This LOINC is already linked to another Browse metric. Check the printed code and metric mapping.",
-        ));
+    let existing = metadata.codes_for_metric(id, native_codes_for_metric(native_links, id));
+    let bound = loinc_metric(code).or_else(|| metadata.links.get(code).map(String::as_str));
+    if bound == Some(id) {
+        return Ok(());
     }
-    if native_links
+    let native_conflict = native_links
         .get(code)
-        .is_some_and(|ids| ids.len() != 1 || !ids.contains(id))
+        .is_some_and(|ids| ids.len() != 1 || !ids.contains(id));
+    if bound.is_some() || native_conflict {
+        return Err(AppError::LoincCodeConflict {
+            incoming: code.to_owned(),
+            existing: existing.iter().copied().collect::<Vec<_>>().join(", "),
+            native: bound.is_none(),
+        });
+    }
+    crate::loinc::validate_replacement(code, &existing)?;
+    if existing.is_empty()
+        && crate::loinc::long_common_name(code).is_none()
+        && !allow_unlisted_first_code
     {
-        return Err(AppError::Invalid(
-            "This LOINC is already used by a different or ambiguous Apple Health metric. Check the printed code and metric mapping.",
-        ));
+        return Ok(());
     }
     sqlx::query(queries::LINK_LAB_METRIC_LOINC)
         .bind(user_id)

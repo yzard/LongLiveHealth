@@ -564,7 +564,7 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
     let bob = add_user(&state, "bob").await;
     let token = crate::token(&state, "alice").await;
     for (account, label) in [
-        (&user, "Synthetic clinical marker"),
+        (&user, "eGFR (historical MDRD)"),
         (&bob, "Other account marker"),
     ] {
         let connection = state
@@ -583,11 +583,11 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
             "resourceType":"Observation", "status":"final",
             "effectiveDateTime":"2026-08-03T00:00:00Z",
             "code":{"text":label,"coding":[if account.user_id == user.user_id {
-                json!({"system":"http://loinc.org","code":"1968-7"})
+                json!({"system":"http://loinc.org","code":"33914-3"})
             } else {
                 json!({"system":"https://example.org/lab","code":"synthetic"})
             }]},
-            "valueQuantity":{"value":2,"code":"mg/L","system":"http://unitsofmeasure.org"}
+            "valueQuantity":{"value":2,"code":"mL/min/1.73m2","system":"http://unitsofmeasure.org"}
         });
         state
             .database
@@ -629,12 +629,12 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
             let alice_metric = captured_id.clone();
             let first = calls.fetch_add(1, Ordering::SeqCst) == 0;
             let (name, aliases, codes) = if first {
-                ("Direct bilirubin", vec![], vec!["1968-7"])
+                ("eGFR (historical MDRD)", vec![], vec!["33914-3"])
             } else {
                 (
-                    "Renamed direct bilirubin",
-                    vec!["Direct bilirubin"],
-                    vec!["1968-7", "35191-6"],
+                    "Renamed MDRD eGFR",
+                    vec!["eGFR (historical MDRD)"],
+                    vec!["33914-3", "77147-7"],
                 )
             };
             async move {
@@ -642,7 +642,13 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
                 let evidence: serde_json::Value =
                     serde_json::from_str(input[0]["text"].as_str().unwrap()).unwrap();
                 let catalog = evidence["laboratory_metric_catalog"].as_array().unwrap();
-                assert!(catalog.contains(&json!([alice_metric, name, "mg/L", aliases, codes])));
+                assert!(catalog.contains(&json!([
+                    alice_metric,
+                    name,
+                    "mL/min/1.73m2",
+                    aliases,
+                    codes
+                ])));
                 assert!(
                     !catalog
                         .iter()
@@ -713,8 +719,8 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
     let archived = state.database.report(&user.user_id, report).await.unwrap();
     assert_eq!(archived["extraction_outputs"].as_array().unwrap().len(), 1);
     let mut manual = crate::observation_payload();
-    manual.raw_name = "Direct bilirubin (35191-6)".into();
-    manual.raw_unit = Some("mg/L".into());
+    manual.raw_name = "MDRD eGFR (77147-7)".into();
+    manual.raw_unit = Some("mL/min/1.73m2".into());
     manual.metric_id = alice_metric.as_str().map(str::to_owned);
     let revision = state
         .database
@@ -745,7 +751,7 @@ async fn pdf_rendering_and_independent_ocr_service_create_reviewable_rows() {
         "/api/v1/metrics/rename",
         Some(&token),
         json!({
-            "metric_id": alice_metric, "name": "Renamed direct bilirubin"
+            "metric_id": alice_metric, "name": "Renamed MDRD eGFR"
         }),
     )
     .await;

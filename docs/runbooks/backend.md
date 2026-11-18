@@ -77,6 +77,19 @@ docker compose -f docker/docker-compose.yaml exec --user "$PUID:$PGID" backend_a
 
 正式停止用 `docker compose -f docker/docker-compose.yaml stop`，不要 `down -v` 删除持久卷。测试脚本仅为自己创建的独立测试项目使用 `down -v`。
 
+## 更新 LOINC 发布包
+
+将 [官方完整 ZIP](https://loinc.org/downloads/) 交给构建脚本。构建会把原始 ZIP 暂存到
+`dist/loinc/Loinc.zip`，并原样打包进后端镜像。后续构建默认复用最近提供的发布包。
+
+```bash
+LOINC_RELEASE_ZIP=/absolute/path/Loinc_2.83.zip ./build_docker.sh
+```
+
+启动时服务读取 ZIP 中的 `LoincTable/Loinc.csv` 和 `LoincTable/MapTo.csv`，
+在内存中查找名称和直接替代关系。可用 `check-loinc` 查看版本、术语数和映射数。
+本地运行 Cargo 时，将 `LONGLIVEHEALTH_LOINC_ARCHIVE` 指向官方 ZIP。
+
 ## 数据、复制与恢复
 
 SQLite 启用外键、WAL 和 FULL synchronous。空库直接初始化为 schema 9。升级前停止服务并备份完整 data 目录。同一 data 只允许一个服务进程；管理员命令可独立运行。
