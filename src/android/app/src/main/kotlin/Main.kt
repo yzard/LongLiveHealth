@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -118,10 +119,13 @@ open class MainActivity: AppCompatActivity {
         enableEdgeToEdge()
 
         setContent {
-            val saveableStateHolder = rememberSaveableStateHolder()
-            saveableStateHolder.SaveableStateProvider(true) {
-                PresentationRootView(ComposeContext())
-                SideEffect { saveableStateHolder.removeState(true) }
+            // Skip's Compose navigation host caches labels created by Swift.
+            key(InterfaceLanguage.presentationTag) {
+                val saveableStateHolder = rememberSaveableStateHolder()
+                saveableStateHolder.SaveableStateProvider(true) {
+                    PresentationRootView(ComposeContext())
+                    SideEffect { saveableStateHolder.removeState(true) }
+                }
             }
         }
 

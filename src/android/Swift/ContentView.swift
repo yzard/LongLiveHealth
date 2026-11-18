@@ -4,13 +4,13 @@ import SkipFuse
 @MainActor @Observable final class AndroidApplication {
     static let shared = AndroidApplication()
     let model = AppModel()
+    var dataPage: DataPage?
     private init() {}
 }
 
 struct ContentView: View {
     @State var model = AndroidApplication.shared.model
-    @State var languageSettings = InterfaceLanguageSettings.shared
-    @State var dataPage: DataPage?
+    @State var application = AndroidApplication.shared
 
     var body: some View {
         Group {
@@ -32,16 +32,14 @@ struct ContentView: View {
                         .tabItem { Label(uiText("Insights"), systemImage: MobileSymbol.name("sparkles")) }.tag("Insights")
                     BrowseView(model: model)
                         .tabItem { Label(uiText("Browse"), systemImage: MobileSymbol.name("list.bullet")) }.tag("Browse")
-                    DataCenterView(model: model, selected: $dataPage)
+                    DataCenterView(model: model, selected: $application.dataPage)
                         .tabItem { Label(uiText("Data"), systemImage: MobileSymbol.name("externaldrive")) }.tag("Data")
                 }
-                // Skip's navigation host retains the initial text in tab items and toolbars.
-                // Keep the active tab and Data destination outside that host when language changes.
-                .id(languageSettings.language.rawValue)
                 .initialTask { await model.resumeForeground() }
             }
         }.tint(.teal)
-            .environment(\.locale, languageSettings.language.locale)
+            .environment(\.locale, InterfaceLanguageSettings.shared.language.locale)
+            .onChange(of: model.session?.userID) { _, _ in application.dataPage = nil }
             .sheet(isPresented: Binding(get: { model.showSharedReportImport && model.session != nil && !model.isLocked && !model.privacyCovered }, set: { model.showSharedReportImport = $0 })) { SharedReportImportView(model: model) }
             .alert(uiText("Could not complete the action"), isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
                 Button(uiText("OK")) { model.errorMessage = nil }

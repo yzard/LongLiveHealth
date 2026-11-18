@@ -2,13 +2,18 @@ package health.app
 
 import android.content.Context
 import android.content.res.Resources
+import androidx.compose.runtime.mutableStateOf
 import org.json.JSONObject
 
 internal object InterfaceLanguage {
+    private val selection = mutableStateOf("")
+    val presentationTag: String get() = selection.value
+
     fun system(): String = Resources.getSystem().configuration.locales[0].toLanguageTag()
 
     fun apply(context: Context, value: String) {
         preferences(context).edit().putString("selection", value).apply()
+        selection.value = value
     }
 
     fun catalogJson(context: Context): String = catalog(context).toString()
