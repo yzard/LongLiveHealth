@@ -59,6 +59,10 @@ docker exec --user 1002:1003 longlivehealth /app/longlivehealth --data-dir /data
 docker exec --user 1002:1003 longlivehealth /app/longlivehealth --data-dir /data probe-providers
 ```
 
+When migrating a NAS service that still references a per-build tag, load and
+verify the release image first. Then change the service's image reference to
+`longlivehealth-backend-api:latest`. Keep the previous image tag for rollback.
+
 NAS uses `env_file: ./lsio.env`, matching the other Home Service containers.
 The shared file supplies PUID 1002, PGID 1003, UMASK 002 and TZ US/Eastern.
 There is no per-service environment block or fixed `user` override. The image's

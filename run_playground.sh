@@ -7,6 +7,7 @@ fi
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 command -v python3 >/dev/null || { echo 'python3 is required for playground startup checks' >&2; exit 1; }
 "$PROJECT_ROOT/build_docker.sh" local
+export LONGLIVEHEALTH_API_IMAGE=longlivehealth-backend-api:local
 export LONGLIVEHEALTH_API_DATA_DIR="$PROJECT_ROOT/playground/backend_api"
 export PUID="$(id -u)" PGID="$(id -g)"
 COMPOSE=(docker compose --project-name longlivehealth-playground --file "$PROJECT_ROOT/docker/docker-compose.yaml")

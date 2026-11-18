@@ -39,6 +39,7 @@ class PlaygroundEntrypointTests(unittest.TestCase):
                 }
                 docker.write_text(
                     "#!/usr/bin/env python3\nimport sys,json,os\nfrom pathlib import Path\n"
+                    + "assert os.environ['LONGLIVEHEALTH_API_IMAGE'] == 'longlivehealth-backend-api:local'\n"
                     + f"with Path({str(trace)!r}).open('a') as log: log.write(json.dumps(sys.argv[1:])+'\\n')\n"
                     + f"if 'config' in sys.argv: print({json.dumps(config)!r})\n"
                 )

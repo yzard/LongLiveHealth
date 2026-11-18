@@ -8,6 +8,8 @@ Browse and Data show a list on the left and detail on the right when the display
 
 Developer builds run through `./build_android.sh` on a Docker host. Do not remove the `longlivehealth-android-signing` Docker volume: changing its key prevents an update over the existing installation. The published APK supports ARM64 phones only; x86 and x86_64 libraries are excluded. Canonical UI and business logic are in `src/shared`; Android-specific services are in `src/android`.
 
+Build the Desk emulator image with `./build_android.sh emulator`. It uses the same SDK installation as the Release build and keeps only the emulator, test system image, ADB, and runtime tools in `longlivehealth-android-emulator:local`. Start emulator containers with `--device /dev/kvm`.
+
 For emulator acceptance, use synthetic data with `tests/ios/simulator_fixture.py`, then run `tests/android/ui_smoke.py` on the Desk host with the `longlivehealth-android-test` emulator container. `login`, `navigation`, and `camera` exercise the corresponding flows. Health Connect instrumentation tests create and clean up synthetic provider records. Do not run these against a user's real account.
 
 Physical fold/unfold navigation has been checked on Z Fold hardware. Biometric authentication, provider-specific data, battery-management behavior and actual hardware photo capture still need dedicated end-to-end checks.
@@ -57,7 +59,7 @@ Expanded-screen follow-up on 2026-10-30: the device reported OPENED with its phy
 
 ## Build workspace cleanup
 
-After an APK is exported successfully, the build removes its private Swift and Gradle workspaces. The success hook also removes the recognized old `build/android/client` and `research` compilation directories.
+After an APK is exported successfully, the build removes its private compilation workspace. BuildKit, Gradle, and Swift Package Manager reuse their dependency caches, and the signing volume preserves the APK identity. The success hook also removes the recognized old `build/android/client` and `research` compilation directories.
 
 Use `dist/android/longlivehealth.apk` for installation. New emulator containers should mount `dist/android/` at `/artifacts` and install `/artifacts/longlivehealth.apk`. An existing container with an older bind path keeps its APK under `dist/android/emulator/<container-id>/`; a small link preserves its recorded source path. The old compiler caches are removed without stopping that container. See the [Android cleanup verification](../reviews/2026-10-31-android-cleanup.md).
 

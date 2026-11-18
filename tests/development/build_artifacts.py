@@ -57,7 +57,7 @@ class BuildArtifactTests(unittest.TestCase):
             self.assertTrue(work.exists())
 
     def test_real_exit_trap_cleans_on_success_retains_failure_and_propagates_cleanup_error(self):
-        for failure, expected in [('', 0), ('build', 7), ('cleanup', 9)]:
+        for failure, expected in [('', 0), ('build', 7), ('cleanup', 1)]:
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary).resolve()
                 (root / 'src/development').mkdir(parents=True)
@@ -66,9 +66,7 @@ class BuildArtifactTests(unittest.TestCase):
                 binary = root / 'bin'
                 binary.mkdir()
                 docker = binary / 'docker'
-                docker.write_text(
-                    '#!/bin/bash\nif [[ "$1 $2" == "buildx rm" && "$TEST_FAILURE" == cleanup ]]; then exit 9; fi\n'
-                )
+                docker.write_text('#!/bin/bash\n[[ "$1 $2" == "buildx inspect" ]]\n')
                 docker.chmod(0o755)
                 script = '''set -euo pipefail
 source "$1"
@@ -76,9 +74,13 @@ start_build "$2"
 echo compiled > "$BUILD_WORK_DIR/scratch"
 mkdir -p "$2/dist"
 echo artifact > "$2/dist/program"
+if [[ "$TEST_FAILURE" == cleanup ]]; then
+    mkdir -p "$2/build/backend_api/target"
+fi
 [[ "$TEST_FAILURE" != build ]] || exit 7
 '''
-                env = dict(os.environ, PATH=str(binary) + os.pathsep + os.environ['PATH'], TEST_FAILURE=failure)
+                env = dict(os.environ, PATH=str(binary) + os.pathsep + os.environ['PATH'],
+                           TEST_FAILURE=failure, XDG_CACHE_HOME=str(root / 'cache'))
                 result = subprocess.run(
                     ['bash', '-c', script, 'build-test', str(ROOT / 'src/development/build_lifecycle.sh'), str(root)],
                     env=env,

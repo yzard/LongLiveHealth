@@ -66,7 +66,7 @@ cargo run --locked -- --data-dir /absolute/path/backend_api disable-user --usern
 ./build_docker.sh
 python3 src/development/data_roots.py --project "$PWD"
 export PUID="$(id -u)" PGID="$(id -g)"
-docker compose -f docker/docker-compose.yaml up -d
+docker compose -f docker/docker-compose.yaml up -d --no-build
 docker compose -f docker/docker-compose.yaml exec --user "$PUID:$PGID" backend_api \
   /app/longlivehealth --data-dir /data create-user --username yourname
 ```

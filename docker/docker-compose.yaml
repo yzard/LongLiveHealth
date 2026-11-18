@@ -1,9 +1,7 @@
 services:
   backend_api:
-    image: longlivehealth-backend-api:local
-    build:
-      context: ..
-      dockerfile: docker/backend_api.Dockerfile
+    image: "${LONGLIVEHEALTH_API_IMAGE:-longlivehealth-backend-api:latest}"
+    pull_policy: never
     restart: unless-stopped
     environment:
       PUID: "${PUID:-1000}"

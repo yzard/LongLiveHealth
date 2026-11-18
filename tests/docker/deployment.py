@@ -47,8 +47,10 @@ def free_port():
 
 
 http_port, https_port = free_port(), free_port()
+image = os.environ.get('LONGLIVEHEALTH_API_IMAGE') or 'longlivehealth-backend-api:latest'
 environment = dict(
     os.environ,
+    LONGLIVEHEALTH_API_IMAGE=image,
     LONGLIVEHEALTH_API_DATA_DIR=str(OUTPUT / (PROJECT + '-api')),
     PUID=str(os.getuid()),
     PGID=str(os.getgid()),
@@ -391,7 +393,7 @@ try:
         assert len(mounts) == 1
         assert mounts[0]['source'] == str(source) and mounts[0]['target'] == '/data'
         assert bool(mounts[0].get('read_only', False)) == read_only
-    command(compose + ['up', '-d'])
+    command(compose + ['up', '-d', '--no-build'])
     for service in ['backend_api']:
         eventually(lambda: assert_service_identity(service), 30)
     caddy = command(compose + ['ps', '-q', 'caddy']).decode().strip()
@@ -788,7 +790,7 @@ try:
                 f'127.0.0.1:{restored_port}:8080',
                 '-v',
                 f'{snapshot}:/data',
-                'longlivehealth-backend-api:local',
+                image,
             ]
         )
         .decode()
@@ -835,7 +837,7 @@ try:
         'restart_persistence': True,
         'stopped_copy_restores_complete_archive': True,
         'report_and_account_deletion': True,
-        'image': 'longlivehealth-backend-api:local',
+        'image': image,
         'synthetic_only': True,
         'health_load_and_limit_checks': load_result,
         'real_shared_strata_inference': options.ocr,
