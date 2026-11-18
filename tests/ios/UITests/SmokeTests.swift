@@ -505,6 +505,51 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertFalse(app.buttons["About Reference Levels"].exists)
     }
 
+    @MainActor func testLaboratoryResultShapesShareOneMetricDetail() async throws {
+        var setup = URLRequest(url: URL(string: "http://127.0.0.1:18765/api/v1/test/enable-lab-result-shapes")!)
+        setup.httpMethod = "POST"
+        _ = try await URLSession.shared.data(for: setup)
+        let app = XCUIApplication()
+        app.launch()
+        dismissPasswordPrompts(app)
+        if app.buttons["Sign in"].exists {
+            let server = app.textFields["http://192.168.1.20:8080"]
+            server.tap()
+            let old = server.value as? String ?? ""
+            if old != "http://192.168.1.20:8080" {
+                server.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count))
+            }
+            server.typeText("http://127.0.0.1:18765")
+            app.textFields["Username"].tap()
+            app.textFields["Username"].typeText("simulator")
+            app.secureTextFields["Password"].tap()
+            app.secureTextFields["Password"].typeText("test-password")
+            app.buttons["Sign in"].tap()
+            dismissPasswordPrompts(app)
+        }
+        XCTAssertTrue(app.tabBars.buttons["Browse"].waitForExistence(timeout: 10))
+        tapTab(app, "Browse")
+        let search = app.searchFields["Search metrics"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.tap()
+        search.typeText("LDL")
+        XCTAssertTrue(app.buttons["LDL"].waitForExistence(timeout: 10))
+        app.buttons["LDL"].tap()
+        let value = app.staticTexts["chart-range-value"]
+        XCTAssertTrue(value.waitForExistence(timeout: 10))
+        XCTAssertEqual(value.label, "0–5")
+        app.buttons["Qualitative range"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", "None–Few")).firstMatch.waitForExistence(timeout: 5))
+        app.buttons["Negative / Positive"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", "Negative · Positive")).firstMatch.waitForExistence(timeout: 5))
+        let appearance = XCTAttachment(screenshot: app.screenshot())
+        appearance.name = "Binary × and + laboratory chart"
+        appearance.lifetime = .keepAlways
+        add(appearance)
+        setup.url = URL(string: "http://127.0.0.1:18765/api/v1/test/reset")!
+        _ = try await URLSession.shared.data(for: setup)
+    }
+
     @MainActor func testMetricEducationAndReopenRefresh() async throws {
         let app = XCUIApplication(); app.launch()
         dismissPasswordPrompts(app)

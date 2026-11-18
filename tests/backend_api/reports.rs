@@ -455,7 +455,9 @@ async fn submitted_units_share_scale_and_unknown_values_report_specific_reasons(
             .iter()
             .all(|point| point["value"] == "100" && point["reference"]["upper"] == "100")
     );
-    assert_eq!(derived["incomparable_count"], 3);
+    assert_eq!(derived["incomparable_count"], 2);
+    assert_eq!(derived["special_points"][0]["kind"], "binary");
+    assert_eq!(derived["special_points"][0]["lower"], "1");
     let reasons = derived["excluded"]
         .as_array()
         .unwrap()
@@ -464,9 +466,7 @@ async fn submitted_units_share_scale_and_unknown_values_report_specific_reasons(
         .collect::<std::collections::HashSet<_>>();
     assert_eq!(
         reasons,
-        ["comparison", "unparsed_value", "unsupported_unit"]
-            .into_iter()
-            .collect()
+        ["comparison", "unsupported_unit"].into_iter().collect()
     );
 }
 

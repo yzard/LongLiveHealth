@@ -353,6 +353,18 @@ source, unit, first/last sample times, display time, minimum, maximum and unique
 sample count. Buckets are calendar-aligned minutes, hours, days, days, weeks and months,
 respectively, using the chart timezone (UTC for clinical and daily views). Sources and incompatible units never merge.
 Clients draw a vertical minimum–maximum bar, or one point for a single value.
+Laboratory chart ranges combine exact numeric results with closed observed
+intervals. A dated interval contributes one measurement and its converted lower
+and upper bounds. Interval buckets omit a scalar mean. If the latest result is
+an interval, its bounds appear as `latest_min` and `latest_max`.
+
+`result_charts` contains available qualitative charts with `kind`, `unit`,
+`ranges`, and `sources`. The binary chart uses separate positions for
+negative and positive results in the same bucket. A printed None to Few result
+establishes the two ordered labels for an ordinal chart. Units reported with
+binary lab results remain on the original records. The chart uses the most
+common explicitly reported unit if present.
+
 Original point/history arrays remain available. Heart quantity-series subsamples
 are indexed as compact `quantity_samples`, including their precise times.
 

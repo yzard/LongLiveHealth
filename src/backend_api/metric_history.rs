@@ -85,8 +85,16 @@ pub async fn history(
         .as_array()
         .cloned()
         .ok_or(AppError::Internal)?;
+    let mut special = report_history["special_points"]
+        .as_array()
+        .cloned()
+        .ok_or(AppError::Internal)?;
     let mut sources = BTreeMap::new();
-    for point in points.iter_mut().chain(report_records.iter_mut()) {
+    for point in points
+        .iter_mut()
+        .chain(report_records.iter_mut())
+        .chain(special.iter_mut())
+    {
         let report_id = point["report_id"]
             .as_str()
             .ok_or(AppError::Internal)?
@@ -133,10 +141,15 @@ pub async fn history(
         || crate::lab_metric_metadata::is_clinical_id(&request.metric_id)
     {
         points.sort_by_key(|point| point["timestamp"].as_i64());
-        let (chart_ranges, chart_unit_conflict) =
-            history_chart(&request.metric_id, &report_records, &points);
+        let (chart_ranges, chart_unit_conflict, result_charts) = history_chart(
+            &request.metric_id,
+            definition["standard_unit"].as_str(),
+            &report_records,
+            &points,
+            &mut special,
+        );
         return Ok(
-            json!({"chart_ranges":chart_ranges,"chart_unit_conflict":chart_unit_conflict,"metric":definition,"records":report_records,"points":points,
+            json!({"chart_ranges":chart_ranges,"chart_unit_conflict":chart_unit_conflict,"result_charts":result_charts,"metric":definition,"records":report_records,"points":points,
             "excluded":report_history["excluded"],"excluded_count":report_history["incomparable_count"],
             "algorithm_version":"metric-history-v2","conversion_version":crate::laboratory::CONVERSION_VERSION}),
         );
@@ -166,8 +179,8 @@ pub async fn history(
         points.retain(|point| point["original"]["clinical_observation"].is_null());
         if let Some(group) = groups.get(&request.metric_id) { points.extend(group.points.clone()); }
         points.sort_by(|a,b| a["timestamp"].as_i64().cmp(&b["timestamp"].as_i64()).then_with(|| a["point_id"].as_str().cmp(&b["point_id"].as_str())));
-        let (chart_ranges, chart_unit_conflict) = history_chart(&request.metric_id, &records, &points);
-        Ok(json!({"chart_ranges":chart_ranges,"chart_unit_conflict":chart_unit_conflict,"metric":definition,"records":records,"points":points,"excluded":excluded,"excluded_count":excluded.len(),
+        let (chart_ranges, chart_unit_conflict, result_charts) = history_chart(&request.metric_id, definition["standard_unit"].as_str(), &records, &points, &mut special);
+        Ok(json!({"chart_ranges":chart_ranges,"chart_unit_conflict":chart_unit_conflict,"result_charts":result_charts,"metric":definition,"records":records,"points":points,"excluded":excluded,"excluded_count":excluded.len(),
             "unassigned_clinical_records":unassigned,"unassigned_clinical_count":unassigned.len(),
             "algorithm_version":"metric-history-v2","conversion_version":crate::laboratory::CONVERSION_VERSION}))
     }).await
@@ -175,12 +188,30 @@ pub async fn history(
 
 fn history_chart<'a>(
     metric: &str,
+    standard: Option<&str>,
     records: &'a [Value],
     points: &[Value],
-) -> (Value, Vec<&'a str>) {
+    special: &mut Vec<Value>,
+) -> (Value, Vec<&'a str>, Value) {
     let mut reported = BTreeSet::new();
     let mut comparable = BTreeSet::new();
     for record in records {
+        if record["report_id"].is_null()
+            && let Some(chart) = record.get("special_chart")
+        {
+            let mut sample = chart.clone();
+            sample["source_key"] = record["source_key"].clone();
+            sample["source_name"] = record["source_name"].clone();
+            sample["timestamp"] = record["timestamp"].clone();
+            special.push(sample);
+        }
+        if record["display_value"]
+            .as_str()
+            .and_then(crate::laboratory::qualitative_shape)
+            .is_some()
+        {
+            continue;
+        }
         let originals = record["original_records"].as_array();
         if let Some(originals) = originals.filter(|items| !items.is_empty()) {
             for original in originals {
@@ -191,22 +222,120 @@ fn history_chart<'a>(
                     comparable.insert(crate::laboratory::history_comparison_unit(
                         metric,
                         code.unwrap_or(label),
+                        standard,
                     ));
                 }
             }
         } else if let Some(unit) = reported_unit(&record["unit"]) {
             reported.insert(unit);
-            comparable.insert(crate::laboratory::history_comparison_unit(metric, unit));
+            comparable.insert(crate::laboratory::history_comparison_unit(
+                metric, unit, standard,
+            ));
         }
     }
+    let intervals = special.iter().filter(|point| point["kind"] == "numeric");
     let plotted: BTreeSet<_> = points
         .iter()
+        .chain(intervals.clone())
         .filter_map(|point| reported_unit(&point["unit"]))
         .collect();
-    if reported.len() > 1 && (comparable.len() > 1 || plotted.len() > 1) {
-        return (json!({}), reported.into_iter().collect());
+    let mut result_charts = Vec::new();
+    // A printed "None to Few" interval establishes the ordered scale for this metric.
+    let has_ordinal_scale = special
+        .iter()
+        .any(|point| point["kind"] == "ordinal" && !point["upper"].is_null());
+    for (kind, labels) in [
+        ("binary", ["Negative", "Positive"]),
+        ("ordinal", ["None", "Few"]),
+    ] {
+        if kind == "ordinal" && !has_ordinal_scale {
+            continue;
+        }
+        let samples: Vec<_> = special
+            .iter()
+            .filter(|point| point["kind"] == kind)
+            .collect();
+        if samples.is_empty() {
+            continue;
+        }
+        // Prefer the most common explicit unit, with deterministic ties. Keep each original unit in history.
+        let mut units = BTreeMap::new();
+        for record in records {
+            if record["display_value"]
+                .as_str()
+                .and_then(crate::laboratory::qualitative_shape)
+                .is_some_and(|(shape, _, _)| shape == kind)
+                && let Some(unit) = reported_unit(&record["unit"]).filter(|unit| *unit != "1")
+            {
+                *units
+                    .entry(crate::laboratory::custom_unit(unit))
+                    .or_insert(0) += 1;
+            }
+        }
+        let unit = units
+            .into_iter()
+            .max_by_key(|&(unit, count)| (count, std::cmp::Reverse(unit)))
+            .map_or("", |(unit, _)| unit);
+        let mut ranges = crate::chart::bounded_ranges(
+            samples
+                .iter()
+                .filter_map(|sample| chart_sample(sample, unit)),
+            chrono_tz::UTC,
+            kind == "binary",
+        );
+        ranges["scale_labels"] = json!(labels);
+        ranges["result_kind"] = json!(kind);
+        let sources: BTreeMap<_, _> = samples
+            .iter()
+            .filter_map(|sample| {
+                Some((
+                    sample["source_key"].as_str()?,
+                    sample["source_name"].as_str()?,
+                ))
+            })
+            .collect();
+        result_charts.push(json!({"kind":kind,"unit":unit,"ranges":ranges,"sources":sources}));
     }
-    (point_ranges(points), Vec::new())
+
+    if reported.len() > 1 && (comparable.len() > 1 || plotted.len() > 1) {
+        return (
+            json!({}),
+            reported.into_iter().collect(),
+            json!(result_charts),
+        );
+    }
+    let ranges = crate::chart::bounded_ranges(
+        points
+            .iter()
+            .chain(intervals)
+            .filter_map(|point| chart_sample(point, point["unit"].as_str()?)),
+        chrono_tz::UTC,
+        false,
+    );
+    (ranges, Vec::new(), json!(result_charts))
+}
+
+fn numeric(value: &Value) -> Option<f64> {
+    value
+        .as_f64()
+        .or_else(|| value.as_str()?.parse().ok())
+        .filter(|value| value.is_finite())
+}
+
+fn chart_sample(point: &Value, unit: &str) -> Option<(String, String, f64, f64, Option<f64>)> {
+    let source = point["source_key"]
+        .as_str()
+        .or_else(|| point["source_id"].as_str())?
+        .to_owned();
+    let timestamp = numeric(&point["timestamp"])?;
+    let lower = numeric(&point["lower"]).or_else(|| numeric(&point["value"]))?;
+    Some((
+        source,
+        unit.to_owned(),
+        timestamp,
+        lower,
+        numeric(&point["upper"]),
+    ))
 }
 
 fn reported_unit(value: &Value) -> Option<&str> {
@@ -214,25 +343,6 @@ fn reported_unit(value: &Value) -> Option<&str> {
         .as_str()
         .map(str::trim)
         .filter(|unit| !unit.is_empty() && *unit != "Not reported")
-}
-
-fn point_ranges(points: &[Value]) -> Value {
-    crate::chart::ranges(
-        points.iter().filter_map(|p| {
-            Some((
-                p["source_key"]
-                    .as_str()
-                    .or_else(|| p["source_id"].as_str())?
-                    .to_owned(),
-                p["unit"].as_str()?.to_owned(),
-                p["timestamp"].as_f64()?,
-                p["value"]
-                    .as_f64()
-                    .or_else(|| p["value"].as_str()?.parse::<f64>().ok())?,
-            ))
-        }),
-        chrono_tz::UTC,
-    )
 }
 
 fn append_health(

@@ -159,6 +159,14 @@ pub(crate) fn groups(records: &[Value]) -> BTreeMap<String, Group> {
                     entry["plotted"] = json!(true);
                 }
             }
+            if timestamp.is_some()
+                && let Some((display, original_unit, sample)) =
+                    special_sample(candidate, &metric, &name, unit)
+            {
+                entry["display_value"] = json!(display);
+                entry["unit"] = json!(original_unit);
+                entry["special_chart"] = sample;
+            }
             if metric == "vitamin_d_25_oh_total" && quest_total_vitamin_d(candidate, record) {
                 entry["quest_total_vitamin_d"] = json!(true);
             }
@@ -254,6 +262,81 @@ pub(crate) fn groups(records: &[Value]) -> BTreeMap<String, Group> {
         group.definition["record_count"] = json!(group.records.len());
     }
     groups
+}
+
+fn special_sample(
+    candidate: &Value,
+    metric: &str,
+    name: &str,
+    unit: &str,
+) -> Option<(String, String, Value)> {
+    let range = &candidate["valueRange"];
+    let (raw, unit) = if let (Some(low), Some(high)) = (
+        range["low"]["value"].as_number(),
+        range["high"]["value"].as_number(),
+    ) {
+        let range_unit = |bound: &str| {
+            let quantity = &range[bound];
+            if !quantity["system"]
+                .as_str()
+                .is_none_or(|system| system == "http://unitsofmeasure.org")
+                || !quantity["comparator"].is_null()
+            {
+                return None;
+            }
+            quantity["code"]
+                .as_str()
+                .or_else(|| quantity["unit"].as_str())
+        };
+        let low_unit = range_unit("low")?;
+        let high_unit = range_unit("high")?;
+        if crate::laboratory::custom_unit(low_unit) != crate::laboratory::custom_unit(high_unit) {
+            return None;
+        }
+        (format!("{low}–{high}"), low_unit)
+    } else {
+        let label = display_value(candidate);
+        crate::laboratory::qualitative_shape(&label)?;
+        (label, unit)
+    };
+    let payload = crate::reports::ObservationPayload {
+        raw_lab_code: None,
+        raw_name: name.to_owned(),
+        raw_result: raw.clone(),
+        raw_unit: (!unit.is_empty()).then(|| unit.to_owned()),
+        reference_range: None,
+        report_flag: None,
+        sampled_at: None,
+        metric_id: Some(metric.to_owned()),
+        source: crate::reports::Source {
+            page: 1,
+            quote: String::new(),
+            bounding_box: None,
+        },
+        notes: None,
+        ocr_mapping_note: None,
+        ocr_metric_candidate: None,
+        ocr_section_heading: None,
+        unmapped_choice: None,
+        ocr_new_metric: None,
+        ocr_normalization: None,
+    };
+    let custom = crate::laboratory::metric_definition(metric)
+        .is_none()
+        .then(|| crate::laboratory::CustomMetric {
+            metric_id: metric.to_owned(),
+            name: name.to_owned(),
+            standard_unit: crate::laboratory::custom_unit(unit).to_owned(),
+        });
+    let result =
+        crate::laboratory::interpret_metric(&payload, Some(metric), custom.as_ref()).result;
+    let (kind, lower, upper) = crate::laboratory::chart_shape(&result, &raw)?;
+    let chart_unit = result.unit.as_deref().unwrap_or(unit);
+    Some((
+        raw,
+        unit.to_owned(),
+        json!({"kind":kind,"lower":lower,"upper":upper,"unit":chart_unit}),
+    ))
 }
 
 fn administrative(candidate: &Value) -> bool {

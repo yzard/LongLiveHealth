@@ -109,6 +109,8 @@ public nonisolated enum InterfaceCatalog {
 
     private struct MessageTemplate: Sendable {
         let prefix: String
+        let literalLength: Int
+        let key: String
         let pattern: NSRegularExpression
         let translation: String
     }
@@ -129,8 +131,13 @@ public nonisolated enum InterfaceCatalog {
             }
             pattern += NSRegularExpression.escapedPattern(for: String(key[start...])) + "\\z"
             guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else { return nil }
-            return MessageTemplate(prefix: prefix, pattern: regex, translation: translation)
-        }.sorted { $0.prefix.count > $1.prefix.count }
+            let literalLength = key.utf16.count - matches.reduce(0) { $0 + $1.range.length }
+            return MessageTemplate(prefix: prefix, literalLength: literalLength, key: key, pattern: regex, translation: translation)
+        }.sorted {
+            if $0.prefix.count != $1.prefix.count { return $0.prefix.count > $1.prefix.count }
+            if $0.literalLength != $1.literalLength { return $0.literalLength > $1.literalLength }
+            return $0.key < $1.key
+        }
     }()
 
     static func render(_ template: String, values: [String]) -> String {

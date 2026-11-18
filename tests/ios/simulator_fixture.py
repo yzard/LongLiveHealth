@@ -21,6 +21,7 @@ upload_ids = []
 fail_upload = False
 upload_delay = 0
 fail_review = False
+lab_result_shapes = False
 report_status_chart = False
 report_diagnostics_available = True
 observations = []
@@ -64,7 +65,7 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_POST(self):
-        global fail_upload, upload_delay, fail_review, context, relation, admin_password_changed, refresh_failure, source_preferences, fail_preferences, report_status_chart, report_diagnostics_available
+        global fail_upload, upload_delay, fail_review, context, relation, admin_password_changed, refresh_failure, source_preferences, fail_preferences, report_status_chart, report_diagnostics_available, lab_result_shapes
         length = int(self.headers.get('Content-Length', 0))
         raw = self.rfile.read(length)
         body = json.loads(raw) if self.headers.get('Content-Type') == 'application/json' else {}
@@ -99,7 +100,10 @@ class Handler(BaseHTTPRequestHandler):
             upload_delay = 0
             fail_review = False
             report_status_chart = False
+            lab_result_shapes = False
             report_diagnostics_available = True
+        if route == 'test/enable-lab-result-shapes':
+            lab_result_shapes = True
         if route == 'test/enable-report-status-chart':
             report_status_chart = True
         if route in ('test/seed-report', 'test/seed-multipage-report'):
@@ -548,6 +552,36 @@ class Handler(BaseHTTPRequestHandler):
                 response = {'record_type':body['record_id'], 'start_at':int(time.time())-60, 'details':details, 'notes':[]}
         if route == 'metrics/history/get' and not response.get('chart_unit_conflict'):
             response['chart_ranges'] = chart_ranges([(p.get('source_key', p.get('source_id', '')), p['unit'], p['timestamp'], float(p['value'])) for p in response.get('points', [])])
+        if route == 'metrics/history/get' and lab_result_shapes and body.get('metric_id') == 'ldl_cholesterol':
+            now = int(time.time())
+            source = 'report:lab'
+            def shaped_ranges(unit, lower, upper, discrete=False):
+                values = [(source, unit, now, lower)]
+                if discrete:
+                    ranges = chart_ranges(values)
+                    other = chart_ranges([(source, unit, now, upper)])
+                    for period in ('H', 'D', 'W', 'M', '6M', 'Y'):
+                        ranges[period].extend(other[period])
+                    return ranges
+                ranges = chart_ranges(values)
+                for period in ('H', 'D', 'W', 'M', '6M', 'Y'):
+                    for bucket in ranges[period]:
+                        bucket.update(max=upper, latest_value=None, latest_min=lower, latest_max=upper)
+                return ranges
+
+            binary = shaped_ranges('mg/dL', 0, 1, discrete=True)
+            binary.update(scale_labels=['Negative', 'Positive'], result_kind='binary')
+            ordinal = shaped_ranges('', 0, 1)
+            ordinal.update(scale_labels=['None', 'Few'], result_kind='ordinal')
+            response = {
+                'points': [],
+                'records': [{'source_key': source, 'source_name': 'Synthetic Lab', 'timestamp': now, 'display_value':'0–5', 'unit':'mg/dL'}],
+                'chart_ranges': shaped_ranges('mg/dL', 0, 5),
+                'result_charts': [
+                    {'kind': 'binary', 'unit': 'mg/dL', 'sources': {source: 'Synthetic Lab'}, 'ranges': binary},
+                    {'kind': 'ordinal', 'unit': '', 'sources': {source: 'Synthetic Lab'}, 'ranges': ordinal},
+                ]
+            }
         if route in ('wellness/chart', 'wellness/measurements'):
             kind = body['record_type']
             unit = {'heart_rate':'count/min','respiratory_rate':'count/min','body_mass':'kg','vo2_max':'ml/kg*min','blood_glucose':'mg/dL','body_fat':'%','oxygen_saturation':'%','HKQuantityTypeIdentifierHeartRateVariabilityRMSSD':'ms'}.get(kind, apple_definitions.get(kind, {}).get('unit', 'count'))

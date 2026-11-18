@@ -2464,3 +2464,117 @@ async fn rename_updates_saved_pending_title_and_preserves_unsaved_pdf_title() {
         assert_eq!(new["display_name"], expected);
     }
 }
+
+#[tokio::test]
+async fn lab_charts_keep_closed_ranges_and_binary_states_distinct() {
+    let (_directory, state) = fixture().await;
+    let user = add_user(&state, "chart-shapes").await;
+    for (index, (metric, name, result, unit)) in [
+        (
+            "ldl_cholesterol",
+            "LDL Cholesterol",
+            "2.586–5.172",
+            Some("mmol/L"),
+        ),
+        ("ldl_cholesterol", "LDL Cholesterol", "120", Some("mg/dL")),
+        ("ldl_cholesterol", "LDL Cholesterol", "<90", Some("mg/dL")),
+        (
+            "urine_bacteria",
+            "Bacteria - urine",
+            "None to Few",
+            Some("/HPF"),
+        ),
+        (
+            "urine_ketones",
+            "Ketones - urine",
+            "Negative",
+            Some("mg/dL"),
+        ),
+        ("urine_ketones", "Ketones - urine", "Positive", None),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let report_id = archive(&state, "chart-shapes").await;
+        let mut payload = observation_payload();
+        payload.metric_id = Some(metric.into());
+        payload.raw_name = name.into();
+        payload.raw_result = result.into();
+        payload.raw_unit = unit.map(str::to_owned);
+        payload.sampled_at = Some(format!("2026-08-05T10:{index:02}:00Z"));
+        state
+            .database
+            .submit_report_changes(
+                &user.user_id,
+                ReportSubmission {
+                    report_id,
+                    expected_revision: 1,
+                    context: Some(
+                        serde_json::from_value(json!({"source_name":"Same Lab"})).unwrap(),
+                    ),
+                    observations: vec![ReportResultChange {
+                        observation_id: None,
+                        expected_revision: None,
+                        status: ReportResultStatus::Submitted,
+                        payload,
+                    }],
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let get = |id: &str| {
+        history(
+            &state.database,
+            &user.user_id,
+            HistoryRequest {
+                metric_id: id.to_owned(),
+            },
+        )
+    };
+    let numeric = get("ldl_cholesterol").await.unwrap();
+    assert_eq!(numeric["points"].as_array().unwrap().len(), 1);
+    assert_eq!(numeric["records"].as_array().unwrap().len(), 3);
+    let bucket = &numeric["chart_ranges"]["D"][0];
+    assert_eq!(bucket["unit"], "mg/dL");
+    assert_eq!(bucket["min"], 100.0);
+    assert_eq!(bucket["max"], 200.0);
+    assert_eq!(bucket["count"], 2);
+    assert!(bucket["mean"].is_null());
+    assert_eq!(numeric["chart_unit_conflict"], json!([]));
+
+    let ordered = get("urine_bacteria").await.unwrap();
+    let chart = &ordered["result_charts"][0];
+    assert_eq!(chart["kind"], "ordinal");
+    assert_eq!(chart["unit"], "/HPF");
+    assert_eq!(chart["ranges"]["scale_labels"], json!(["None", "Few"]));
+    assert_eq!(chart["ranges"]["D"][0]["latest_min"], 0.0);
+    assert_eq!(chart["ranges"]["D"][0]["latest_max"], 1.0);
+
+    let qualitative = get("urine_ketones").await.unwrap();
+    let chart = &qualitative["result_charts"][0];
+    assert_eq!(chart["kind"], "binary");
+    assert_eq!(chart["unit"], "mg/dL");
+    let buckets = chart["ranges"]["D"].as_array().unwrap();
+    assert_eq!(buckets.len(), 2);
+    assert_eq!(
+        (buckets[0]["min"].as_f64(), buckets[0]["max"].as_f64()),
+        (Some(0.0), Some(0.0))
+    );
+    assert_eq!(
+        (buckets[1]["min"].as_f64(), buckets[1]["max"].as_f64()),
+        (Some(1.0), Some(1.0))
+    );
+    let records = qualitative["records"].as_array().unwrap();
+    assert!(
+        records
+            .iter()
+            .any(|record| record["display_value"] == "Positive" && record["unit"].is_null())
+    );
+    assert!(
+        records
+            .iter()
+            .any(|record| record["display_value"] == "Negative" && record["unit"] == "mg/dL")
+    );
+    assert_eq!(qualitative["chart_unit_conflict"], json!([]));
+}

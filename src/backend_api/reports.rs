@@ -1675,7 +1675,8 @@ async fn invalidate_report_projections(
 pub(crate) fn history_record(observation: &Observation) -> Value {
     json!({"point_id":format!("report:{}", observation.observation_id),
             "observation_id":observation.observation_id,"report_id":observation.report_id,
-            "sampled_at":observation.payload.sampled_at,"display_value":observation.payload.raw_result,
+            "sampled_at":observation.payload.sampled_at,"timestamp":observation.payload.sampled_at.as_deref().and_then(|date| parse_time(date).ok()),
+            "display_value":observation.payload.raw_result,
             "unit":observation.payload.raw_unit,"status":observation.status,"original":observation.payload})
 }
 
@@ -1710,6 +1711,7 @@ pub async fn trends(
         return Err(AppError::Invalid("Invalid time range"));
     }
     let mut points = Vec::new();
+    let mut special_points = Vec::new();
     let mut records = Vec::new();
     let mut incomparable = 0;
     let mut excluded = Vec::new();
@@ -1735,6 +1737,28 @@ pub async fn trends(
             continue;
         }
         let quantity = &observation.interpretation.result;
+        let mut shape = crate::laboratory::chart_shape(quantity, &observation.payload.raw_result);
+        let raw_unit = observation.payload.raw_unit.as_deref().unwrap_or("").trim();
+        if shape.is_none() && observation.reported_metric_id.is_some() {
+            let definition = CustomMetric {
+                metric_id: id.to_owned(),
+                name: observation.payload.raw_name.clone(),
+                standard_unit: crate::laboratory::custom_unit(raw_unit).to_owned(),
+            };
+            let result =
+                crate::laboratory::interpret_metric(&observation.payload, None, Some(&definition));
+            shape = crate::laboratory::chart_shape(&result.result, &observation.payload.raw_result);
+        }
+        if let Some((kind, lower, upper)) = shape {
+            records.last_mut().expect("history record was appended")["special_chart"] =
+                json!({"kind":kind,"lower":lower,"upper":upper});
+            special_points.push(json!({
+                "observation_id":observation.observation_id, "report_id":observation.report_id, "metric_id":id,
+                "timestamp":timestamp, "kind":kind, "lower":lower, "upper":upper,
+                "unit":if kind == "numeric" { quantity.unit.as_deref().unwrap_or(raw_unit) } else { raw_unit },
+            }));
+            continue;
+        }
         let raw_number = observation.reported_metric_id.as_ref().and_then(|_| {
             rust_decimal::Decimal::from_str_exact(observation.payload.raw_result.trim())
                 .ok()
@@ -1768,7 +1792,7 @@ pub async fn trends(
     }
     points.sort_by_key(|point| point["timestamp"].as_i64());
     Ok(
-        json!({"records":records,"points":points,"reported_metric":reported_metric,"incomparable_count":incomparable,"excluded":excluded,"algorithm_version":"lab-trend-v1","conversion_version":crate::laboratory::CONVERSION_VERSION}),
+        json!({"records":records,"points":points,"special_points":special_points,"reported_metric":reported_metric,"incomparable_count":incomparable,"excluded":excluded,"algorithm_version":"lab-trend-v1","conversion_version":crate::laboratory::CONVERSION_VERSION}),
     )
 }
 

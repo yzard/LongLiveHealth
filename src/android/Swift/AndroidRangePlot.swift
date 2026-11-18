@@ -4,6 +4,8 @@ import SwiftUI
 struct AndroidRangePlot: View {
     let rows: [JSONValue]
     let referenceBand: JSONValue
+    let scaleLabels: [String]
+    let isBinary: Bool
     let domain: ClosedRange<Double>
     let start: Double
     let length: Double
@@ -32,12 +34,18 @@ struct AndroidRangePlot: View {
                         Text((value / divisor).formatted(.number.precision(.fractionLength(0...2)))).font(.caption2).foregroundStyle(Color.pink).offset(x: w - 34, y: y - 14)
                     }
                 }
-                ForEach(0..<4, id: \.self) { index in
-                    let value = domain.lowerBound + (domain.upperBound - domain.lowerBound) * Double(index) / 3
-                    let y = h * (1 - Double(index) / 3)
+                let levels = scaleLabels.isEmpty
+                    ? (0..<4).map { domain.lowerBound + (domain.upperBound - domain.lowerBound) * Double($0) / 3 }
+                    : scaleLabels.indices.map { Double($0) }
+                ForEach(Array(levels.enumerated()), id: \.offset) { index, value in
+                    let y = h * (domain.upperBound - value) / (domain.upperBound - domain.lowerBound)
                     Rectangle().fill(Color.secondary.opacity(0.2)).frame(width: w, height: 0.5).offset(y: y)
-                    Text(value.formatted(.number.precision(.fractionLength(0...1)))).font(.caption2)
-                        .foregroundStyle(.secondary).offset(x: w + 4, y: y - 7)
+                    if isBinary {
+                        BinaryResultSymbol(value: value, positiveColor: .primary).offset(x: w + 4, y: y - 10)
+                    } else {
+                        let label = scaleLabels.isEmpty ? value.formatted(.number.precision(.fractionLength(0...1))) : uiLabel(scaleLabels[index])
+                        Text(label).font(.caption2).foregroundStyle(.secondary).offset(x: w + 4, y: y - 7)
+                    }
                 }
                 ForEach(Array(ticks.enumerated()), id: \.offset) { _, tick in
                     let x = w * (tick.0 - start) / length
@@ -51,7 +59,10 @@ struct AndroidRangePlot: View {
                     let x = w * (at - start) / length
                     let top = h * (domain.upperBound - upper) / (domain.upperBound - domain.lowerBound)
                     let bottom = h * (domain.upperBound - lower) / (domain.upperBound - domain.lowerBound)
-                    if lower != upper {
+                    if isBinary {
+                        BinaryResultSymbol(value: lower, positiveColor: color(row))
+                            .frame(width: 20, height: 20).offset(x: x - 10, y: top - 10)
+                    } else if lower != upper {
                         Rectangle().fill(color(row)).frame(width: width, height: max(0.5, bottom - top)).offset(x: x - width / 2, y: top)
                         if exposedEnd(row, true) { Circle().fill(color(row)).frame(width: width, height: width).offset(x: x - width / 2, y: bottom - width / 2) }
                         if exposedEnd(row, false) { Circle().fill(color(row)).frame(width: width, height: width).offset(x: x - width / 2, y: top - width / 2) }

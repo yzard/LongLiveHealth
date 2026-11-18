@@ -18,6 +18,7 @@ struct MetricChart: View {
     let heartRate: Bool
     let navigationTimestamps: [Double]?
     let onWindowChange: ((ChartWindow) -> Void)?
+    var evidence: [JSONValue] = []
     @Environment(\.timeZone) var timeZone
     @State var emptyAnchor = Date().timeIntervalSince1970
     @State var window: ChartWindow?
@@ -29,6 +30,23 @@ struct MetricChart: View {
     private var components: [JSONValue] { ranges["components"].arrayValue }
     private func componentName(_ row: JSONValue) -> String {
         components.first { $0["id"] == row["component"] }?["title"].stringValue ?? ""
+    }
+
+    private var scaleLabels: [String] { ranges["scale_labels"].arrayValue.map(\.stringValue) }
+    private var isBinary: Bool { ranges["result_kind"].stringValue == "binary" }
+    private var selectedEvidence: [JSONValue] {
+        guard let selected, let start = selected["start_at"].numberValue,
+              let end = selected["end_at"].numberValue else { return [] }
+        let source = selected["source"].stringValue
+        let kind = ranges["result_kind"].stringValue
+        return evidence.filter { record in
+            guard SourceNames.key(record) == source, let at = record["timestamp"].numberValue,
+                  at >= start, at < end else { return false }
+            let shape = record["special_chart"]
+            if kind.isEmpty { return shape == .null || shape["kind"].stringValue == "numeric" }
+            guard shape["kind"].stringValue == kind else { return false }
+            return !isBinary || Double(shape["lower"].stringValue) == selected["min"].numberValue
+        }
     }
 
     private var calendar: Calendar {
@@ -48,7 +66,7 @@ struct MetricChart: View {
         }
     }
     private var referenceLevels: [JSONValue] {
-        if !components.isEmpty { return [] }
+        if !components.isEmpty || !scaleLabels.isEmpty { return [] }
         let days = ranges["reference_days"].arrayValue.filter {
             !hiddenSources.contains($0["source"].stringValue) && !hiddenComponents.contains($0["component"].stringValue) && $0["unit"].stringValue == unit &&
             ($0["last_at"].numberValue ?? 0) >= active.start && ($0["last_at"].numberValue ?? 0) < active.start + active.length
@@ -63,6 +81,7 @@ struct MetricChart: View {
         referenceLevels.filter { ($0["days"].numberValue ?? 0) > 0 }.max { ($0["days"].numberValue ?? 0) < ($1["days"].numberValue ?? 0) } ?? .null
     }
     private var yDomain: ClosedRange<Double> {
+        if !scaleLabels.isEmpty { return -0.25...(Double(scaleLabels.count - 1) + 0.25) }
         let values = rows.flatMap { row in
             [row["min"].numberValue, row["max"].numberValue].compactMap { $0 }.map { $0 / divisor }
         }
@@ -80,7 +99,10 @@ struct MetricChart: View {
             $0["unit"].stringValue == unit && !hiddenSources.contains($0["source"].stringValue)
         }.max { ($0["last_at"].numberValue ?? 0) < ($1["last_at"].numberValue ?? 0) }
     }
-    private var displayUnit: String { heartRate ? "BPM" : divisor == 3600 ? "Hours" : HistoricalValue.displayUnit(unit.isEmpty ? "Unit Not Specified" : unit, kind: metricKind) }
+    private var displayUnit: String {
+        if !scaleLabels.isEmpty { return unit.isEmpty ? "" : HistoricalValue.displayUnit(unit, kind: metricKind) }
+        return heartRate ? "BPM" : divisor == 3600 ? "Hours" : HistoricalValue.displayUnit(unit.isEmpty ? "Unit Not Specified" : unit, kind: metricKind)
+    }
     private var colors: [Color] {
         sourceKeys.enumerated().map { heartRate && $0.offset == 0 ? .pink : SourceLegend.colors[$0.offset % SourceLegend.colors.count] }
     }
@@ -92,12 +114,19 @@ struct MetricChart: View {
         return colors[index]
     }
     private func number(_ value: Double) -> String {
-        (value / divisor).formatted(.number.precision(.fractionLength(0...(heartRate ? 0 : 2))))
+        if let level = Int(exactly: value), scaleLabels.indices.contains(level) { return uiLabel(scaleLabels[level]) }
+        return (value / divisor).formatted(.number.precision(.fractionLength(0...(heartRate ? 0 : 2))))
     }
     private func valueLabel(_ row: JSONValue) -> String {
         let lower = row["min"].numberValue ?? 0
         let upper = row["max"].numberValue ?? lower
-        return lower == upper ? number(lower) : "\(number(lower))–\(number(upper))"
+        return lower == upper ? number(lower) : [number(lower), number(upper)].joined(separator: isBinary ? " · " : "–")
+    }
+    private func latestLabel(_ row: JSONValue) -> String? {
+        if let low = row["latest_min"].numberValue, let high = row["latest_max"].numberValue {
+            return valueLabel(.object(["min": .number(low), "max": .number(high)]))
+        }
+        return row["latest_value"].numberValue.map(number)
     }
     private func intervalLabel(_ row: JSONValue?) -> String {
         let start = row?["start_at"].numberValue ?? active.start
@@ -189,7 +218,7 @@ struct MetricChart: View {
                 }
             }.pickerStyle(.segmented)
             VStack(alignment: .leading, spacing: 3) {
-                Text(selected == nil ? uiText("RANGE") : uiText("SELECTED RANGE")).font(.caption).foregroundStyle(.secondary)
+                Text(isBinary ? uiText("Result") : selected == nil ? uiText("RANGE") : uiText("SELECTED RANGE")).font(.caption).foregroundStyle(.secondary)
                 if !components.isEmpty && selected == nil {
                     ForEach(Array(components.filter { !hiddenComponents.contains($0["id"].stringValue) }.enumerated()), id: \.offset) { _, component in
                         let values = rows.filter { $0["component"] == component["id"] }
@@ -206,7 +235,7 @@ struct MetricChart: View {
                     Text((selected ?? summary).map(valueLabel) ?? (hiddenSources.count == sourceKeys.count && !sourceKeys.isEmpty ? uiText("No sources selected") : uiText("No data")))
                         .font(.system(size: 34, weight: .regular, design: .rounded)).minimumScaleFactor(0.6)
                         .accessibilityIdentifier("chart-range-value")
-                    Text(displayUnit).font(.headline).foregroundStyle(.secondary)
+                    if !displayUnit.isEmpty { Text(displayUnit).font(.headline).foregroundStyle(.secondary) }
                 }
                 }
                 Text(intervalLabel(selected)).font(.subheadline).foregroundStyle(.secondary)
@@ -225,7 +254,7 @@ struct MetricChart: View {
             GeometryReader { geometry in
                 let width = barWidth(plotWidth: max(1, geometry.size.width - 36))
                 #if os(Android)
-                AndroidRangePlot(rows: segments, referenceBand: referenceBand, domain: yDomain, start: active.start, length: active.length,
+                AndroidRangePlot(rows: segments, referenceBand: referenceBand, scaleLabels: scaleLabels, isBinary: isBinary, domain: yDomain, start: active.start, length: active.length,
                     divisor: divisor, width: width, ticks: tickDates.map { ($0.timeIntervalSince1970, tickLabel($0)) },
                     color: color, exposedEnd: exposedEnd, selected: $selected, move: move)
                 #else
@@ -246,7 +275,11 @@ struct MetricChart: View {
                         let lower = (row["display_min"].numberValue ?? 0) / divisor
                         let upper = (row["display_max"].numberValue ?? 0) / divisor
                         let date = Date(timeIntervalSince1970: position(row))
-                        if lower != upper {
+                        if isBinary {
+                            PointMark(x: .value("Time", date), y: .value("Result", lower))
+                                .symbol { BinaryResultSymbol(value: lower, positiveColor: color(row)) }
+                                .accessibilityValue(number(lower))
+                        } else if lower != upper {
                             RuleMark(x: .value("Time", date), yStart: .value("Minimum", lower), yEnd: .value("Maximum", upper))
                                 .lineStyle(StrokeStyle(lineWidth: width, lineCap: .butt)).foregroundStyle(color(row))
                                 .accessibilityLabel(model.sourceLabel(row["source"].stringValue))
@@ -292,7 +325,21 @@ struct MetricChart: View {
                         }
                     }
                 }
-                .chartYAxis { AxisMarks(position: .trailing, values: .automatic(desiredCount: 4)) }
+                .chartYAxis {
+                    if scaleLabels.isEmpty {
+                        AxisMarks(position: .trailing, values: .automatic(desiredCount: 4))
+                    } else {
+                        AxisMarks(position: .trailing, values: scaleLabels.indices.map(Double.init)) { tick in
+                            AxisGridLine()
+                            if let value = tick.as(Double.self) {
+                                AxisValueLabel {
+                                    if isBinary { BinaryResultSymbol(value: value, positiveColor: .primary) }
+                                    else { Text(number(value)) }
+                                }
+                            }
+                        }
+                    }
+                }
                 .chartOverlay { proxy in
                     GeometryReader { overlay in
                         Color.clear
@@ -311,11 +358,19 @@ struct MetricChart: View {
                 .accessibilityAdjustableAction { move($0 == .increment ? 1 : -1) }
                 #endif
             }.frame(height: 250)
-            if components.isEmpty, let latest, let at = latest["last_at"].numberValue, let value = latest["latest_value"].numberValue {
+            let selectedRecords = selectedEvidence
+            if !selectedRecords.isEmpty {
+                NavigationLink(uiText("Historical Values")) {
+                    List {
+                        MetricHistoricalValuesSection(model: model, records: selectedRecords, points: [])
+                    }.mobileNavigationTitle(uiText("Historical Values"))
+                }
+            }
+            if components.isEmpty, let latest, let at = latest["last_at"].numberValue, let value = latestLabel(latest) {
                 HStack {
                     Text(uiText("Latest: \(uiDate(Date(timeIntervalSince1970: at), dateStyle: calendar.isDateInToday(Date(timeIntervalSince1970: at)) ? .omitted : .abbreviated, timeStyle: .shortened))"))
                     Spacer()
-                    Text("\(number(value)) \(displayUnit)")
+                    Text([value, displayUnit].filter { !$0.isEmpty }.joined(separator: " "))
                 }.font(.subheadline).padding(12).background(Color.secondary.opacity(0.16), in: Capsule())
             }
             if !components.isEmpty {
@@ -412,5 +467,18 @@ struct MetricChart: View {
         .onChange(of: timestamps) { _, _ in
             window = ChartWindow(timestamps: timestamps, period: active.period, calendar: calendar); selected = nil
         }
+    }
+}
+
+
+struct BinaryResultSymbol: View {
+    let value: Double
+    let positiveColor: Color
+
+    var body: some View {
+        Text(value == 0 ? "×" : "+")
+            .font(.system(size: 15, weight: .bold))
+            .foregroundStyle(value == 0 ? Color.red : positiveColor)
+            .accessibilityLabel(uiText(value == 0 ? "Negative" : "Positive"))
     }
 }

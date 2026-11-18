@@ -357,8 +357,11 @@ pub(crate) fn verified_custom_candidate<'a>(
         .filter(|unit| !unit.is_empty())
         .unwrap_or("1");
     let key = crate::laboratory_names::key(name);
+    let binary =
+        qualitative_shape(&payload.raw_result).is_some_and(|(kind, _, _)| kind == "binary");
     let mut exact = custom.iter().filter(|metric| {
-        metric.standard_unit == unit && crate::laboratory_names::key(&metric.name) == key
+        (metric.standard_unit == unit || (binary && (unit == "1" || metric.standard_unit == "1")))
+            && crate::laboratory_names::key(&metric.name) == key
     });
     let matched = exact.next()?;
     (matched.metric_id == id && exact.next().is_none()).then_some(matched.metric_id.as_str())
@@ -772,12 +775,16 @@ pub(crate) fn custom_unit(raw: &str) -> &str {
     canonical_unit(raw).unwrap_or_else(|| raw.trim())
 }
 
-pub(crate) fn history_comparison_unit<'a>(metric: &str, raw: &'a str) -> &'a str {
+pub(crate) fn history_comparison_unit<'a>(
+    metric: &str,
+    raw: &'a str,
+    standard: Option<&'a str>,
+) -> &'a str {
     let unit = custom_unit(raw);
-    if let Some(definition) = metric_definition(metric)
-        && conversion(metric, definition.standard_unit, unit).is_some()
+    if let Some(standard) = standard.filter(|standard| !standard.is_empty())
+        && conversion(metric, standard, unit).is_some()
     {
-        return definition.standard_unit;
+        return standard;
     }
     unit
 }
@@ -863,41 +870,39 @@ pub(crate) fn metric_suggestions<'a>(
     }
     let reported = raw_unit.map(str::trim).filter(|unit| !unit.is_empty());
     let mut ranked = Vec::new();
-    let mut add =
-        |id: &'a str, name: &'a str, standard_unit: &'a str, name_score: i32, is_custom: bool| {
-            let unit_match = match reported {
-                None => UnitMatch::NotReported,
-                Some(unit) if unit == standard_unit => UnitMatch::Exact,
-                Some(unit) if custom_unit(unit) == standard_unit => UnitMatch::Convertible,
-                Some(unit)
-                    if !is_custom
-                        && canonical_unit(unit)
-                            .is_some_and(|unit| conversion(id, standard_unit, unit).is_some()) =>
-                {
-                    UnitMatch::Convertible
-                }
-                Some(_) => UnitMatch::Incompatible,
-            };
-            let score = name_score
-                + match unit_match {
-                    UnitMatch::Exact => 24,
-                    UnitMatch::Convertible => 18,
-                    UnitMatch::NotReported => 0,
-                    UnitMatch::Incompatible => -18,
-                };
-            ranked.push((
-                score,
-                MetricSuggestion {
-                    metric_id: id,
-                    name,
-                    standard_unit,
-                    unit_match,
-                },
-            ));
+    let mut add = |id: &'a str, name: &'a str, standard_unit: &'a str, name_score: i32| {
+        let unit_match = match reported {
+            None => UnitMatch::NotReported,
+            Some(unit) if unit == standard_unit => UnitMatch::Exact,
+            Some(unit) if custom_unit(unit) == standard_unit => UnitMatch::Convertible,
+            Some(unit)
+                if canonical_unit(unit)
+                    .is_some_and(|unit| conversion(id, standard_unit, unit).is_some()) =>
+            {
+                UnitMatch::Convertible
+            }
+            Some(_) => UnitMatch::Incompatible,
         };
+        let score = name_score
+            + match unit_match {
+                UnitMatch::Exact => 24,
+                UnitMatch::Convertible => 18,
+                UnitMatch::NotReported => 0,
+                UnitMatch::Incompatible => -18,
+            };
+        ranked.push((
+            score,
+            MetricSuggestion {
+                metric_id: id,
+                name,
+                standard_unit,
+                unit_match,
+            },
+        ));
+    };
     for (id, score) in name_scores {
         if let Some(metric) = DEFINITIONS.get(id) {
-            add(id, metric.name, metric.standard_unit, score as i32, false);
+            add(id, metric.name, metric.standard_unit, score as i32);
         }
     }
     for metric in custom_metrics {
@@ -915,7 +920,6 @@ pub(crate) fn metric_suggestions<'a>(
                 &metric.name,
                 &metric.standard_unit,
                 score as i32,
-                true,
             );
         }
     }
@@ -1299,6 +1303,20 @@ fn derive(
     else {
         return Quantity::unavailable("unmapped_metric", raw_unit, origin);
     };
+    if !reference && let Some((kind, _, _)) = qualitative_shape(raw) {
+        let missing = raw_unit.is_none_or(|unit| unit.trim().is_empty());
+        // Once the assay is mapped, its qualitative state does not require
+        // a quantitative conversion. New physical-unit definitions still
+        // verify their printed unit when one is available.
+        if kind == "ordinal" || missing || standard_unit == "1" || metric_id.is_some() {
+            return Quantity {
+                status: "qualitative",
+                reason: "The printed result uses an ordered qualitative scale.",
+                display: Some(raw.trim().to_owned()),
+                ..Quantity::unavailable("qualitative", raw_unit, origin)
+            };
+        }
+    }
     let Some(raw_unit) = raw_unit
         .filter(|unit| !unit.trim().is_empty())
         .or((standard_unit == "1").then_some("1"))
@@ -1307,7 +1325,7 @@ fn derive(
     };
     let unit = custom_unit(raw_unit);
     let rule = if custom.is_some() {
-        (unit == standard_unit && !standard_unit.is_empty())
+        (!standard_unit.is_empty())
             .then(|| conversion(id, standard_unit, unit))
             .flatten()
     } else {
@@ -1316,6 +1334,14 @@ fn derive(
     let Some(rule) = rule else {
         return Quantity::unavailable("unsupported_unit", Some(raw_unit), origin);
     };
+    if !reference && qualitative_shape(raw).is_some() {
+        return Quantity {
+            status: "qualitative",
+            reason: "The printed result uses an ordered qualitative scale.",
+            display: Some(raw.trim().to_owned()),
+            ..Quantity::unavailable("qualitative", Some(raw_unit), origin)
+        };
+    }
     let Some(parsed) = (if reference {
         shape(raw)
     } else {
@@ -1381,6 +1407,45 @@ fn derive(
         "Bounded value retained; it is not an exact numeric trend point."
     };
     quantity
+}
+
+/// These are coordinates on a qualitative scale, never measured quantities.
+pub(crate) fn qualitative_shape(raw: &str) -> Option<(&'static str, u8, Option<u8>)> {
+    let label = raw.trim().to_ascii_lowercase();
+    match label.as_str() {
+        "negative" | "not detected" => Some(("binary", 0, None)),
+        "positive" | "detected" => Some(("binary", 1, None)),
+        "none" => Some(("ordinal", 0, None)),
+        "few" => Some(("ordinal", 1, None)),
+        _ => {
+            let (lower, upper) = [" to ", "–", "—", "-"]
+                .into_iter()
+                .find_map(|separator| label.split_once(separator))?;
+            (lower.trim() == "none" && upper.trim() == "few").then_some(("ordinal", 0, Some(1)))
+        }
+    }
+}
+
+pub(crate) fn chart_shape(
+    result: &Quantity,
+    raw: &str,
+) -> Option<(&'static str, String, Option<String>)> {
+    match result.status {
+        "range" => Some((
+            "numeric",
+            result.lower.clone()?,
+            Some(result.upper.clone()?),
+        )),
+        "qualitative" => {
+            let (kind, lower, upper) = qualitative_shape(raw)?;
+            Some((
+                kind,
+                lower.to_string(),
+                upper.map(|value| value.to_string()),
+            ))
+        }
+        _ => None,
+    }
 }
 
 pub fn interpret(payload: &ObservationPayload) -> Interpretation {

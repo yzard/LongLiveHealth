@@ -11,6 +11,7 @@ struct MetricHistoryView: View {
     @State var loading = false
     @State var failure: String?
     @State var editing = false
+    @State var selectedChartKind = "numeric"
 
     private var metricName: String {
         model.renamedLabMetrics[metric["metric_id"].stringValue]
@@ -22,10 +23,24 @@ struct MetricHistoryView: View {
     private var points: [JSONValue] { currentHistory["points"].arrayValue }
     private var records: [JSONValue] { currentHistory["records"].arrayValue }
     private var incompatibleUnits: [String] { currentHistory["chart_unit_conflict"].arrayValue.map(\.stringValue) }
-    private var showsChart: Bool { !points.isEmpty && incompatibleUnits.isEmpty }
-    private var chartUnits: [String] { Array(Set(points.map { $0["unit"].stringValue })).sorted() }
-    private var sourceKeys: [String] { Array(Set(points.map(SourceNames.key))).sorted() }
-    private var sourceNames: [String: String] { Dictionary(points.map { (SourceNames.key($0), $0["source_name"].stringValue) }, uniquingKeysWith: { first, _ in first }) }
+    private var numericRanges: JSONValue { currentHistory["chart_ranges"] }
+    private var chartKinds: [String] {
+        let quantitative = numericRanges["D"].arrayValue.isEmpty || !incompatibleUnits.isEmpty ? [] : ["numeric"]
+        return quantitative + currentHistory["result_charts"].arrayValue.map { $0["kind"].stringValue }
+    }
+    private var chartKind: String { chartKinds.contains(selectedChartKind) ? selectedChartKind : chartKinds.first ?? "" }
+    private var chart: JSONValue { currentHistory["result_charts"].arrayValue.first { $0["kind"].stringValue == chartKind } ?? .null }
+    private var ranges: JSONValue { chartKind == "numeric" ? numericRanges : chart["ranges"] }
+    private var chartUnits: [String] {
+        Array(Set(ranges["D"].arrayValue.map { $0["unit"].stringValue })).sorted()
+    }
+    private var sourceKeys: [String] { Array(Set(ranges["D"].arrayValue.map { $0["source"].stringValue })).sorted() }
+    private var sourceNames: [String: String] {
+        if chartKind != "numeric" { return chart["sources"].objectValue.mapValues(\.stringValue) }
+        return Dictionary((records + points).map { (SourceNames.key($0), $0["source_name"].stringValue) },
+                          uniquingKeysWith: { first, _ in first })
+    }
+    private var showsChart: Bool { !chartKinds.isEmpty }
 
     var body: some View {
         MetricDetailScreen(title: metricName) {
@@ -38,10 +53,23 @@ struct MetricHistoryView: View {
             }
             if showsChart {
                 MetricChartSection {
+                    if chartKinds.count > 1 {
+                        Picker(uiText("Result type"), selection: Binding(get: { chartKind }, set: { selectedChartKind = $0 })) {
+                            ForEach(chartKinds, id: \.self) { kind in
+                                Text(uiText(kind == "numeric" ? "Numeric" : kind == "binary" ? "Negative / Positive" : "Qualitative range")).tag(kind)
+                            }
+                        }.pickerStyle(.segmented)
+                    }
+                    if !incompatibleUnits.isEmpty {
+                        Text(uiText("A chart is unavailable because these units cannot be converted to a common unit: \(incompatibleUnits.joined(separator: ", "))."))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     ForEach(chartUnits, id: \.self) { unit in
-                        MetricChart(model: model, guidance: currentHistory["reference_guidance"], ranges: currentHistory["chart_ranges"], unit: unit, metricKind: metric["metric_id"].stringValue,
+                        MetricChart(model: model, guidance: currentHistory["reference_guidance"], ranges: ranges, unit: unit, metricKind: metric["metric_id"].stringValue,
                                     divisor: 1, sourceKeys: sourceKeys, names: sourceNames,
-                                    initialPeriod: .week, showsHour: false, heartRate: false, navigationTimestamps: nil, onWindowChange: nil)
+                                    initialPeriod: .week, showsHour: false, heartRate: false, navigationTimestamps: nil,
+                                    onWindowChange: nil, evidence: records)
+                            .id(chartKind + unit)
                             .environment(\.timeZone, .gmt)
                     }
                 }

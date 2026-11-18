@@ -1491,5 +1491,13 @@
   "{0}{1}% vs personal baseline": "{0}{1}% 对比个人基线",
   "{0}–{1} of {2}": "第 {0}–{1} 项，共 {2} 项",
   "{0}–{1} seconds": "{0}–{1} 秒",
-  "· Heart rate: {0} BPM": "· 心率：{0} BPM"
+  "· Heart rate: {0} BPM": "· 心率：{0} BPM",
+  "None": "无",
+  "Few": "少量",
+  "Negative": "阴性",
+  "Positive": "阳性",
+  "Result type": "结果类型",
+  "Numeric": "数值",
+  "Negative / Positive": "阴性／阳性",
+  "Qualitative range": "定性区间"
 }
