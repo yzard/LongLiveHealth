@@ -1012,6 +1012,17 @@ nonisolated final class SmokeTests: XCTestCase {
             XCTAssertFalse(app.buttons[printed].exists)
             title.tap()
             XCTAssertTrue(app.navigationBars["Review result"].waitForExistence(timeout: 5))
+            let ocrColumn = app.staticTexts["OCR"]
+            let databaseColumn = app.staticTexts["Database"]
+            let ocrMetricName = app.staticTexts["ocr-metric-name"]
+            let databaseMetricName = app.staticTexts["database-metric-name"]
+            reveal(app, ocrMetricName)
+            XCTAssertEqual(ocrMetricName.label, printed)
+            XCTAssertEqual(databaseMetricName.label, name)
+            XCTAssertLessThan(ocrColumn.frame.midX, databaseColumn.frame.midX)
+            XCTAssertLessThan(ocrMetricName.frame.maxX, databaseMetricName.frame.minX)
+            XCTAssertEqual(ocrMetricName.frame.minY, databaseMetricName.frame.minY, accuracy: 4)
+            XCTAssertTrue(app.staticTexts["ocr-result"].exists)
             if name == "Appearance - urine" {
                 XCTAssertFalse(app.staticTexts["Maps to"].exists)
                 XCTAssertFalse(app.staticTexts["Recommended name (LOINC)"].exists)
@@ -1024,6 +1035,10 @@ nonisolated final class SmokeTests: XCTestCase {
                 }
                 reveal(app, databaseName)
                 XCTAssertEqual(databaseName.label, "Appearance of Urine")
+                let ocrName = app.staticTexts["ocr-loinc-name"]
+                XCTAssertEqual(ocrName.label, "Appearance of Urine")
+                XCTAssertLessThan(ocrName.frame.minX, databaseName.frame.minX)
+                XCTAssertEqual(ocrName.frame.minY, databaseName.frame.minY, accuracy: 4)
                 let markNew = app.buttons["mark-as-new-metric"]
                 let asSuggested = app.buttons["use-suggested-metric"]
                 let picker = app.descendants(matching: .any)
@@ -1059,6 +1074,8 @@ nonisolated final class SmokeTests: XCTestCase {
                     object: databaseName
                 )
                 XCTAssertEqual(XCTWaiter.wait(for: [updated], timeout: 5), .completed)
+                XCTAssertEqual(app.staticTexts["ocr-loinc-code"].label, "5767-9")
+                XCTAssertEqual(ocrName.label, "Appearance of Urine")
                 for _ in 0..<3 where !asSuggested.isHittable { app.swipeDown() }
                 asSuggested.tap()
                 let restored = app.staticTexts["database-metric-name"]
@@ -1069,22 +1086,10 @@ nonisolated final class SmokeTests: XCTestCase {
             let heading = app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "OCR Results")).firstMatch
             reveal(app, heading)
             XCTAssertTrue(heading.exists)
-            let field = app.staticTexts.matching(NSPredicate(format: "label == %@", printed)).firstMatch
-            reveal(app, field)
-            XCTAssertTrue(field.exists)
-            let printedLabel = app.staticTexts.matching(NSPredicate(format: "label == %@", "Metric name")).firstMatch
-            XCTAssertTrue(printedLabel.isHittable)
-            XCTAssertGreaterThanOrEqual(field.frame.minX - printedLabel.frame.maxX, 12)
-            if name == "Appearance - urine" {
-                let ocrName = app.staticTexts["ocr-loinc-name"]
-                reveal(app, ocrName)
-                XCTAssertEqual(ocrName.label, "Appearance of Urine")
-            }
             let screenshot = XCTAttachment(screenshot: app.screenshot())
             screenshot.lifetime = .keepAlways
             add(screenshot)
-            for label in ["Metric name", "Lab code", "LOINC code", "Result", "Unit",
-                          "Reference range", "Report flag", "Collection date"] {
+            for label in ["Lab code", "Reference range", "Report flag", "Collection date"] {
                 let caption = app.staticTexts.matching(NSPredicate(format: "label == %@", label)).firstMatch
                 reveal(app, caption)
                 XCTAssertTrue(caption.exists, "Missing printed-field label: \(label)")

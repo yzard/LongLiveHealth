@@ -635,12 +635,28 @@ def report_mapping_layout():
     assert position["MAPPING"] < picker[1] < position["OCR RESULTS"]
     assert picker[2] < suggested[0] < suggested[2] < new[0]
     assert max(picker[1], suggested[1], new[1]) < min(picker[3], suggested[3], new[3])
-    assert position["Database LOINC code"] < position["Database LOINC name"]
-    assert position["LOINC code"] < position["LOINC name"]
+    assert bounds["OCR"][0] < bounds["Database"][0]
+    assert position["OCR"] < position["Name"] < position["Unit"] < position["LOINC code"]
+    assert position["LOINC code"] < position["LOINC name"] < position["Result"] < position["OCR RESULTS"]
+    assert position["OCR RESULTS"] < position["Lab code"]
+    assert "Database LOINC code" not in position and "Database metric name" not in position
+    for value in ("5767-9", "Appearance of Urine"):
+        cells = sorted(tuple(map(int, re.findall(r"\d+", node.get("bounds"))))
+                       for node in nodes if node.get("text") == value)
+        assert len(cells) == 2
+        left, right = cells
+        assert left[2] < right[0]
+        assert max(left[1], right[1]) < min(left[3], right[3])
     assert "Recommended name (LOINC)" not in position
     assert "COMPARISON" not in position and "About Metric mapping" not in labels()
     assert labels().count("Appearance of Urine") == 2
-    tap("Appearance - urine")
+    tap("New")
+    edited_nodes = {node.get("resource-id"): node for node in tree().iter("node") if node.get("resource-id")}
+    for field in ("database-metric-name", "database-metric-unit", "database-metric-loinc"):
+        assert any(node.get("class") == "android.widget.EditText" for node in edited_nodes[field].iter("node"))
+    assert edited_nodes["ocr-metric-name"].get("class") != "android.widget.EditText"
+    tap_node(next(node for node in edited_nodes["metric-mapping-picker"].iter("node")
+                  if node.get("clickable") == "true"))
     wait_for("HDL")
     tap("HDL")
     assert labels().count("Appearance of Urine") == 1

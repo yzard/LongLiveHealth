@@ -234,7 +234,11 @@ struct ObservationEditor: View {
                     .accessibilityIdentifier("mark-as-new-metric")
                     .disabled(isNewMetric || saving)
             }
-            databaseRows
+            if isReview {
+                mappingComparison
+            } else {
+                manualDatabaseRows
+            }
             if isNewMetric && !validLOINC(newMetricLOINC) {
                 Text(uiText("Enter a LOINC code such as 50560-2.")).font(.caption).foregroundStyle(.red)
             }
@@ -296,15 +300,15 @@ struct ObservationEditor: View {
 
     @ViewBuilder private var printedRows: some View {
         // Fixed fields share the form's lazy list with the candidate rows on Android.
-        resultRow(uiText("Metric name"), value: $printedName)
-        resultRow(uiText("Lab code"), value: text("raw_lab_code"))
-        resultRow(uiText("LOINC code"), value: $loincCode)
-        if isReview {
-            printedRow(uiText("LOINC name"), value: .constant(""), readOnly: printedLOINCName,
-                       identifier: "ocr-loinc-name", emptyValue: "")
+        if !isReview {
+            resultRow(uiText("Metric name"), value: $printedName)
         }
-        resultRow(uiText("Result"), value: text("raw_result"))
-        resultRow(uiText("Unit"), value: text("raw_unit"))
+        resultRow(uiText("Lab code"), value: text("raw_lab_code"))
+        if !isReview {
+            resultRow(uiText("LOINC code"), value: $loincCode)
+            resultRow(uiText("Result"), value: text("raw_result"))
+            resultRow(uiText("Unit"), value: text("raw_unit"))
+        }
         resultRow(uiText("Reference range"), value: text("reference_range"))
         resultRow(uiText("Report flag"), value: text("report_flag"))
         resultRow(uiText("Collection date"), value: text("sampled_at"))
@@ -314,42 +318,87 @@ struct ObservationEditor: View {
         printedRow(label, value: value, readOnly: isReview ? value.wrappedValue : nil)
     }
 
-    @ViewBuilder private var databaseRows: some View {
-        let metric = metrics.first { $0["metric_id"] == .string(metricSelection) }
+    private var databaseMetric: JSONValue {
+        metrics.first { $0["metric_id"] == .string(metricSelection) }
             ?? observation["metric_suggestions"].arrayValue.first { $0["metric_id"] == .string(metricSelection) }
             ?? .null
+    }
+
+    @ViewBuilder private var mappingComparison: some View {
+        let metric = databaseMetric
         let entries = metric["loinc"].arrayValue
         let codes = entries.map { $0["code"].stringValue }.joined(separator: ", ")
+        let names = isNewMetric ? newDatabaseLOINCName : entries
+            .filter { !$0["code"].stringValue.isEmpty }
+            .map { $0["official_name"].stringValue }
+            .filter { !$0.isEmpty }.joined(separator: "\n")
+        comparisonRow("", ocr: Text("OCR").font(.subheadline.weight(.semibold)),
+                      database: Text(uiText("Database")).font(.subheadline.weight(.semibold)))
+        comparisonRow(uiText("Name"),
+                      ocr: readOnlyValue(printedName).accessibilityIdentifier("ocr-metric-name"),
+                      database: editorField(uiText("Name"), value: $newMetricName,
+                          readOnly: isNewMetric ? nil : metric["name"].stringValue, identifier: "database-metric-name"))
+        comparisonRow(uiText("Unit"),
+                      ocr: readOnlyValue(payload["raw_unit"].stringValue).accessibilityIdentifier("ocr-metric-unit"),
+                      database: editorField(uiText("Unit"), value: $newMetricUnit,
+                          readOnly: isNewMetric ? nil : metric["standard_unit"].stringValue, identifier: "database-metric-unit"))
+        comparisonRow(uiText("LOINC code"),
+                      ocr: readOnlyValue(loincCode).accessibilityIdentifier("ocr-loinc-code"),
+                      database: editorField(uiText("LOINC code"), value: $newMetricLOINC,
+                          readOnly: isNewMetric ? nil : codes, identifier: "database-metric-loinc"))
+        comparisonRow(uiText("LOINC name"),
+                      ocr: readOnlyValue(printedLOINCName, emptyValue: "").accessibilityIdentifier("ocr-loinc-name"),
+                      database: readOnlyValue(names, emptyValue: "").accessibilityIdentifier("database-loinc-name"))
+        comparisonRow(uiText("Result"),
+                      ocr: readOnlyValue(payload["raw_result"].stringValue).accessibilityIdentifier("ocr-result"),
+                      database: Spacer(minLength: 0))
+    }
+
+    private func comparisonRow<OCR: View, Database: View>(_ label: String, ocr: OCR, database: Database) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 72, alignment: .leading)
+            ocr.frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            database.frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 3)
+    }
+
+    @ViewBuilder private var manualDatabaseRows: some View {
+        let metric = databaseMetric
+        let codes = metric["loinc"].arrayValue.map { $0["code"].stringValue }.joined(separator: ", ")
         printedRow(uiText("Database metric name"), value: $newMetricName,
                    readOnly: isNewMetric ? nil : metric["name"].stringValue, identifier: "database-metric-name")
         printedRow(uiText("Database metric unit"), value: $newMetricUnit,
                    readOnly: isNewMetric ? nil : metric["standard_unit"].stringValue, identifier: "database-metric-unit")
         printedRow(uiText("Database LOINC code"), value: $newMetricLOINC,
                    readOnly: isNewMetric ? nil : codes, identifier: "database-metric-loinc")
-        if isReview {
-            let names = isNewMetric ? newDatabaseLOINCName : entries
-                .filter { !$0["code"].stringValue.isEmpty }
-                .map { $0["official_name"].stringValue }
-                .filter { !$0.isEmpty }.joined(separator: "\n")
-            printedRow(uiText("Database LOINC name"), value: .constant(""), readOnly: names,
-                       identifier: "database-loinc-name", emptyValue: "")
-        }
     }
 
-    @ViewBuilder private func printedRow(_ label: String, value: Binding<String>, readOnly: String? = nil,
-                                        identifier: String? = nil, emptyValue: String = "—") -> some View {
-        let field = Group {
+    private func readOnlyValue(_ value: String, emptyValue: String = "—") -> some View {
+        Text(value.isEmpty ? emptyValue : value)
+            .foregroundStyle(.secondary)
+    }
+
+    private func editorField(_ label: String, value: Binding<String>, readOnly: String?, identifier: String?) -> some View {
+        Group {
             if let readOnly {
-                Text(readOnly.isEmpty ? emptyValue : readOnly)
-                    .foregroundStyle(.secondary)
+                readOnlyValue(readOnly)
             } else {
                 TextField("—", text: value, axis: .vertical)
                     .autocorrectionDisabled()
                     .accessibilityLabel(Text(label))
             }
         }
-        .multilineTextAlignment(.trailing)
         .accessibilityIdentifier(identifier ?? label)
+    }
+
+    @ViewBuilder private func printedRow(_ label: String, value: Binding<String>, readOnly: String? = nil,
+                                        identifier: String? = nil) -> some View {
+        let field = editorField(label, value: value, readOnly: readOnly, identifier: identifier)
+            .multilineTextAlignment(.trailing)
         if isReview {
             HStack(alignment: .firstTextBaseline, spacing: 18) {
                 Text(label)
