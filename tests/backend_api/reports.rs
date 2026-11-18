@@ -4,6 +4,37 @@ use longlivehealth::reports::ReportResultStatus;
 use longlivehealth::reports::{ReportResultChange, ReportSubmission, TrendRequest, trends};
 
 #[tokio::test]
+async fn loinc_lookup_returns_the_bundled_name_with_authentication() {
+    use axum::http::StatusCode;
+    use serde_json::json;
+
+    let (_directory, state) = fixture().await;
+    add_user(&state, "alice").await;
+    let token = crate::token(&state, "alice").await;
+    let router = longlivehealth::app::create_application(state);
+    let path = "/api/v1/metrics/loinc/get";
+
+    let (status, _) = crate::request(&router, path, None, json!({"code": "1988-5"})).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let (status, result) =
+        crate::request(&router, path, Some(&token), json!({"code": "1988-5"})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        result["official_name"],
+        "C reactive protein [Mass/volume] in Serum or Plasma"
+    );
+
+    let (status, result) =
+        crate::request(&router, path, Some(&token), json!({"code": "9999999-9"})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(result, json!({"official_name": null}));
+
+    let (status, _) = crate::request(&router, path, Some(&token), json!({"code": "bad"})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn report_submission_rejects_retired_status_without_writing_a_revision() {
     use axum::http::StatusCode;
     use serde_json::json;
@@ -1254,7 +1285,9 @@ async fn review_creates_an_owned_metric_and_links_its_submitted_browse_history()
     payload.unmapped_choice = Some(UnmappedChoice::New(NewMetric {
         name: payload.raw_name.clone(),
         standard_unit: "ZR".into(),
+        loinc_code: Some("1234567-8".into()),
     }));
+    payload.raw_name = "Zyphorin activity (5767-9)".into();
     let request = |observation_revision| ReportSubmission {
         report_id: report.clone(),
         expected_revision: 2,
@@ -1289,6 +1322,9 @@ async fn review_creates_an_owned_metric_and_links_its_submitted_browse_history()
     let id = saved["created_metric"]["metric_id"].as_str().unwrap();
     let result = &saved["observations"][0];
     assert_eq!(result["resolved_metric_id"], id);
+    assert_eq!(result["lab_test_code"], "5767-9");
+    assert_eq!(result["payload"]["raw_name"], "Zyphorin activity (5767-9)");
+    assert_eq!(saved["created_metric"]["loinc"][0]["code"], "1234567-8");
     assert_eq!(result["payload"]["raw_unit"], "ZR");
     assert_eq!(
         result["payload"]["source"]["quote"],
@@ -1303,6 +1339,7 @@ async fn review_creates_an_owned_metric_and_links_its_submitted_browse_history()
         .await
         .unwrap();
     assert_eq!(series["metric"]["name"], "Zyphorin activity");
+    assert_eq!(series["metric"]["loinc"][0]["code"], "1234567-8");
     assert_eq!(series["points"][0]["report_id"], report);
     assert!(
         history(&state.database, &other.user_id, history_request())
@@ -1351,6 +1388,7 @@ async fn mark_as_new_replaces_a_legacy_submitted_display_identity_with_a_persist
     payload.unmapped_choice = Some(UnmappedChoice::New(NewMetric {
         name: "pH of Urine".into(),
         standard_unit: "".into(),
+        loinc_code: None,
     }));
     let promoted = review(
         2,
@@ -1424,6 +1462,7 @@ async fn edited_draft_can_submit_directly_after_mapping_issues_are_fixed() {
     payload.unmapped_choice = Some(UnmappedChoice::New(NewMetric {
         name: "Zyphorin enzyme activity".into(),
         standard_unit: "ZR".into(),
+        loinc_code: None,
     }));
     payload.raw_name = "Zyphorin activity (2093-3)".into();
     payload.raw_unit = Some("wrong unit".into());
@@ -1577,6 +1616,7 @@ async fn a_saved_new_metric_can_submit_a_qualitative_result_with_a_compatible_un
     payload.unmapped_choice = Some(UnmappedChoice::New(NewMetric {
         name: "Urobilinogen in Urine".into(),
         standard_unit: "U/L".into(),
+        loinc_code: None,
     }));
     let saved = state
         .database
@@ -1621,6 +1661,7 @@ async fn a_saved_new_metric_can_submit_a_qualitative_result_with_a_compatible_un
     payload.unmapped_choice = Some(UnmappedChoice::New(NewMetric {
         name: "Urobilinogen in Urine".into(),
         standard_unit: "mg/dL".into(),
+        loinc_code: None,
     }));
     let saved = state
         .database
@@ -1677,6 +1718,7 @@ async fn submitting_multiple_new_results_creates_each_distinct_saved_definition_
         payload.unmapped_choice = Some(UnmappedChoice::New(NewMetric {
             name: name.into(),
             standard_unit: "ZR".into(),
+            loinc_code: None,
         }));
         ReportResultChange {
             observation_id: None,

@@ -371,15 +371,20 @@ pub fn split_test_code(name: &str) -> (&str, Option<&str>) {
         .strip_suffix(')')
         .and_then(|value| value.rsplit_once('('))
         && !label.trim().is_empty()
-        && let Some((number, check_digit)) = code.trim().split_once('-')
-        && (1..=7).contains(&number.len())
-        && number.bytes().all(|byte| byte.is_ascii_digit())
-        && check_digit.len() == 1
-        && check_digit.bytes().all(|byte| byte.is_ascii_digit())
+        && valid_test_code(code.trim())
     {
         return (label.trim_end(), Some(code.trim()));
     }
     (name, None)
+}
+
+pub(crate) fn valid_test_code(code: &str) -> bool {
+    code.split_once('-').is_some_and(|(number, check_digit)| {
+        (1..=7).contains(&number.len())
+            && number.bytes().all(|byte| byte.is_ascii_digit())
+            && check_digit.len() == 1
+            && check_digit.bytes().all(|byte| byte.is_ascii_digit())
+    })
 }
 
 pub fn display_name<'a>(raw_name: &'a str, metric_id: Option<&str>) -> &'a str {

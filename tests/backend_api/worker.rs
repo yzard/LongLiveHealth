@@ -66,6 +66,7 @@ async fn new_submitted_metric_and_loinc_are_used_for_rescans_and_first_imports()
                 row.ocr_new_metric = metric.is_none().then(|| NewMetric {
                     name: "pH of Urine".into(),
                     standard_unit: "".into(),
+                    loinc_code: None,
                 });
                 axum::Json(super::provider::completion(json!({
                     "observations": [row], "warnings": [], "source_name": "Fixture Lab",

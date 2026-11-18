@@ -4,6 +4,32 @@ use std::{
     sync::LazyLock,
 };
 
+use crate::{authentication::CurrentUser, error::AppError};
+use axum::Json;
+use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize)]
+pub(crate) struct NameRequest {
+    code: String,
+}
+
+#[derive(Serialize)]
+pub(crate) struct NameResult {
+    official_name: Option<&'static str>,
+}
+
+pub(crate) async fn get(
+    _: CurrentUser,
+    Json(request): Json<NameRequest>,
+) -> Result<Json<NameResult>, AppError> {
+    if !crate::laboratory::valid_test_code(&request.code) {
+        return Err(AppError::Invalid("Invalid LOINC code"));
+    }
+    Ok(Json(NameResult {
+        official_name: long_common_name(&request.code),
+    }))
+}
+
 // LOINC 2.83 LONG_COMMON_NAME records from the NLM Clinical Table Search Service.
 // See the LOINC notice in the project license.
 static LONG_COMMON_NAMES: LazyLock<HashMap<&str, &str>> = LazyLock::new(|| {

@@ -144,6 +144,7 @@ class Handler(BaseHTTPRequestHandler):
             row = observations[0]
             row['display_name'] = 'Appearance - urine'
             row['lab_test_code'] = '5767-9'
+            row['lab_test_name'] = 'Appearance of Urine'
             row['resolved_metric_id'] = 'urine_appearance'
             row['interpretation'] = {}
             row['payload'].update(metric_id=None, raw_name='Appearance (5767-9)', raw_result='Clear',
@@ -191,7 +192,7 @@ class Handler(BaseHTTPRequestHandler):
                 dict(template, observation_id='fixture-ready-name', status='pending',
                      payload=dict(template['payload'], metric_id=None, raw_name='GLU FAST')),
                 dict(template, observation_id='fixture-possible-name', status='pending', resolved_metric_id=None,
-                     lab_test_code='5767-9',
+                     lab_test_code='5767-9', lab_test_name='Appearance of Urine',
                      payload=dict(template['payload'], metric_id=None, raw_name='URINE APPR (5767-9)', raw_lab_code='1113',
                                   ocr_metric_candidate='urine_appearance'),
                      browse_issues=[{'code': 'unsupported_unit', 'scope': 'browse', 'message': 'Unit mismatch'}],
@@ -264,7 +265,10 @@ class Handler(BaseHTTPRequestHandler):
                 if choice.get('kind') == 'new':
                     revised['display_name'] = choice['definition']['name']
                 if change['status'] == 'submitted' and choice.get('kind') == 'new':
-                    created_metric = dict(choice['definition'], metric_id='custom:fixture')
+                    definition = choice['definition']
+                    created_metric = {'metric_id': 'custom:fixture', 'name': definition['name'],
+                                      'standard_unit': definition['standard_unit'],
+                                      'loinc': [{'code': definition['loinc_code']}] if definition.get('loinc_code') else []}
                 if created_metric:
                     revised['payload']['metric_id'] = created_metric['metric_id']
                     revised['payload'].pop('unmapped_choice', None)
@@ -340,8 +344,10 @@ class Handler(BaseHTTPRequestHandler):
                 'metrics': [
                     {'metric_id': 'ldl_cholesterol', 'name': 'LDL', 'standard_unit': 'mg/dL'},
                     {'metric_id': 'hdl_cholesterol', 'name': 'HDL'},
-                    {'metric_id': 'glucose', 'name': 'Glucose'},
-                    {'metric_id': 'urine_appearance', 'name': 'Appearance - urine', 'standard_unit': '1'},
+                    {'metric_id': 'glucose', 'name': 'Glucose', 'standard_unit': 'mg/dL',
+                     'loinc': [{'code': '2345-7', 'official_name': 'Glucose [Mass/volume] in Serum or Plasma'}]},
+                    {'metric_id': 'urine_appearance', 'name': 'Appearance - urine', 'standard_unit': '1',
+                     'loinc': [{'code': '5767-9', 'official_name': 'Appearance of Urine'}]},
                 ]
             },
             'metrics/history/get': {
@@ -589,6 +595,8 @@ class Handler(BaseHTTPRequestHandler):
             history = [{'date': d, 'alternatives': [{'source': 'apple_health:watch', 'value': value, 'unit': unit}]} for d in dates]
             response = {'record_type': kind, 'unit': unit, 'history': history, 'first_record_at':1577836800, 'last_record_at':int(datetime.fromisoformat(all_dates[-1]).replace(tzinfo=timezone.utc).timestamp())}
             response['chart_ranges'] = chart_ranges([('apple_health:watch', unit, datetime.fromisoformat(d).replace(tzinfo=timezone.utc).timestamp(), value) for d in dates])
+        if route == 'metrics/loinc/get':
+            response = {'official_name': {'1988-5': 'C reactive protein [Mass/volume] in Serum or Plasma'}.get(body['code'])}
         if route == 'test/counts':
             response = request_counts
         if route == 'session/login' and body.get('username') == 'admin':

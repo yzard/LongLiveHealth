@@ -967,21 +967,84 @@ nonisolated final class SmokeTests: XCTestCase {
             XCTAssertFalse(app.buttons[printed].exists)
             title.tap()
             XCTAssertTrue(app.navigationBars["Review result"].waitForExistence(timeout: 5))
-            let field = app.descendants(matching: .any)
-                .matching(NSPredicate(format: "value == %@", printed)).firstMatch
+            if name == "Appearance - urine" {
+                XCTAssertFalse(app.staticTexts["Maps to"].exists)
+                XCTAssertFalse(app.staticTexts["Recommended name (LOINC)"].exists)
+                let databaseName = app.staticTexts["database-loinc-name"]
+                let expected = [("name", name), ("unit", "1"), ("loinc", "5767-9")]
+                for (key, value) in expected {
+                    let readOnly = app.staticTexts["database-metric-\(key)"]
+                    reveal(app, readOnly)
+                    XCTAssertEqual(readOnly.label, value)
+                }
+                reveal(app, databaseName)
+                XCTAssertEqual(databaseName.label, "Appearance of Urine")
+                let markNew = app.buttons["mark-as-new-metric"]
+                let asSuggested = app.buttons["use-suggested-metric"]
+                let picker = app.descendants(matching: .any)
+                    .matching(identifier: "metric-mapping-picker").firstMatch
+                reveal(app, markNew)
+                XCTAssertEqual(markNew.label, "New")
+                XCTAssertEqual(asSuggested.label, "Suggested")
+                XCTAssertTrue(picker.isHittable)
+                XCTAssertLessThan(picker.frame.midX, asSuggested.frame.midX)
+                XCTAssertLessThan(asSuggested.frame.midX, markNew.frame.midX)
+                XCTAssertEqual(picker.frame.midY, asSuggested.frame.midY, accuracy: 3)
+                XCTAssertEqual(asSuggested.frame.midY, markNew.frame.midY, accuracy: 3)
+                XCTAssertTrue(asSuggested.isEnabled)
+                markNew.tap()
+                XCTAssertFalse(markNew.isEnabled)
+                for (key, _) in expected {
+                    let editable = app.descendants(matching: .any)
+                        .matching(identifier: "database-metric-\(key)")
+                        .matching(NSPredicate(format: "elementType IN %@", [
+                            XCUIElement.ElementType.textField.rawValue, XCUIElement.ElementType.textView.rawValue,
+                        ])).firstMatch
+                    reveal(app, editable)
+                    XCTAssertTrue(editable.exists && editable.isEnabled)
+                }
+                let code = app.textFields["database-metric-loinc"]
+                reveal(app, code)
+                code.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.5)).tap()
+                code.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "5767-9".count) + "1988-5")
+                XCTAssertEqual(code.value as? String, "1988-5")
+                reveal(app, databaseName)
+                let updated = XCTNSPredicateExpectation(
+                    predicate: NSPredicate(format: "label == %@", "C reactive protein [Mass/volume] in Serum or Plasma"),
+                    object: databaseName
+                )
+                XCTAssertEqual(XCTWaiter.wait(for: [updated], timeout: 5), .completed)
+                for _ in 0..<3 where !asSuggested.isHittable { app.swipeDown() }
+                asSuggested.tap()
+                let restored = app.staticTexts["database-metric-name"]
+                reveal(app, restored)
+                XCTAssertEqual(restored.label, name)
+                XCTAssertEqual(databaseName.label, "Appearance of Urine")
+            }
+            let heading = app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "OCR Results")).firstMatch
+            reveal(app, heading)
+            XCTAssertTrue(heading.exists)
+            let field = app.staticTexts.matching(NSPredicate(format: "label == %@", printed)).firstMatch
             reveal(app, field)
             XCTAssertTrue(field.exists)
-            let printedLabel = app.staticTexts["Metric name"].firstMatch
+            let printedLabel = app.staticTexts.matching(NSPredicate(format: "label == %@", "Metric name")).firstMatch
             XCTAssertTrue(printedLabel.isHittable)
             XCTAssertGreaterThanOrEqual(field.frame.minX - printedLabel.frame.maxX, 12)
+            if name == "Appearance - urine" {
+                let ocrName = app.staticTexts["ocr-loinc-name"]
+                reveal(app, ocrName)
+                XCTAssertEqual(ocrName.label, "Appearance of Urine")
+            }
             let screenshot = XCTAttachment(screenshot: app.screenshot())
             screenshot.lifetime = .keepAlways
             add(screenshot)
             for label in ["Metric name", "Lab code", "LOINC code", "Result", "Unit",
                           "Reference range", "Report flag", "Collection date"] {
-                let caption = app.staticTexts[label].firstMatch
+                let caption = app.staticTexts.matching(NSPredicate(format: "label == %@", label)).firstMatch
                 reveal(app, caption)
                 XCTAssertTrue(caption.exists, "Missing printed-field label: \(label)")
+                XCTAssertFalse(app.textFields[label].exists)
+                XCTAssertFalse(app.textViews[label].exists)
             }
             let bar = app.navigationBars["Review result"]
             let save = app.buttons["save-reviewed-result"]
@@ -1028,6 +1091,9 @@ nonisolated final class SmokeTests: XCTestCase {
         reveal(app, newResult); newResult.tap()
         XCTAssertTrue(app.navigationBars["Review result"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Save"].exists)
+        let asSuggested = app.buttons["use-suggested-metric"]
+        XCTAssertTrue(asSuggested.exists)
+        XCTAssertFalse(asSuggested.isEnabled)
         app.buttons["mark-as-new-metric"].tap()
         XCTAssertTrue(app.navigationBars["Review result"].waitForExistence(timeout: 5))
         let submit = app.buttons["submit-reviewed-result"]

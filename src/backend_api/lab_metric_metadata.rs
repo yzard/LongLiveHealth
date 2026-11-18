@@ -187,9 +187,10 @@ pub(crate) async fn link_submitted(
     user_id: &str,
     metadata: &mut Metadata,
     native_links: &BTreeMap<String, BTreeSet<String>>,
-    payload: &ObservationPayload,
+    id: &str,
+    code: Option<&str>,
 ) -> Result<(), AppError> {
-    let (Some(id), Some(code)) = (payload.metric_id.as_deref(), test_code(payload)) else {
+    let Some(code) = code else {
         return Ok(());
     };
     if let Some(existing) =

@@ -69,6 +69,15 @@ pub struct OcrNormalization {
 }
 
 impl ObservationPayload {
+    fn mapping_loinc(&self) -> Option<&str> {
+        if let Some(UnmappedChoice::New(metric)) = &self.unmapped_choice
+            && let Some(code) = metric.loinc_code.as_deref()
+        {
+            return Some(code.trim()).filter(|code| !code.is_empty());
+        }
+        test_code(self)
+    }
+
     pub fn validate(&self, pages: i64) -> Result<(), AppError> {
         if crate::laboratory::is_administrative_name(&self.raw_name) {
             return Err(AppError::Invalid(
@@ -160,7 +169,7 @@ impl ObservationPayload {
             && !metric.is_valid()
         {
             return Err(AppError::Invalid(
-                "Enter a valid name and standard unit for the new metric",
+                "Enter a valid name, standard unit and LOINC code for the new metric",
             ));
         }
         if let Some(bounds) = self.source.bounding_box
@@ -489,7 +498,7 @@ impl StoredObservation {
     ) -> Result<Observation, AppError> {
         let mut payload: ObservationPayload = serde_json::from_str(&self.payload_json)?;
         let context: Value = serde_json::from_str(&self.context_json)?;
-        let code = test_code(&payload);
+        let code = payload.mapping_loinc();
         let learned = code
             .and_then(|code| metadata.links.get(code))
             .map(String::as_str);
@@ -596,6 +605,7 @@ impl StoredObservation {
                 if let Some(entries) = suggestions.as_array_mut() {
                     for entry in entries {
                         metadata.apply_name(entry);
+                        metadata.apply_loinc(entry, None);
                     }
                 }
                 Some(suggestions)
@@ -699,6 +709,8 @@ pub struct ReportSubmission {
 pub struct NewMetric {
     pub name: String,
     pub standard_unit: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loinc_code: Option<String>,
 }
 
 impl NewMetric {
@@ -746,6 +758,10 @@ impl NewMetric {
             && !self.standard_unit.chars().any(char::is_control)
             && !crate::laboratory::is_administrative_name(name)
             && crate::laboratory::split_test_code(name).1.is_none()
+            && self.loinc_code.as_deref().is_none_or(|code| {
+                let code = code.trim();
+                code.is_empty() || crate::laboratory::valid_test_code(code)
+            })
     }
 }
 
@@ -1181,7 +1197,9 @@ impl Database {
                 || (item.status == ReportResultStatus::Submitted
                     && (item.payload.metric_id.is_some()
                         || matches!(item.payload.unmapped_choice, Some(UnmappedChoice::New(_))))
-                    && test_code(&item.payload)
+                    && item
+                        .payload
+                        .mapping_loinc()
                         .is_some_and(|code| crate::laboratory::loinc_metric(code).is_none()))
         });
         let clinical = if needs_clinical_catalog {
@@ -1345,17 +1363,25 @@ impl Database {
                 } else {
                     (uuid::Uuid::new_v4().to_string(), 1, None, None)
                 };
+            // Capture the code before a new definition becomes an ordinary metric ID.
+            let mapping_code = observation.payload.mapping_loinc().map(str::to_owned);
             if observation.status == ReportResultStatus::Submitted {
                 match observation.payload.unmapped_choice.as_ref() {
                     Some(UnmappedChoice::New(metric)) => {
-                        let code = test_code(&observation.payload);
-                        let printed_code =
-                            crate::laboratory::split_test_code(&observation.payload.raw_name).1;
+                        let code = mapping_code.as_deref();
+                        let definition_code = metric
+                            .loinc_code
+                            .as_deref()
+                            .map(str::trim)
+                            .or_else(|| {
+                                crate::laboratory::split_test_code(&observation.payload.raw_name).1
+                            })
+                            .filter(|code| !code.is_empty());
                         let definition = metric.definition(String::new());
                         let key = (
                             crate::laboratory_names::key(&definition.name),
                             definition.standard_unit.clone(),
-                            printed_code.map(str::to_owned),
+                            definition_code.map(str::to_owned),
                         );
                         let existing = created_definitions.get(&key).map(String::as_str);
                         let linked = code.and_then(crate::laboratory::loinc_metric).or_else(|| {
@@ -1414,14 +1440,15 @@ impl Database {
                         || test_code(payload) != test_code(&observation.payload)
                 })
             {
-                if observation.payload.metric_id.is_some() {
+                if let Some(metric_id) = observation.payload.metric_id.as_deref() {
                     // Explicit mappings come from the reviewer. OCR cannot supply this field.
                     lab_metric_metadata::link_submitted(
                         &mut transaction,
                         user_id,
                         &mut metadata,
                         &native_links,
-                        &observation.payload,
+                        metric_id,
+                        mapping_code.as_deref(),
                     )
                     .await?;
                 } else {
@@ -1484,9 +1511,17 @@ impl Database {
         let mut document = self
             .render_report(user_id, snapshot, Some(&mut transaction))
             .await?;
-        if let Some(metric) = created_metrics.first() {
-            document["created_metric"] = serde_json::to_value(metric)?;
-            document["created_metrics"] = serde_json::to_value(&created_metrics)?;
+        if !created_metrics.is_empty() {
+            let created = created_metrics
+                .iter()
+                .map(|metric| {
+                    let mut definition = serde_json::to_value(metric)?;
+                    metadata.apply_loinc(&mut definition, None);
+                    Ok(definition)
+                })
+                .collect::<Result<Vec<_>, AppError>>()?;
+            document["created_metric"] = created[0].clone();
+            document["created_metrics"] = json!(created);
         }
         if queue_analysis {
             document["analysis_trigger"] = json!({"status":"queued"});
@@ -1802,7 +1837,7 @@ impl Database {
                         .is_some_and(lab_metric_metadata::is_clinical_id)
                         || ((payload.metric_id.is_some()
                             || matches!(payload.unmapped_choice, Some(UnmappedChoice::New(_))))
-                            && test_code(payload).is_some_and(|code| {
+                            && payload.mapping_loinc().is_some_and(|code| {
                                 crate::laboratory::loinc_metric(code).is_none()
                             }))))
         };

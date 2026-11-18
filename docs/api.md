@@ -31,6 +31,7 @@ Android 安装包通过公开的 `GET /longlivehealth.apk` 下载（旧路径 `/
 | reports/relate | report_id、expected_revision、preferred_report_id 可空、kind | updated |
 | reports/delete | report_id、expected_revision | cleanup_queued |
 | metrics/list | {} | metrics：metric_id/name/standard_unit |
+| metrics/loinc/get | code（LOINC 代码） | official_name（字典中没有该代码时为 null） |
 | metrics/rename | metric_id、name（1–256 UTF-8 字节） | metric_id、name |
 | health/connect | platform、installation_id UUID | connection_id、platform、installation_id |
 | health/sync | 见下方 | batch_id、replayed、total_records |

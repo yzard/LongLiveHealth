@@ -5,33 +5,40 @@ struct ObservationEditor: View {
     let metrics: [JSONValue]
     let pageCount: Int
     let source: (Int) async throws -> DocumentLocation
+    let lookupLOINCName: (String) async throws -> String
     let save: (JSONValue) async throws -> Void
     @State var payload: JSONValue
     @State var printedName: String
     @State var loincCode: String
-    @State var creatingMetric: Bool
     @State var metricSelection: String
     @State var newMetricName: String
     @State var newMetricUnit: String
+    @State var newMetricLOINC: String
     @State var saving = false
     @State var error: String?
     @State var preview: DocumentLocation?
     @State var submitAsPrinted = false
+    @State var lookedUpLOINCNames: [String: String] = [:]
+    @State var unavailableLOINCCode: String?
     @Environment(\.dismiss) var dismiss
-    init(observation: JSONValue, metrics: [JSONValue], pageCount: Int, source: @escaping (Int) async throws -> DocumentLocation, save: @escaping (JSONValue) async throws -> Void) {
-        self.observation = observation; self.metrics = metrics; self.pageCount = pageCount; self.source = source; self.save = save
+    init(observation: JSONValue, metrics: [JSONValue], pageCount: Int,
+         source: @escaping (Int) async throws -> DocumentLocation,
+         lookupLOINCName: @escaping (String) async throws -> String,
+         save: @escaping (JSONValue) async throws -> Void) {
+        self.observation = observation; self.metrics = metrics; self.pageCount = pageCount; self.source = source
+        self.lookupLOINCName = lookupLOINCName; self.save = save
         _payload = State(initialValue: observation == .null ? .object(["source": .object(["page": .number(1), "quote": .string("")])]) : observation["payload"])
         let code = observation["lab_test_code"].stringValue
-        _printedName = State(initialValue: LaboratoryPresentation.printedName(observation["payload"]["raw_name"].stringValue, code: code))
+        let originalName = LaboratoryPresentation.printedName(observation["payload"]["raw_name"].stringValue, code: code)
+        _printedName = State(initialValue: originalName)
         _loincCode = State(initialValue: code)
         let savedChoice = observation["payload"]["unmapped_choice"]
         let proposal = savedChoice["kind"] == .string("new")
             ? savedChoice["definition"] : observation["payload"]["ocr_new_metric"]
-        _creatingMetric = State(initialValue: savedChoice["kind"] == .string("new"))
         _metricSelection = State(initialValue: ReportReview.defaultMetricID(observation) ?? "")
-        let originalName = LaboratoryPresentation.printedName(observation["payload"]["raw_name"].stringValue, code: code)
         _newMetricName = State(initialValue: proposal["name"].stringValue.isEmpty ? originalName : proposal["name"].stringValue)
         _newMetricUnit = State(initialValue: proposal == .null ? observation["payload"]["raw_unit"].stringValue : proposal["standard_unit"].stringValue)
+        _newMetricLOINC = State(initialValue: proposal["loinc_code"] == .null ? code : proposal["loinc_code"].stringValue)
     }
     var body: some View {
         NavigationStack {
@@ -50,6 +57,7 @@ struct ObservationEditor: View {
                     Button(uiText("Submit for History")) { Task { await submit(as: "submitted") } }
                 } message: { Text(uiText("The result is saved as printed. It may be unavailable in metric charts.")) }
         }
+        .task(id: newDatabaseLOINCCode) { await loadNewLOINCName() }
     }
     private var isReview: Bool { observation != .null }
 
@@ -140,7 +148,7 @@ struct ObservationEditor: View {
     private func submitResult() {
         let unitConflict = payload["raw_unit"] == observation["payload"]["raw_unit"]
             && observation["browse_issues"].arrayValue.contains { $0["code"] == .string("unsupported_unit") }
-        if !creatingMetric && (metricSelection.isEmpty || unitConflict) {
+        if !isNewMetric && unitConflict {
             submitAsPrinted = true
         } else {
             Task { await submit(as: "submitted") }
@@ -152,17 +160,15 @@ struct ObservationEditor: View {
         return saved.isEmpty ? "pending" : saved
     }
 
-    private var canMarkAsNew: Bool {
-        status == "pending" || (status == "submitted" && ReportReview.savedMetricID(observation) == nil)
-    }
+    private var isNewMetric: Bool { metricSelection.isEmpty }
 
     private var saveDisabled: Bool {
-        saving || !validLOINC || printedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || payload["raw_result"].stringValue.isEmpty
-            || (creatingMetric && (newMetricName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+        saving || (!isReview && !validLOINC(loincCode)) || printedName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || payload["raw_result"].stringValue.isEmpty
+            || (isNewMetric && (!validLOINC(newMetricLOINC) || newMetricName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
     }
 
-    private var validLOINC: Bool {
-        let code = loincCode.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func validLOINC(_ value: String) -> Bool {
+        let code = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if code.isEmpty { return true }
         let parts = code.components(separatedBy: "-")
         return parts.count == 2 && (1...7).contains(parts[0].count) && parts[1].count == 1
@@ -174,20 +180,21 @@ struct ObservationEditor: View {
         saving = true
         defer { saving = false }
         do {
-            let originalCode = observation["lab_test_code"].stringValue
-            let originalName = LaboratoryPresentation.printedName(payload["raw_name"].stringValue, code: originalCode)
             var reviewedPayload = payload
             reviewedPayload["metric_id"] = .optional(metricSelection)
-            if creatingMetric {
+            if isNewMetric {
                 reviewedPayload["unmapped_choice"] = .object([
                     "kind": .string("new"),
-                    "definition": .object(["name": .string(newMetricName), "standard_unit": .string(newMetricUnit)]),
+                    "definition": .object([
+                        "name": .string(newMetricName),
+                        "standard_unit": .string(newMetricUnit),
+                        "loinc_code": .string(newMetricLOINC.trimmingCharacters(in: .whitespacesAndNewlines)),
+                    ]),
                 ])
             } else {
-                reviewedPayload["unmapped_choice"] = metricSelection.isEmpty
-                    ? .object(["kind": .string("unmapped")]) : .null
+                reviewedPayload["unmapped_choice"] = .null
             }
-            if printedName != originalName || loincCode != originalCode {
+            if !isReview {
                 let code = loincCode.trimmingCharacters(in: .whitespacesAndNewlines)
                 reviewedPayload["raw_name"] = .string(code.isEmpty ? printedName : "\(printedName) (\(code))")
             }
@@ -204,25 +211,34 @@ struct ObservationEditor: View {
 
     @ViewBuilder private var reviewSections: some View {
         Section(uiText("Mapping")) {
-            recommendedName
-            HStack {
-                Text(uiText("Metric maps to"))
-                SelectionPicker(title: uiText("Metric maps to"), selection: mapping, placeholder: uiText("Unmapped"),
-                    choices: mappingChoices)
+            let choices = mappingChoices
+            let candidate = observation["payload"]["ocr_metric_candidate"].stringValue
+            let recommendation = choices.first { $0.id == candidate }?.id
+            HStack(spacing: 8) {
+                SelectionPicker(title: uiText("Maps to"), selection: $metricSelection, placeholder: uiText("New"),
+                    choices: choices)
                     .labelsHidden()
+                    .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Button(uiText("Mark as New"), action: markAsNew)
+                    .accessibilityIdentifier("metric-mapping-picker")
+                Button(uiText("Suggested")) {
+                    if let recommendation { metricSelection = recommendation }
+                }
+                .buttonStyle(.bordered)
+                .fixedSize(horizontal: true, vertical: false)
+                .accessibilityIdentifier("use-suggested-metric")
+                .disabled(recommendation == nil || saving)
+                Button(uiText("New")) { metricSelection = "" }
                     .buttonStyle(.bordered)
+                    .fixedSize(horizontal: true, vertical: false)
                     .accessibilityIdentifier("mark-as-new-metric")
-                    .disabled(!canMarkAsNew || creatingMetric || saving)
+                    .disabled(isNewMetric || saving)
             }
-            if creatingMetric {
-                TextField(uiText("Metric name"), text: $newMetricName)
-                TextField(uiText("Standard unit"), text: $newMetricUnit)
-                Button(uiText("Keep unmapped")) { creatingMetric = false }
-            } else {
-                candidateOptions
+            databaseRows
+            if isNewMetric && !validLOINC(newMetricLOINC) {
+                Text(uiText("Enter a LOINC code such as 50560-2.")).font(.caption).foregroundStyle(.red)
             }
+            candidateOptions
             let suggestion = ReportReview.suggestionNote(observation, includeMetricName: true)
             let proposal = observation["payload"]["ocr_new_metric"]
             let proposed = [proposal["name"].stringValue, proposal["standard_unit"].stringValue]
@@ -233,9 +249,11 @@ struct ObservationEditor: View {
             }
             mappingIssues
         }
-        Section(uiText("As printed on the report")) {
+        Section(isReview ? uiText("OCR Results") : uiText("Result details")) {
             printedRows
-            if !validLOINC { Text(uiText("Enter a LOINC code such as 50560-2.")).font(.caption).foregroundStyle(.red) }
+            if !isReview && !validLOINC(loincCode) {
+                Text(uiText("Enter a LOINC code such as 50560-2.")).font(.caption).foregroundStyle(.red)
+            }
         }
         if !isReview && status == "pending" {
             Section { submitButton }
@@ -261,7 +279,7 @@ struct ObservationEditor: View {
             DisclosureGroup(uiText("Closest matches")) {
                 ForEach(Array(suggestions.enumerated()), id: \.offset) { _, suggestion in
                     Button {
-                        mapping.wrappedValue = suggestion["metric_id"].stringValue
+                        metricSelection = suggestion["metric_id"].stringValue
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(suggestion["name"].stringValue)
@@ -278,21 +296,60 @@ struct ObservationEditor: View {
 
     @ViewBuilder private var printedRows: some View {
         // Fixed fields share the form's lazy list with the candidate rows on Android.
-        printedRow(uiText("Metric name"), value: $printedName)
-        printedRow(uiText("Lab code"), value: text("raw_lab_code"))
-        printedRow(uiText("LOINC code"), value: $loincCode)
-        printedRow(uiText("Result"), value: text("raw_result"))
-        printedRow(uiText("Unit"), value: text("raw_unit"))
-        printedRow(uiText("Reference range"), value: text("reference_range"))
-        printedRow(uiText("Report flag"), value: text("report_flag"))
-        printedRow(uiText("Collection date"), value: text("sampled_at"))
+        resultRow(uiText("Metric name"), value: $printedName)
+        resultRow(uiText("Lab code"), value: text("raw_lab_code"))
+        resultRow(uiText("LOINC code"), value: $loincCode)
+        if isReview {
+            printedRow(uiText("LOINC name"), value: .constant(""), readOnly: printedLOINCName,
+                       identifier: "ocr-loinc-name", emptyValue: "")
+        }
+        resultRow(uiText("Result"), value: text("raw_result"))
+        resultRow(uiText("Unit"), value: text("raw_unit"))
+        resultRow(uiText("Reference range"), value: text("reference_range"))
+        resultRow(uiText("Report flag"), value: text("report_flag"))
+        resultRow(uiText("Collection date"), value: text("sampled_at"))
     }
 
-    @ViewBuilder private func printedRow(_ label: String, value: Binding<String>) -> some View {
-        let field = TextField("—", text: value, axis: .vertical)
-            .multilineTextAlignment(.trailing)
-            .autocorrectionDisabled()
-            .accessibilityLabel(Text(label))
+    private func resultRow(_ label: String, value: Binding<String>) -> some View {
+        printedRow(label, value: value, readOnly: isReview ? value.wrappedValue : nil)
+    }
+
+    @ViewBuilder private var databaseRows: some View {
+        let metric = metrics.first { $0["metric_id"] == .string(metricSelection) }
+            ?? observation["metric_suggestions"].arrayValue.first { $0["metric_id"] == .string(metricSelection) }
+            ?? .null
+        let entries = metric["loinc"].arrayValue
+        let codes = entries.map { $0["code"].stringValue }.joined(separator: ", ")
+        printedRow(uiText("Database metric name"), value: $newMetricName,
+                   readOnly: isNewMetric ? nil : metric["name"].stringValue, identifier: "database-metric-name")
+        printedRow(uiText("Database metric unit"), value: $newMetricUnit,
+                   readOnly: isNewMetric ? nil : metric["standard_unit"].stringValue, identifier: "database-metric-unit")
+        printedRow(uiText("Database LOINC code"), value: $newMetricLOINC,
+                   readOnly: isNewMetric ? nil : codes, identifier: "database-metric-loinc")
+        if isReview {
+            let names = isNewMetric ? newDatabaseLOINCName : entries
+                .filter { !$0["code"].stringValue.isEmpty }
+                .map { $0["official_name"].stringValue }
+                .filter { !$0.isEmpty }.joined(separator: "\n")
+            printedRow(uiText("Database LOINC name"), value: .constant(""), readOnly: names,
+                       identifier: "database-loinc-name", emptyValue: "")
+        }
+    }
+
+    @ViewBuilder private func printedRow(_ label: String, value: Binding<String>, readOnly: String? = nil,
+                                        identifier: String? = nil, emptyValue: String = "—") -> some View {
+        let field = Group {
+            if let readOnly {
+                Text(readOnly.isEmpty ? emptyValue : readOnly)
+                    .foregroundStyle(.secondary)
+            } else {
+                TextField("—", text: value, axis: .vertical)
+                    .autocorrectionDisabled()
+                    .accessibilityLabel(Text(label))
+            }
+        }
+        .multilineTextAlignment(.trailing)
+        .accessibilityIdentifier(identifier ?? label)
         if isReview {
             HStack(alignment: .firstTextBaseline, spacing: 18) {
                 Text(label)
@@ -307,20 +364,39 @@ struct ObservationEditor: View {
         }
     }
 
-    @ViewBuilder private var recommendedName: some View {
-        let name = observation["lab_test_name"].stringValue
-        if !name.isEmpty && loincCode == observation["lab_test_code"].stringValue {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(uiText("Recommended name (LOINC)")).font(.caption).foregroundStyle(.secondary)
-                    Text(name).accessibilityIdentifier("review-result-loinc-name")
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                Button(uiText("Use")) { printedName = name }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel(Text(uiText("Use recommended name")))
-                    .accessibilityIdentifier("review-result-use-loinc-name")
-                    .disabled(saving || printedName == name)
-            }
+    private var printedLOINCName: String {
+        loincCode.isEmpty ? "" : observation["lab_test_name"].stringValue
+    }
+
+    private var newDatabaseLOINCCode: String? {
+        let code = newMetricLOINC.trimmingCharacters(in: .whitespacesAndNewlines)
+        return isReview && isNewMetric && !code.isEmpty && validLOINC(code) ? code : nil
+    }
+
+    private var newDatabaseLOINCName: String {
+        guard let code = newDatabaseLOINCCode else { return "" }
+        if unavailableLOINCCode == code { return uiText("Official name unavailable") }
+        return knownLOINCName(code) ?? ""
+    }
+
+    private func knownLOINCName(_ code: String) -> String? {
+        if code == loincCode && !printedLOINCName.isEmpty { return printedLOINCName }
+        if let name = lookedUpLOINCNames[code] { return name }
+        let entry = metrics.lazy.flatMap { $0["loinc"].arrayValue }
+            .first { $0["code"].stringValue == code && !$0["official_name"].stringValue.isEmpty }
+        return entry?["official_name"].stringValue
+    }
+
+    private func loadNewLOINCName() async {
+        unavailableLOINCCode = nil
+        guard let code = newDatabaseLOINCCode, knownLOINCName(code) == nil else { return }
+        do {
+            try await Task.sleep(for: .milliseconds(300))
+            let name = try await lookupLOINCName(code)
+            guard !Task.isCancelled, newDatabaseLOINCCode == code else { return }
+            lookedUpLOINCNames[code] = name
+        } catch {
+            if !Task.isCancelled && newDatabaseLOINCCode == code { unavailableLOINCCode = code }
         }
     }
 
@@ -351,21 +427,6 @@ struct ObservationEditor: View {
         }.sorted { left, right in
             LaboratoryPresentation.nameSortsBefore(left.title, id: left.id, right.title, otherID: right.id)
         }
-    }
-
-    private var mapping: Binding<String> {
-        Binding(get: { metricSelection }, set: { value in
-            metricSelection = value
-            creatingMetric = false
-        })
-    }
-
-    private func markAsNew() {
-        metricSelection = ""
-        if newMetricName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            newMetricName = printedName
-        }
-        creatingMetric = true
     }
 
     private func matchLabel(_ match: String) -> String {

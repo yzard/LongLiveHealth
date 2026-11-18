@@ -360,6 +360,8 @@ struct ReportView: View {
         ObservationEditor(observation: target.observation, metrics: model.metrics,
             pageCount: Int(document["report"]["page_count"].numberValue ?? 1), source: { page in
                 DocumentLocation(url: try await model.source(reportID), page: page)
+            }, lookupLOINCName: { code in
+                try await model.request("metrics/loinc/get", body: .object(["code": .string(code)]))["official_name"].stringValue
             }) { change in
                 do {
                     try await save(observations: [change], context: .null)

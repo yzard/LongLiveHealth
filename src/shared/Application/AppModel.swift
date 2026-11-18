@@ -82,7 +82,7 @@ final class AppModel {
         "wellness/entries/list", "wellness/library", "wellness/nutrition/day", "wellness/diet", "wellness/meals",
         "wellness/meal-glucose", "wellness/import/list", "wellness/records/list", "wellness/records/get", "metrics/history/get", "browse/catalog", "reports/list", "reports/get", "reports/extraction/get", "metrics/list", "exports/list", "reports/input/get", "wellness/food/lookup", "wellness/food/portion", "wellness/reminders"
     ]
-    private static let uncachedReads: Set<String> = ["jobs/list", "health/coverage", "user/get"]
+    private static let uncachedReads: Set<String> = ["jobs/list", "health/coverage", "user/get", "metrics/loinc/get"]
     func request(_ path: String, body: JSONValue) async throws -> JSONValue {
         try await request(path, body: body, permitsOfflineFallback: true)
     }

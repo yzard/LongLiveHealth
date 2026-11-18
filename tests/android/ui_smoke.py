@@ -261,22 +261,17 @@ def report_date():
         wait_for("11580-8")
         assert "TSH (11580-8)" not in labels()
         current = list(tree().iter("node"))
-        name = next(node for node in current if node.get("text") == recommendation)
-        use = next(node for node in current if node.get("content-desc") == "Use recommended name"
-                   or node.get("text") == "Use")
-        assert bounds(use)[0] > bounds(name)[0], "Use belongs to the right of the recommendation"
-        tap_node(use)
-        assert any(node.get("class") == "android.widget.EditText" and node.get("text") == recommendation
-                   for node in tree().iter("node")), "Use did not fill the Name field"
+        assert any(node.get("text") == recommendation for node in current)
+        assert not any(node.get("class") == "android.widget.EditText" and node.get("text") in {"TSH", "11580-8"}
+                       for node in current)
         assert control("reports/get")["observations"][0] == original
         tap("Save" if save else "Cancel")
         wait_for("Report Info")
 
     saved = control("reports/get")["observations"][0]
     assert saved["status"] == original["status"]
-    expected = dict(original["payload"], raw_name=f"{recommendation} (11580-8)")
-    assert saved["payload"] == expected
-    print("PASS: report dates, recommended name fills the draft, Cancel discards it, and Save preserves the LOINC code and source")
+    assert saved["payload"] == original["payload"]
+    print("PASS: report dates and read-only OCR name and LOINC are preserved")
 
 
 def chart_scroll():
@@ -524,7 +519,7 @@ def report_metric_review():
             wait_for("Appearance - urine" if negative else "Glucose")
             tap("Possible match")
             wait_for("Review result")
-            wait_for("Metric maps to")
+            wait_for("Suggested")
             wait_for("Appearance - urine" if negative else "Glucose")
             assert "Unmapped" not in labels()
             assert "No matching Browse metric. Review this result." not in labels()
@@ -537,6 +532,10 @@ def report_metric_review():
                 warnings = labels()
                 assert any("Unit mismatch · mg/dL" in label for label in warnings)
                 assert any("Verify the assay threshold." in label for label in warnings)
+                tap("New")
+                assert any(n.get("class") == "android.widget.EditText" for n in tree().iter("node"))
+                tap("Suggested")
+                wait_for("Appearance - urine")
                 tap("Appearance - urine")
                 wait_for("Glucose")
                 tap("Glucose")
@@ -545,23 +544,6 @@ def report_metric_review():
                 assert control("reports/get")["observations"][0]["payload"]["metric_id"] is None
                 tap("Possible match")
                 wait_for("Appearance - urine")
-                size = adb("shell", "wm", "size")
-                width, height = map(int, re.findall(r"(\d+)x(\d+)", size)[-1])
-                for _ in range(5):
-                    unit = next((node for node in tree().iter("node")
-                                 if node.get("class") == "android.widget.EditText"
-                                 and node.get("text") == "mg/dL"), None)
-                    if unit is not None:
-                        break
-                    adb("shell", "input", "swipe", str(width // 2), str(height * 3 // 4),
-                        str(width // 2), str(height // 3), "400")
-                assert unit is not None, "Original unit field missing"
-                tap_node(unit)
-                adb("shell", "input", "keyevent", "KEYCODE_MOVE_END")
-                adb("shell", "input", "keycombination", "KEYCODE_CTRL_LEFT", "KEYCODE_A")
-                adb("shell", "input", "text", "mg/L")
-                adb("shell", "input", "keyevent", "KEYCODE_BACK")
-                wait_for("mg/L")
             tap("Save")
             wait_for("0 results ready to submit" if negative else "1 result ready to submit")
             saved = control("reports/get")["observations"][0]
@@ -569,7 +551,7 @@ def report_metric_review():
             assert saved["status"] == "pending"
             if negative:
                 assert saved["payload"]["raw_result"] == "Negative"
-                assert saved["payload"]["raw_unit"] == "mg/L"
+                assert saved["payload"]["raw_unit"] == "mg/dL"
             else:
                 tap("1 result ready to submit")
                 wait_for("Glucose")
@@ -580,9 +562,13 @@ def report_metric_review():
             wait_for("Zyphorin activity")
             tap(issue)
             wait_for("Review result")
-            wait_for("Mark as New")
+            wait_for("Suggested")
+            assert any(
+                node.get("resource-id") == "use-suggested-metric"
+                and node.get("enabled") == "false"
+                for node in tree().iter("node")
+            )
             wait_for("OCR suggestion: Zyphorin panel activity · mmol/L")
-            tap("Mark as New")
             wait_for("Save")
             assert any(n.get("class") == "android.widget.EditText" for n in tree().iter("node"))
             tap("Cancel")
@@ -590,8 +576,7 @@ def report_metric_review():
             assert control("reports/get")["observations"][0]["payload"]["metric_id"] is None
             tap(issue)
             wait_for("Review result")
-            wait_for("Mark as New")
-            tap("Mark as New")
+            wait_for("Suggested")
             wait_for("Save")
             tap("Save")
             wait_for("1 result ready to submit")
@@ -609,7 +594,7 @@ def report_metric_review():
             saved = control("reports/get")["observations"][0]
             assert saved["status"] == "submitted"
             assert saved["created_metric"] == {
-                "name": "Zyphorin panel activity", "standard_unit": "mmol/L", "metric_id": "custom:fixture",
+                "name": "Zyphorin panel activity", "standard_unit": "mmol/L", "metric_id": "custom:fixture", "loinc": [],
             }
             assert saved["payload"]["raw_result"] == "5.5"
     print("PASS: suggested mapping, independent Negative and unit warnings, and cancel/create when no match exists")
@@ -637,15 +622,33 @@ def report_mapping_layout():
     wait_for("Appearance - urine")
     tap("Appearance - urine")
     wait_for("Review result")
-    wait_for("Metric mapping")
+    wait_for("Suggested")
     wait_for("Appearance - urine")
     nodes = list(tree().iter("node"))
-    position = {n.get("text"): int(re.findall(r"\d+", n.get("bounds"))[1]) for n in nodes if n.get("text")}
-    assert position["MAPPING"] < position["Metric mapping"] < position["AS PRINTED ON THE REPORT"]
+    bounds = {}
+    for node in nodes:
+        if name := node.get("text"):
+            bounds.setdefault(name, tuple(map(int, re.findall(r"\d+", node.get("bounds")))))
+    position = {name: rect[1] for name, rect in bounds.items()}
+    picker, suggested, new = (bounds[name] for name in ("Appearance - urine", "Suggested", "New"))
+    assert "Maps to" not in position
+    assert position["MAPPING"] < picker[1] < position["OCR RESULTS"]
+    assert picker[2] < suggested[0] < suggested[2] < new[0]
+    assert max(picker[1], suggested[1], new[1]) < min(picker[3], suggested[3], new[3])
+    assert position["Database LOINC code"] < position["Database LOINC name"]
+    assert position["LOINC code"] < position["LOINC name"]
+    assert "Recommended name (LOINC)" not in position
     assert "COMPARISON" not in position and "About Metric mapping" not in labels()
+    assert labels().count("Appearance of Urine") == 2
     tap("Appearance - urine")
+    wait_for("HDL")
+    tap("HDL")
+    assert labels().count("Appearance of Urine") == 1
+    tap("HDL")
     wait_for("Glucose")
     tap("Glucose")
+    wait_for("Glucose [Mass/volume] in Serum or Plasma")
+    assert "Appearance of Urine" in labels()
     size = adb("shell", "wm", "size")
     width, height = map(int, re.findall(r"(\d+)x(\d+)", size)[-1])
     for _ in range(4):

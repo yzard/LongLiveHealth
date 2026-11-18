@@ -54,6 +54,7 @@ pub fn router(upload_limit: usize) -> Router<AppState> {
         )
         .route("/api/v1/reports/relate", post(relate_reports))
         .route("/api/v1/metrics/list", post(list_metrics))
+        .route("/api/v1/metrics/loinc/get", post(crate::loinc::get))
         .route("/api/v1/metrics/rename", post(rename_metric))
         .route("/api/v1/browse/catalog", post(browse_catalog))
         .route("/api/v1/metrics/history/get", post(get_metric_history))
@@ -434,21 +435,25 @@ async fn list_metrics(
     for metric in database.custom_metrics(user).await? {
         definitions.push(serde_json::to_value(metric)?);
     }
-    for (id, group) in crate::lab_metric_metadata::clinical_groups(database, user).await? {
-        if crate::lab_metric_metadata::is_clinical_id(&id) {
+    let clinical = crate::lab_metric_metadata::clinical_groups(database, user).await?;
+    for (id, group) in &clinical {
+        if crate::lab_metric_metadata::is_clinical_id(id) {
             definitions.push(serde_json::to_value(
-                crate::lab_metric_metadata::clinical_metric(&group)?,
+                crate::lab_metric_metadata::clinical_metric(group)?,
             )?);
         }
     }
     let metadata = database.lab_metric_metadata(user).await?;
     for metric in metadata.named_report_metrics() {
-        let mut definition = serde_json::to_value(metric)?;
-        metadata.apply_loinc(&mut definition, None);
-        definitions.push(definition);
+        definitions.push(serde_json::to_value(metric)?);
     }
     for definition in &mut definitions {
         metadata.apply_name(definition);
+        let native_codes = definition["metric_id"]
+            .as_str()
+            .and_then(|id| clinical.get(id))
+            .map(|group| &group.loinc_codes);
+        metadata.apply_loinc(definition, native_codes);
     }
     definitions.sort_by_cached_key(|metric| {
         (
