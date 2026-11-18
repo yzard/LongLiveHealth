@@ -57,19 +57,32 @@ struct MetricChart: View {
     }
     private var timestamps: [Double] {
         if let navigationTimestamps { return navigationTimestamps.isEmpty ? [emptyAnchor] : navigationTimestamps }
-        return ranges["D"].arrayValue.filter { $0["unit"].stringValue == unit }.compactMap { $0["last_at"].numberValue }
+        let archive = ranges[ChartPeriod.all.rawValue].arrayValue
+        return (archive.isEmpty ? ranges["D"].arrayValue : archive)
+            .filter { $0["unit"].stringValue == unit }.flatMap { [$0["first_at"].numberValue, $0["last_at"].numberValue].compactMap { $0 } }
     }
     private var active: ChartWindow { window ?? ChartWindow(timestamps: timestamps, period: initialPeriod, calendar: calendar) }
     private var rows: [JSONValue] {
         ranges[active.period.rawValue].arrayValue.filter {
-            !hiddenSources.contains($0["source"].stringValue) && !hiddenComponents.contains($0["component"].stringValue) && $0["unit"].stringValue == unit && ($0["end_at"].numberValue ?? 0) > active.start && ($0["start_at"].numberValue ?? 0) < active.start + active.length
+            !hiddenSources.contains($0["source"].stringValue) && !hiddenComponents.contains($0["component"].stringValue) && $0["unit"].stringValue == unit && (active.period == .all || (($0["end_at"].numberValue ?? 0) > active.start && ($0["start_at"].numberValue ?? 0) < active.start + active.length))
         }
+    }
+    private var plotStart: Double {
+        guard active.period == .all else { return active.start }
+        let firstBucketStart = ranges[ChartPeriod.all.rawValue].arrayValue.compactMap { $0["start_at"].numberValue }.min()
+        return min(active.start, firstBucketStart ?? active.start)
+    }
+    private var plotEnd: Double {
+        guard active.period == .all else { return active.start + active.length }
+        // Include the far edge of the final bucket, even for a one-point archive.
+        let lastBucketEnd = ranges[ChartPeriod.all.rawValue].arrayValue.compactMap { $0["end_at"].numberValue }.max()
+        return max(active.start + active.length, lastBucketEnd ?? active.start)
     }
     private var referenceLevels: [JSONValue] {
         if !components.isEmpty || !scaleLabels.isEmpty { return [] }
         let days = ranges["reference_days"].arrayValue.filter {
             !hiddenSources.contains($0["source"].stringValue) && !hiddenComponents.contains($0["component"].stringValue) && $0["unit"].stringValue == unit &&
-            ($0["last_at"].numberValue ?? 0) >= active.start && ($0["last_at"].numberValue ?? 0) < active.start + active.length
+            ($0["last_at"].numberValue ?? 0) >= plotStart && ($0["last_at"].numberValue ?? 0) < plotEnd
         }
         let deviceNames = Dictionary(uniqueKeysWithValues: sourceKeys.map { key in
             (key, SourceNames.label(key: key, fallback: names[key] ?? key, aliases: .null, catalog: model.sourceCatalog))
@@ -95,7 +108,7 @@ struct MetricChart: View {
         return .object(["min": .number(lower), "max": .number(upper)])
     }
     private var latest: JSONValue? {
-        ["H", "D", "W", "M", "6M", "Y"].flatMap { ranges[$0].arrayValue }.filter {
+        ChartPeriod.allCases.flatMap { ranges[$0.rawValue].arrayValue }.filter {
             $0["unit"].stringValue == unit && !hiddenSources.contains($0["source"].stringValue)
         }.max { ($0["last_at"].numberValue ?? 0) < ($1["last_at"].numberValue ?? 0) }
     }
@@ -131,6 +144,12 @@ struct MetricChart: View {
     private func intervalLabel(_ row: JSONValue?) -> String {
         let start = row?["start_at"].numberValue ?? active.start
         let end = row?["end_at"].numberValue ?? active.start + active.length
+        if active.period == .all {
+            let archive = ranges[ChartPeriod.all.rawValue].arrayValue.filter { $0["unit"].stringValue == unit }
+            let first = row?["first_at"].numberValue ?? archive.compactMap { $0["first_at"].numberValue }.min() ?? start
+            let last = row?["last_at"].numberValue ?? archive.compactMap { $0["last_at"].numberValue }.max() ?? end - 1
+            return formattedInterval(from: first, to: last)
+        }
         let formatter = DateIntervalFormatter()
         formatter.locale = InterfaceLanguageSettings.shared.language.locale
         formatter.calendar = calendar
@@ -146,6 +165,14 @@ struct MetricChart: View {
         }
         let displayedEnd = selected != nil && active.period == .day ? end : end - 1
         return formatter.string(from: Date(timeIntervalSince1970: start), to: Date(timeIntervalSince1970: displayedEnd))
+    }
+    private func formattedInterval(from start: Double, to end: Double) -> String {
+        let formatter = DateIntervalFormatter()
+        formatter.locale = InterfaceLanguageSettings.shared.language.locale
+        formatter.calendar = calendar
+        formatter.timeZone = timeZone
+        formatter.dateStyle = .medium
+        return formatter.string(from: Date(timeIntervalSince1970: start), to: Date(timeIntervalSince1970: end))
     }
     private var segments: [JSONValue] {
         let deviceNames = Dictionary(uniqueKeysWithValues: sourceKeys.map { key in
@@ -169,13 +196,13 @@ struct MetricChart: View {
     private func barWidth(plotWidth: Double) -> Double {
         let slots = rows.map { row in
             let duration = (row["end_at"].numberValue ?? 0) - (row["start_at"].numberValue ?? 0)
-            return plotWidth * duration / active.length * 0.8
+            return plotWidth * duration / (plotEnd - plotStart) * 0.8
         }
         return max(0.8, min(8, (slots.min() ?? 8 / 0.85) * 0.85))
     }
     private var tickDates: [Date] {
-        let step = active.period == .hour ? 900.0 : active.period == .day ? 21600.0 : active.length / 4
-        return (0..<4).map { Date(timeIntervalSince1970: active.start + Double($0) * step) }
+        let step = active.period == .hour ? 900.0 : active.period == .day ? 21600.0 : (plotEnd - plotStart) / 4
+        return (0..<4).map { Date(timeIntervalSince1970: plotStart + Double($0) * step) }
     }
     private func move(_ direction: Int) {
         var value = active
@@ -204,7 +231,7 @@ struct MetricChart: View {
     private func tickLabel(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.timeZone = timeZone
-        formatter.dateFormat = active.period == .hour ? "h:mm a" : active.period == .day ? "h a" : active.period == .week ? "EEE" : active.period == .month ? "d" : "MMM"
+        formatter.dateFormat = active.period == .hour ? "h:mm a" : active.period == .day ? "h a" : active.period == .week ? "EEE" : active.period == .month ? "d" : active.period == .all ? "MMM yy" : "MMM"
         return formatter.string(from: date)
     }
 
@@ -254,14 +281,14 @@ struct MetricChart: View {
             GeometryReader { geometry in
                 let width = barWidth(plotWidth: max(1, geometry.size.width - 36))
                 #if os(Android)
-                AndroidRangePlot(rows: segments, referenceBand: referenceBand, scaleLabels: scaleLabels, isBinary: isBinary, domain: yDomain, start: active.start, length: active.length,
+                AndroidRangePlot(rows: segments, referenceBand: referenceBand, scaleLabels: scaleLabels, isBinary: isBinary, domain: yDomain, start: plotStart, length: plotEnd - plotStart,
                     divisor: divisor, width: width, ticks: tickDates.map { ($0.timeIntervalSince1970, tickLabel($0)) },
                     color: color, exposedEnd: exposedEnd, selected: $selected, move: move)
                 #else
                 Chart {
                     if referenceBand != .null {
-                        RectangleMark(xStart: .value("Start", Date(timeIntervalSince1970: active.start)),
-                            xEnd: .value("End", Date(timeIntervalSince1970: active.start + active.length)),
+                        RectangleMark(xStart: .value("Start", Date(timeIntervalSince1970: plotStart)),
+                            xEnd: .value("End", Date(timeIntervalSince1970: plotEnd)),
                             yStart: .value("Lower", referenceBand["lower"].numberValue.map { $0 / divisor } ?? yDomain.lowerBound),
                             yEnd: .value("Upper", referenceBand["upper"].numberValue.map { $0 / divisor } ?? yDomain.upperBound))
                             .foregroundStyle(Color.pink.opacity(0.18))
@@ -305,7 +332,7 @@ struct MetricChart: View {
                             .foregroundStyle(.secondary.opacity(0.5)).lineStyle(StrokeStyle(lineWidth: 1))
                     }
                 }
-                .chartXScale(domain: Date(timeIntervalSince1970: active.start)...Date(timeIntervalSince1970: active.start + active.length))
+                .chartXScale(domain: Date(timeIntervalSince1970: plotStart)...Date(timeIntervalSince1970: plotEnd))
                 .chartYScale(domain: yDomain)
                 .chartLegend(.hidden)
                 .chartPlotStyle { $0.clipped() }
@@ -320,6 +347,7 @@ struct MetricChart: View {
                                 case .week: Text(date, format: .dateTime.weekday(.abbreviated))
                                 case .month: Text(date, format: .dateTime.day())
                                 case .halfYear, .year: Text(date, format: .dateTime.month(.abbreviated))
+                                case .all: Text(date, format: .dateTime.month(.abbreviated).year(.twoDigits))
                                 }
                             }
                         }
@@ -390,7 +418,7 @@ struct MetricChart: View {
                             } else { Text("—") }
                         }.frame(minHeight: 44)
                     }.buttonStyle(.plain)
-                    let days = ReferenceLevels.visibleDays(component["chart_ranges"]["reference_days"].arrayValue, start: active.start, end: active.start + active.length, unit: unit, hiddenSources: hiddenSources)
+                    let days = ReferenceLevels.visibleDays(component["chart_ranges"]["reference_days"].arrayValue, start: plotStart, end: plotEnd, unit: unit, hiddenSources: hiddenSources)
                     let levels = ReferenceLevels.levels(days: days, names: names)
                     if !levels.isEmpty {
                         HStack {

@@ -56,15 +56,18 @@ struct DailyMetricView: View {
         guard force || loadedWindow != selectedWindow || failure != nil else { return }
         guard let selectedWindow, let token = model.session?.token else { return }
         loading = true; failure = nil
-        defer { loading = false }
+        defer { if self.selectedWindow == selectedWindow { loading = false } }
         let formatter = DateFormatter(); formatter.calendar = Calendar(identifier: .gregorian); formatter.timeZone = .gmt; formatter.dateFormat = "yyyy-MM-dd"
         let dates = [selectedWindow.start, selectedWindow.start + selectedWindow.length - 1].map { JSONValue.string(formatter.string(from: Date(timeIntervalSince1970: $0))) }
         do {
-            let response = try await model.request("wellness/history", body: .object(["record_type": metric["record_type"], "timezone": .string(TimeZone.current.identifier), "dates": .array(dates)]))
+            let response = try await model.request("wellness/history", body: .object(["record_type": metric["record_type"], "timezone": .string(TimeZone.current.identifier), "dates": selectedWindow.period == .all ? .null : .array(dates)]))
             guard !Task.isCancelled, self.selectedWindow == selectedWindow, model.session?.token == token else { return }
             completeHistory = response
             loadedWindow = selectedWindow
-        } catch { if !Task.isCancelled { failure = "Selected period could not be loaded: " + error.localizedDescription } }
+        } catch {
+            guard !Task.isCancelled, self.selectedWindow == selectedWindow, model.session?.token == token else { return }
+            failure = "Selected period could not be loaded: " + error.localizedDescription
+        }
 
     }
 }

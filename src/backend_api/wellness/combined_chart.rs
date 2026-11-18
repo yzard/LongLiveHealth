@@ -26,11 +26,12 @@ impl Database {
             .bind(&r.record_type)
             .fetch_one(&self.pool)
             .await?;
+        let span = r.span(bounds)?;
         let mut stream = sqlx::query(queries::COMBINED_SAMPLES)
             .bind(user)
             .bind(&r.record_type)
-            .bind(r.start_at)
-            .bind(r.end_at)
+            .bind(span.0)
+            .bind(span.1)
             .fetch(&self.pool);
         let mut series =
             BTreeMap::<String, (crate::chart::PeriodRanges, crate::chart::PeriodRanges)>::new();
@@ -80,9 +81,9 @@ impl Database {
                 series.insert(
                     kind.clone(),
                     (
-                        crate::chart::PeriodRanges::new(&r.period, tz)
+                        crate::chart::PeriodRanges::new(&r.period, tz, span)
                             .ok_or(AppError::Invalid("Unknown chart period"))?,
-                        crate::chart::PeriodRanges::new("M", tz).ok_or(AppError::Internal)?,
+                        crate::chart::PeriodRanges::new("M", tz, span).ok_or(AppError::Internal)?,
                     ),
                 );
             }

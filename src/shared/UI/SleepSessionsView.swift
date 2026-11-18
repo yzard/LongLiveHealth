@@ -17,7 +17,7 @@ struct SleepSessionsView: View {
         MetricDetailScreen(title: uiText("Sleep")) {
             MetricChartSection {
                 Picker(uiText("Time range"), selection: $period) {
-                    ForEach(ChartPeriod.allCases.filter { $0 != .hour }, id: \.self) { Text($0.rawValue).tag($0) }
+                    ForEach(ChartPeriod.allCases.filter { $0 != .hour && $0 != .all }, id: \.self) { Text($0.rawValue).tag($0) }
                 }.pickerStyle(.segmented)
                 DatePicker(uiText("Date"), selection: $selectedDate, displayedComponents: [.date])
                 if loading { ProgressView(uiText("Loading selected period")) }

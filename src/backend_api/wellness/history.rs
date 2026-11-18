@@ -90,6 +90,12 @@ impl Database {
             &[],
             &json!({"days":days,"algorithm_version":if request.record_type == "sleep" {"sleep-wake-days-v1"} else {crate::health::ALGORITHM_VERSION}}),
         )?;
+        if request.dates.is_some() {
+            result["chart_ranges"]
+                .as_object_mut()
+                .ok_or(AppError::Internal)?
+                .remove(crate::chart::ALL_PERIOD);
+        }
         result["data_revision"] = json!(revision);
         result["first_record_at"] = json!(first);
         result["last_record_at"] = json!(last);

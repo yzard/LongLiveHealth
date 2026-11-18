@@ -62,6 +62,7 @@ struct BrowseChart<Content: View>: View {
                                 case .week: Text(date, format: .dateTime.weekday(.abbreviated))
                                 case .month: Text(date, format: .dateTime.day())
                                 case .halfYear, .year: Text(date, format: .dateTime.month(.abbreviated))
+                                case .all: Text(date, format: .dateTime.month(.abbreviated).year(.twoDigits))
                                 }
                             }
                         }

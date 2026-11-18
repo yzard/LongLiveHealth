@@ -73,3 +73,32 @@ fn calendar_buckets_respect_local_dates_dst_and_month_lengths() {
     );
     assert_eq!(result["W"][0]["start_at"], day["start_at"]);
 }
+
+#[test]
+fn all_history_uses_equal_buckets_and_keeps_every_sample_across_years() {
+    let first = 1_262_304_000.0;
+    let last = 1_767_225_600.0;
+    let result = ranges(
+        (0..=100).map(|index| {
+            let at = first + (last - first) * f64::from(index) / 100.0;
+            ("watch".into(), "bpm".into(), at, f64::from(index))
+        }),
+        chrono_tz::America::New_York,
+    );
+    let rows = result["All"].as_array().unwrap();
+    assert_eq!(rows.len(), 48);
+    let width = rows[0]["end_at"].as_i64().unwrap() - rows[0]["start_at"].as_i64().unwrap();
+    assert!(
+        rows.iter()
+            .all(|r| r["end_at"].as_i64().unwrap() - r["start_at"].as_i64().unwrap() == width)
+    );
+    assert_eq!(
+        rows.iter()
+            .map(|r| r["count"].as_u64().unwrap())
+            .sum::<u64>(),
+        101
+    );
+    assert_eq!(rows.first().unwrap()["first_at"], first);
+    assert_eq!(rows.last().unwrap()["last_at"], last);
+    assert_eq!(rows.last().unwrap()["max"], 100.0);
+}

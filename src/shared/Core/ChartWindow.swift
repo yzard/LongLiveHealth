@@ -1,7 +1,7 @@
 import Foundation
 
 public nonisolated enum ChartPeriod: String, CaseIterable, Sendable {
-    case hour = "H", day = "D", week = "W", month = "M", halfYear = "6M", year = "Y"
+    case hour = "H", day = "D", week = "W", month = "M", halfYear = "6M", year = "Y", all = "All"
 
     public var title: String {
         switch self {
@@ -11,16 +11,18 @@ public nonisolated enum ChartPeriod: String, CaseIterable, Sendable {
         case .month: "Month"
         case .halfYear: "Six months"
         case .year: "Year"
+        case .all: "All history"
         }
     }
 
     public func interval(containing date: Date, calendar: Calendar) -> DateInterval {
+        precondition(self != .all, "All history requires archive bounds")
         let component: Calendar.Component = switch self {
         case .hour: .hour
         case .day: .day
         case .week: .weekOfYear
         case .month, .halfYear: .month
-        case .year: .year
+        case .year, .all: .year
         }
         let interval = calendar.dateInterval(of: component, for: date) ?? DateInterval(start: date, duration: 86400)
         if self == .halfYear {
@@ -49,17 +51,28 @@ public nonisolated struct ChartWindow: Equatable, Hashable, Sendable {
         first = valid.min() ?? Date().timeIntervalSince1970
         last = valid.max() ?? first
         self.period = period
-        let interval = period.interval(containing: Date(timeIntervalSince1970: last), calendar: calendar)
-        start = interval.start.timeIntervalSince1970
-        length = interval.duration
-        lower = min(first, start)
-        upper = max(last + 1, interval.end.timeIntervalSince1970)
+        start = first
+        length = last - first + 1
+        lower = first
+        upper = last + 1
+        apply(period, anchor: last, calendar: calendar)
     }
 
     public mutating func select(_ period: ChartPeriod, calendar: Calendar) {
         let anchor = min(last, max(first, start + length - 1))
-        let interval = period.interval(containing: Date(timeIntervalSince1970: anchor), calendar: calendar)
+        apply(period, anchor: anchor, calendar: calendar)
+    }
+
+    private mutating func apply(_ period: ChartPeriod, anchor: Double, calendar: Calendar) {
         self.period = period
+        if period == .all {
+            start = first
+            length = last - first + 1
+            lower = first
+            upper = last + 1
+            return
+        }
+        let interval = period.interval(containing: Date(timeIntervalSince1970: anchor), calendar: calendar)
         start = interval.start.timeIntervalSince1970
         length = interval.duration
         lower = min(first, start)
@@ -67,13 +80,13 @@ public nonisolated struct ChartWindow: Equatable, Hashable, Sendable {
     }
 
     public mutating func move(_ direction: Int, calendar: Calendar) {
-        guard direction == -1 || direction == 1 else { return }
+        guard period != .all, direction == -1 || direction == 1 else { return }
         let component: Calendar.Component = switch period {
         case .hour: .hour
         case .day: .day
         case .week: .weekOfYear
         case .month, .halfYear: .month
-        case .year: .year
+        case .year, .all: .year
         }
         let amount = direction * (period == .halfYear ? 6 : 1)
         guard let from = calendar.date(byAdding: component, value: amount, to: Date(timeIntervalSince1970: start)),

@@ -9,6 +9,8 @@
   "25-hydroxyvitamin D3 measures the D3-derived part of circulating vitamin D. It is one component of total 25-hydroxyvitamin D and is interpreted with D2 or the total when assessing vitamin D status.": "25-羟基维生素 D3 测量循环维生素 D 中源自 D3 的部分。它是总 25-羟基维生素 D 的一个组成部分，在评估维生素 D 状态时与 D2 或总量一起解读。",
   "6 months": "6 个月",
   "6M": "半年",
+  "All": "全部",
+  "All history": "全部历史",
   "900 seconds is an initial display parameter. Match the actual source sampling protocol.": "900 秒是初始显示参数。请匹配实际的源采样协议。",
   "A FIT activity file is required": "需要 FIT 活动文件",
   "A GPX filename and at most 4 MiB of UTF-8 XML are required": "需要 GPX 文件名和最多 4 MiB 的 UTF-8 XML",

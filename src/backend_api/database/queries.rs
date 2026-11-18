@@ -831,8 +831,8 @@ SELECT MIN(first_at),CAST(MAX(last_at) AS INTEGER) FROM (
       (SELECT start_at FROM health_records INDEXED BY health_records_range
         WHERE user_id=?1 AND record_type=?2 AND deleted=0 ORDER BY start_at LIMIT 1) AS first_at,
       (SELECT MAX(CASE WHEN json_array_length(payload_json,'$.payload.quantity_samples') IS NULL THEN start_at
-                  ELSE (SELECT MAX(CAST(json_extract(j.value,'$.at') AS REAL))
-                          FROM json_each(payload_json,'$.payload.quantity_samples') j) END)
+                  ELSE COALESCE((SELECT MAX(CAST(json_extract(j.value,'$.at') AS REAL))
+                          FROM json_each(payload_json,'$.payload.quantity_samples') j),start_at) END)
          FROM health_records INDEXED BY health_records_end
         WHERE user_id=?1 AND record_type=?2 AND deleted=0
           AND end_at>=(SELECT start_at FROM latest_start)) AS last_at

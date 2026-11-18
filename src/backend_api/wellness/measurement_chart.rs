@@ -1,5 +1,6 @@
 //! Complete period queries with streaming chart reduction and paginated history.
 use crate::{
+    chart::{ALL_PERIOD, PeriodRanges},
     database::{Database, queries},
     error::AppError,
 };
@@ -41,21 +42,46 @@ pub fn unit(kind: &str) -> Result<&'static str, AppError> {
         }
     }
 }
-fn validate(start: i64, end: i64) -> Result<(), AppError> {
+impl Request {
+    fn validate_period(&self) -> Result<(), AppError> {
+        if self.period == ALL_PERIOD {
+            return Ok(());
+        }
+        if i128::from(self.end_at) - i128::from(self.start_at) > 367 * 86400 {
+            return Err(AppError::Invalid(
+                "Select a measurement period of at most 367 days",
+            ));
+        }
+        validate_dates(self.start_at, self.end_at)
+    }
+
+    pub(super) fn span(&self, bounds: (Option<i64>, Option<i64>)) -> Result<(i64, i64), AppError> {
+        if self.period != ALL_PERIOD {
+            return Ok((self.start_at, self.end_at));
+        }
+        let Some((first, last)) = bounds.0.zip(bounds.1) else {
+            return Ok((0, 1));
+        };
+        let end = last
+            .checked_add(1)
+            .ok_or(AppError::Invalid("Invalid measurement dates"))?;
+        validate_dates(first, end)?;
+        Ok((first, end))
+    }
+}
+
+fn validate_dates(start: i64, end: i64) -> Result<(), AppError> {
     if end <= start
-        || i128::from(end) - i128::from(start) > 367 * 86400
         || chrono::DateTime::from_timestamp(start, 0).is_none()
         || chrono::DateTime::from_timestamp(end, 0).is_none()
     {
-        return Err(AppError::Invalid(
-            "Select a measurement period of at most 367 days",
-        ));
+        return Err(AppError::Invalid("Invalid measurement dates"));
     }
     Ok(())
 }
 impl Database {
     pub async fn measurement_chart(&self, user: &str, r: Request) -> Result<Value, AppError> {
-        validate(r.start_at, r.end_at)?;
+        r.validate_period()?;
         if super::combined_chart::supports(&r.record_type) {
             return self.combined_chart(user, &r).await;
         }
@@ -64,20 +90,21 @@ impl Database {
             .timezone
             .parse()
             .map_err(|_| AppError::Invalid("Unknown IANA timezone"))?;
-        let mut ranges = crate::chart::PeriodRanges::new(&r.period, tz)
-            .ok_or(AppError::Invalid("Unknown chart period"))?;
-        let mut daily = crate::chart::PeriodRanges::new("M", tz).ok_or(AppError::Internal)?;
         let revision = self.data_revision(user).await?;
         let bounds: (Option<i64>, Option<i64>) = sqlx::query_as(queries::MEASUREMENT_BOUNDS)
             .bind(user)
             .bind(&r.record_type)
             .fetch_one(&self.pool)
             .await?;
+        let span = r.span(bounds)?;
+        let mut ranges = PeriodRanges::new(&r.period, tz, span)
+            .ok_or(AppError::Invalid("Unknown chart period"))?;
+        let mut daily = PeriodRanges::new("M", tz, span).ok_or(AppError::Internal)?;
         let mut stream = sqlx::query(queries::MEASUREMENT_SAMPLES)
             .bind(user)
             .bind(&r.record_type)
-            .bind(r.start_at)
-            .bind(r.end_at)
+            .bind(span.0)
+            .bind(span.1)
             .fetch(&self.pool);
         let mut read = 0usize;
         let mut valid = 0usize;
@@ -112,7 +139,7 @@ impl Database {
         user: &str,
         r: HistoryRequest,
     ) -> Result<Value, AppError> {
-        validate(r.start_at, r.end_at)?;
+        validate_dates(r.start_at, r.end_at)?;
         let unit = unit(&r.record_type)?;
         let revision = self.data_revision(user).await?;
         if r.expected_revision.is_some_and(|v| v != revision) {

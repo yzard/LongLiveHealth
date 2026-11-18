@@ -633,6 +633,45 @@ nonisolated final class SmokeTests: XCTestCase {
         XCTAssertFalse(app.buttons["About this metric"].exists)
     }
 
+    @MainActor func testAllHistoryDisplaysOldAndRecentMeasurements() {
+        let app = XCUIApplication()
+        app.launch()
+        dismissPasswordPrompts(app)
+        if app.buttons["Sign in"].exists {
+            let server = app.textFields["http://192.168.1.20:8080"]
+            server.tap()
+            let previous = server.value as? String ?? ""
+            if previous != "http://192.168.1.20:8080" {
+                server.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: previous.count))
+            }
+            server.typeText("http://127.0.0.1:18765")
+            app.textFields["Username"].tap(); app.textFields["Username"].typeText("simulator")
+            app.secureTextFields["Password"].tap(); app.secureTextFields["Password"].typeText("test-password")
+            app.buttons["Sign in"].tap(); dismissPasswordPrompts(app)
+        }
+        XCTAssertTrue(app.tabBars.buttons["Browse"].waitForExistence(timeout: 10))
+        tapTab(app, "Browse")
+        let search = app.searchFields["Search metrics"]
+        for (query, title, expectedRange) in [("heart rate", "Heart rate", "70–90"), ("sleep", "Sleep sessions", "7.5")] {
+            search.tap()
+            search.typeText(query)
+            let metric = app.buttons[title]
+            XCTAssertTrue(metric.waitForExistence(timeout: 10))
+            metric.tap()
+            let all = app.segmentedControls.buttons["All history"]
+            XCTAssertTrue(all.waitForExistence(timeout: 10))
+            all.tap()
+            XCTAssertTrue(all.isSelected)
+            let dates = app.staticTexts["chart-date-range"]
+            let archives = NSPredicate(format: "label CONTAINS %@", "2020")
+            let dateCheck = XCTNSPredicateExpectation(predicate: archives, object: dates)
+            XCTAssertEqual(XCTWaiter.wait(for: [dateCheck], timeout: 12), .completed)
+            XCTAssertEqual(app.staticTexts["chart-range-value"].label, expectedRange)
+            app.navigationBars.buttons.firstMatch.tap()
+            search.buttons["Clear text"].firstMatch.tap()
+        }
+    }
+
     @MainActor func testBrowseWeightAndActivityPlacement() async throws {
         let app = XCUIApplication(); app.launch()
         dismissPasswordPrompts(app)

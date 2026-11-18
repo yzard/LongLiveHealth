@@ -503,7 +503,13 @@ class Handler(BaseHTTPRequestHandler):
             from datetime import timedelta
             from zoneinfo import ZoneInfo
             zone = ZoneInfo(body.get('timezone', 'UTC'))
+            first = int(min((p[2] for p in points), default=0))
+            last = int(max((p[2] for p in points), default=first))
+            archive_width = (last - first + 48) // 48
             def bounds(at, period, window):
+                if period == 'All':
+                    start = first + (int(at) - first) // archive_width * archive_width
+                    return start, start + archive_width
                 dt = datetime.fromtimestamp(at, zone)
                 if period == 'H' or (period == 'D' and not window):
                     start = dt.replace(second=0, microsecond=0)
@@ -527,8 +533,8 @@ class Handler(BaseHTTPRequestHandler):
                     end = start.replace(year=n // 12, month=n % 12 + 1)
                 return start.timestamp(), end.timestamp()
             result = {'summaries': {}}
-            for period in ('H', 'D', 'W', 'M', '6M', 'Y'):
-                for window in (False, True):
+            for period in ('H', 'D', 'W', 'M', '6M', 'Y', 'All'):
+                for window in ((False,) if period == 'All' else (False, True)):
                     groups = {}
                     for source, unit, at, value in points:
                         start, end = bounds(at, period, window)
@@ -560,11 +566,11 @@ class Handler(BaseHTTPRequestHandler):
                 if discrete:
                     ranges = chart_ranges(values)
                     other = chart_ranges([(source, unit, now, upper)])
-                    for period in ('H', 'D', 'W', 'M', '6M', 'Y'):
+                    for period in ('H', 'D', 'W', 'M', '6M', 'Y', 'All'):
                         ranges[period].extend(other[period])
                     return ranges
                 ranges = chart_ranges(values)
-                for period in ('H', 'D', 'W', 'M', '6M', 'Y'):
+                for period in ('H', 'D', 'W', 'M', '6M', 'Y', 'All'):
                     for bucket in ranges[period]:
                         bucket.update(max=upper, latest_value=None, latest_min=lower, latest_max=upper)
                 return ranges
@@ -588,13 +594,14 @@ class Handler(BaseHTTPRequestHandler):
             value = 72.5 if kind == 'body_mass' else 42 if kind == 'vo2_max' else 70
             source = 'manual:longlivehealth' if kind == 'body_mass' else 'apple_health:watch'
             now = int(datetime.now().astimezone().replace(hour=12, minute=21, second=10, microsecond=0).timestamp()) if kind == 'heart_rate' else int(time.time()) - 60
-            all_points = [(source,unit,at,value+n) for n,at in enumerate([now,now-400*86400,1577836800])]
+            first_at = 1577880000  # Noon UTC keeps the fixture in January 2020 across common test timezones.
+            all_points = [(source,unit,at,value+n) for n,at in enumerate([now,now-400*86400,first_at])]
             if kind == 'heart_rate':
                 all_points += [(source,unit,now-5,90)]
-            points = [p for p in all_points if body['start_at'] <= p[2] < body['end_at']]
-            response = {'chart_ranges':chart_ranges(points),'unit':unit,'sources':[source], 'first_at':1577836800,'last_at':now,'samples_read':len(points),'valid_samples':len(points),'excluded_samples':0,'complete':True,'data_revision':1}
+            points = all_points if body.get('period') == 'All' else [p for p in all_points if body['start_at'] <= p[2] < body['end_at']]
+            response = {'chart_ranges':chart_ranges(points),'unit':unit,'sources':[source], 'first_at':first_at,'last_at':now,'samples_read':len(points),'valid_samples':len(points),'excluded_samples':0,'complete':True,'data_revision':1}
             if route == 'wellness/measurements':
-                response = {'points':[{'at':p[2],'value':p[3],'source':p[0],'record_id':str(p[2]),'unit':unit} for p in points],'next_offset':None,'data_revision':1}
+                response = {'points':[{'at':p[2],'value':p[3],'source':p[0],'record_id':str(p[2]),'unit':unit} for p in sorted(points, key=lambda p: -p[2])],'next_offset':None,'data_revision':1}
         if route == 'wellness/chart' and body['record_type'] == 'HKCorrelationTypeIdentifierBloodPressure':
             now = int(time.time()) - 60
             source = 'apple_health:watch'
@@ -629,6 +636,8 @@ class Handler(BaseHTTPRequestHandler):
             history = [{'date': d, 'alternatives': [{'source': 'apple_health:watch', 'value': value, 'unit': unit}]} for d in dates]
             response = {'record_type': kind, 'unit': unit, 'history': history, 'first_record_at':1577836800, 'last_record_at':int(datetime.fromisoformat(all_dates[-1]).replace(tzinfo=timezone.utc).timestamp())}
             response['chart_ranges'] = chart_ranges([('apple_health:watch', unit, datetime.fromisoformat(d).replace(tzinfo=timezone.utc).timestamp(), value) for d in dates])
+            if window:
+                response['chart_ranges'].pop('All')
         if route == 'metrics/loinc/get':
             response = {'official_name': {'1988-5': 'C reactive protein [Mass/volume] in Serum or Plasma'}.get(body['code'])}
         if route == 'test/counts':

@@ -49,3 +49,19 @@ import Testing
     window.select(.year, calendar: calendar)
     #expect(window.length == 366 * 86400)
 }
+
+@Test func allHistoryKeepsFractionalEndpointsAndDoesNotPage() {
+    let calendar = Calendar(identifier: .gregorian)
+    let timestamps = [1_577_836_800.25, 1_767_225_600.75]
+    var window = ChartWindow(timestamps: timestamps, period: .day, calendar: calendar)
+    window.move(-1, calendar: calendar)
+    window.select(.all, calendar: calendar)
+    #expect(window.start == timestamps[0])
+    #expect(window.start + window.length == timestamps[1] + 1)
+    let archive = window
+    window.move(-1, calendar: calendar)
+    window.move(1, calendar: calendar)
+    #expect(window == archive)
+    window.select(.day, calendar: calendar)
+    #expect(window.start <= timestamps[1] && window.start + window.length > timestamps[1])
+}

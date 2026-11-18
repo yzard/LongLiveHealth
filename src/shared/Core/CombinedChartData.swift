@@ -8,7 +8,7 @@ public nonisolated enum CombinedChartData {
     public static func ranges(_ response: JSONValue, unit: String) -> JSONValue {
         let components = response["components"].arrayValue.filter { $0["unit"].stringValue == unit }
         var result: JSONValue = .object(["components": .array(components), "latest_reading": response["latest_reading"]])
-        for period in ["H", "D", "W", "M", "6M", "Y", "reference_days"] {
+        for period in ChartPeriod.allCases.map(\.rawValue) + ["reference_days"] {
             result[period] = .array(components.flatMap { component in
                 component["chart_ranges"][period].arrayValue.map { value in
                     var row = value

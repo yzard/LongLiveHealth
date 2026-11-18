@@ -2662,6 +2662,7 @@ async fn full_sleep_history_keeps_old_devices_and_excludes_in_bed_only_samples()
         .await
         .unwrap();
     assert_eq!(result["chart_ranges"]["D"].as_array().unwrap().len(), 2);
+    assert_eq!(result["chart_ranges"]["All"].as_array().unwrap().len(), 2);
     let mut selected = request();
     selected.dates = Some(["2020-01-01".into(), "2020-12-31".into()]);
     let old = state
@@ -2735,6 +2736,44 @@ async fn period_measurements_stream_all_samples_and_paginate_history() {
             count
         );
     }
+    let later = start + 5 * 366 * 86400;
+    sqlx::query("INSERT INTO health_records(user_id,platform,source_id,record_id,record_type,start_at,end_at,version,deleted,payload_json) SELECT ?, 'apple_health','watch','future','heart_rate',?,?,1,0,json_object('payload',json_object('quantity_samples',json_array(json_object('at',?+0.75,'value',201,'unit','count/min'))), 'test_marker', 1)")
+        .bind(&user.user_id).bind(later).bind(later + 1).bind(later).execute(&pool).await.unwrap();
+    let all = state
+        .database
+        .measurement_chart(
+            &user.user_id,
+            Request {
+                record_type: "heart_rate".into(),
+                timezone: "UTC".into(),
+                period: "All".into(),
+                start_at: later,
+                end_at: later + 1,
+            },
+        )
+        .await
+        .unwrap();
+    let buckets = all["chart_ranges"]["All"].as_array().unwrap();
+    assert_eq!(all["samples_read"], count + 1);
+    assert_eq!(buckets.first().unwrap()["first_at"], start as f64);
+    assert_eq!(buckets.last().unwrap()["last_at"], later as f64 + 0.75);
+    assert_eq!(buckets.last().unwrap()["latest_value"], 201.0);
+    let full_history = state
+        .database
+        .measurement_history(
+            &user.user_id,
+            HistoryRequest {
+                record_type: "heart_rate".into(),
+                start_at: start,
+                end_at: later + 1,
+                offset: 0,
+                expected_revision: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(full_history["points"][0]["at"], later as f64 + 0.75);
+    assert_eq!(full_history["next_offset"], 500);
     let mut offset = 0;
     let mut revision = None;
     let mut ids = std::collections::BTreeSet::new();
