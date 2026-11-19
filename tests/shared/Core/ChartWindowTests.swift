@@ -65,3 +65,24 @@ import Testing
     window.select(.day, calendar: calendar)
     #expect(window.start <= timestamps[1] && window.start + window.length > timestamps[1])
 }
+
+@Test func allHistoryAxisUsesCalendarYearBoundaries() throws {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = .gmt
+    let start = try #require(ChartWindow.day("2018-07-14"))
+    let end = try #require(ChartWindow.day("2026-11-19"))
+    let dates = ChartWindow.historyYearTicks(from: start.timeIntervalSince1970, to: end.timeIntervalSince1970, calendar: calendar)
+    #expect(dates == [start] + ["2020-01-01", "2022-01-01", "2024-01-01", "2026-01-01"].compactMap(ChartWindow.day))
+}
+
+@Test func allHistoryAxisLabelsShortArchivesAndBothYearsAcrossNewYear() throws {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = try #require(TimeZone(identifier: "America/New_York"))
+    let first = try #require(calendar.date(from: DateComponents(year: 2025, month: 12, day: 31, hour: 23)))
+    let newYear = try #require(calendar.date(from: DateComponents(year: 2026, month: 1, day: 1)))
+    let sameYear = ChartWindow.historyYearTicks(from: first.timeIntervalSince1970, to: newYear.timeIntervalSince1970, calendar: calendar)
+    #expect(sameYear == [first])
+    let crossing = ChartWindow.historyYearTicks(from: first.timeIntervalSince1970, to: newYear.timeIntervalSince1970 + 86400, calendar: calendar)
+    #expect(crossing.map { calendar.component(.year, from: $0) } == [2025, 2026])
+    #expect(crossing[1] > newYear)
+}

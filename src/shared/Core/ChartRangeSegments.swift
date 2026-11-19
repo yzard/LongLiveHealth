@@ -2,6 +2,44 @@ import Foundation
 
 /// Splits display envelopes into colored segments without adding or changing measurements.
 public nonisolated enum ChartRangeSegments {
+    public static func position(_ row: JSONValue) -> Double {
+        let start = row["start_at"].numberValue ?? 0
+        let end = row["end_at"].numberValue ?? start
+        return start + (end - start) / 2
+    }
+
+    /// Give narrow marks a comfortable tap target while keeping the original
+    /// time bucket selectable. Distances are measured in screen points.
+    public static func selection(
+        rows: [JSONValue], time: Double, value: Double,
+        secondsPerPoint: Double, unitsPerPoint: Double
+    ) -> JSONValue? {
+        guard time.isFinite, value.isFinite, secondsPerPoint.isFinite, secondsPerPoint > 0,
+              unitsPerPoint.isFinite, unitsPerPoint > 0 else { return nil }
+        let radius = 22.0
+        var hit: JSONValue?
+        var hitDistance = Double.infinity
+        var bucket: JSONValue?
+        var bucketDistance = Double.infinity
+        for row in rows {
+            guard let start = row["start_at"].numberValue, let end = row["end_at"].numberValue,
+                  let lower = row["display_min"].numberValue, let upper = row["display_max"].numberValue
+            else { continue }
+            let dx = abs(position(row) - time) / secondsPerPoint
+            let dy = max(lower - value, value - upper, 0) / unitsPerPoint
+            let distance = dx * dx + dy * dy
+            if distance <= radius * radius, distance < hitDistance {
+                hit = row
+                hitDistance = distance
+            }
+            if start <= time, time < end, distance < bucketDistance {
+                bucket = row
+                bucketDistance = distance
+            }
+        }
+        return hit ?? bucket
+    }
+
     public static func segments(rows: [JSONValue], names: [String: String]) -> [JSONValue] {
         let groups = Dictionary(grouping: rows) { row in
             "\(row["component"])|\(row["start_at"])|\(row["end_at"])|\(row["unit"])"

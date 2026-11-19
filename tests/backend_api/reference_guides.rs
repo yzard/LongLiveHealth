@@ -16,6 +16,29 @@ fn male() -> Profile {
         reference_sex: Some("male".into()),
     }
 }
+
+#[test]
+fn total_vitamin_d_shows_one_guide_without_erasing_the_original_lab_interval() {
+    let row = json!({"source":"hospital","unit":"ng/mL","latest_value":25,"last_at":1767225600});
+    let mut chart = json!({
+        "points":[{
+            "source_key":"hospital", "timestamp":1767225600, "value":25,
+            "reference":{"unit":"ng/mL", "lower":30, "upper":100}
+        }],
+        "chart_ranges":{"D":[row.clone()],"reference_days":[row]}
+    });
+    reference_guides::annotate(&mut chart, "vitamin_d_25_oh_total", &male());
+    let levels = &chart["chart_ranges"]["reference_days"][0]["reference_assessment"];
+    assert_eq!(levels["source"], "vitd");
+    assert_eq!(
+        levels["applicable_rule"]["bands"].as_array().unwrap().len(),
+        4
+    );
+    let original = &chart["chart_ranges"]["D"][0]["reference_assessment"];
+    assert_eq!(original["kind"], "report_reference");
+    assert_eq!(original["lower"], 30.0);
+    assert_eq!(original["upper"], 100.0);
+}
 #[test]
 fn missing_demographics_and_incompatible_units_never_mean_normal() {
     assert_eq!(

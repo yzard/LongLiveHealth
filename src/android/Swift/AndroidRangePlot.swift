@@ -12,6 +12,7 @@ struct AndroidRangePlot: View {
     let divisor: Double
     let width: Double
     let ticks: [(Double, String)]
+    let showsYearTicks: Bool
     let color: (JSONValue) -> Color
     let exposedEnd: (JSONValue, Bool) -> Bool
     @Binding var selected: JSONValue?
@@ -50,12 +51,19 @@ struct AndroidRangePlot: View {
                 ForEach(Array(ticks.enumerated()), id: \.offset) { _, tick in
                     let x = w * (tick.0 - start) / length
                     Rectangle().fill(Color.secondary.opacity(0.2)).frame(width: 0.5, height: h).offset(x: x)
-                    Text(tick.1).font(.caption2).foregroundStyle(.secondary).offset(x: x, y: h + 6)
+                    if showsYearTicks {
+                        let labelWidth = 40.0
+                        let labelX = max(0, min(w - labelWidth, x - labelWidth / 2))
+                        Text(tick.1).font(.caption2).foregroundStyle(.secondary)
+                            .frame(width: labelWidth).offset(x: labelX, y: h + 6)
+                    } else {
+                        Text(tick.1).font(.caption2).foregroundStyle(.secondary).offset(x: x, y: h + 6)
+                    }
                 }
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                     let lower = (row["display_min"].numberValue ?? 0) / divisor
                     let upper = (row["display_max"].numberValue ?? 0) / divisor
-                    let at = ((row["start_at"].numberValue ?? 0) + (row["end_at"].numberValue ?? 0)) / 2
+                    let at = ChartRangeSegments.position(row)
                     let x = w * (at - start) / length
                     let top = h * (domain.upperBound - upper) / (domain.upperBound - domain.lowerBound)
                     let bottom = h * (domain.upperBound - lower) / (domain.upperBound - domain.lowerBound)
@@ -71,7 +79,7 @@ struct AndroidRangePlot: View {
                     }
                 }
                 if let selected {
-                    let at = ((selected["start_at"].numberValue ?? 0) + (selected["end_at"].numberValue ?? 0)) / 2
+                    let at = ChartRangeSegments.position(selected)
                     Rectangle().fill(Color.secondary.opacity(0.5)).frame(width: 1, height: h).offset(x: w * (at - start) / length)
                 }
             }.frame(width: geometry.size.width, height: geometry.size.height)
@@ -80,16 +88,14 @@ struct AndroidRangePlot: View {
                     if abs(drag.translation.width) > 24 && abs(drag.translation.width) > abs(drag.translation.height) * 1.5 {
                         move(drag.translation.width > 0 ? -1 : 1)
                     } else if abs(drag.translation.height) < 15 {
-                        let at = start + drag.location.x / w * length
-                        let y = domain.upperBound - drag.location.y / h * (domain.upperBound - domain.lowerBound)
-                        selected = rows.filter { ($0["start_at"].numberValue ?? 0) <= at && at < ($0["end_at"].numberValue ?? 0) }.min {
-                            distance($0, y) < distance($1, y)
-                        }
+                        guard drag.location.x >= 0, drag.location.x <= w + 8,
+                              drag.location.y >= 0, drag.location.y <= h + 8 else { return }
+                        let at = start + min(drag.location.x, w) / w * length
+                        let y = domain.upperBound - min(drag.location.y, h) / h * (domain.upperBound - domain.lowerBound)
+                        selected = ChartRangeSegments.selection(rows: rows, time: at, value: y * divisor,
+                            secondsPerPoint: length / w, unitsPerPoint: (domain.upperBound - domain.lowerBound) * divisor / h)
                     }
                 })
         }
-    }
-    private func distance(_ row: JSONValue, _ value: Double) -> Double {
-        max((row["display_min"].numberValue ?? 0) / divisor - value, value - (row["display_max"].numberValue ?? 0) / divisor, 0)
     }
 }

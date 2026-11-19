@@ -180,10 +180,40 @@ pub async fn history(
         if let Some(group) = groups.get(&request.metric_id) { points.extend(group.points.clone()); }
         points.sort_by(|a,b| a["timestamp"].as_i64().cmp(&b["timestamp"].as_i64()).then_with(|| a["point_id"].as_str().cmp(&b["point_id"].as_str())));
         let (chart_ranges, chart_unit_conflict, result_charts) = history_chart(&request.metric_id, definition["standard_unit"].as_str(), &records, &points, &mut special);
+        let pending_chart_ranges = pending_chart_ranges(&records);
         Ok(json!({"chart_ranges":chart_ranges,"chart_unit_conflict":chart_unit_conflict,"result_charts":result_charts,"metric":definition,"records":records,"points":points,"excluded":excluded,"excluded_count":excluded.len(),
+            "pending_chart_ranges":pending_chart_ranges,
             "unassigned_clinical_records":unassigned,"unassigned_clinical_count":unassigned.len(),
             "algorithm_version":"metric-history-v2","conversion_version":crate::laboratory::CONVERSION_VERSION}))
     }).await
+}
+
+fn pending_chart_ranges(records: &[Value]) -> Value {
+    crate::chart::bounded_ranges(
+        records.iter().filter_map(|record| {
+            let quantity = &record["original"]["valueQuantity"];
+            if record["status"] != "pending"
+                || record["review_reason"].is_null()
+                || !quantity["comparator"].is_null()
+                || quantity["system"]
+                    .as_str()
+                    .is_some_and(|system| system != "http://unitsofmeasure.org")
+            {
+                return None;
+            }
+            Some((
+                record["source_key"].as_str()?.to_owned(),
+                reported_unit(&record["unit"])?.to_owned(),
+                numeric(&record["timestamp"])?,
+                quantity["value"]
+                    .as_f64()
+                    .filter(|value| value.is_finite())?,
+                None,
+            ))
+        }),
+        chrono_tz::UTC,
+        false,
+    )
 }
 
 fn history_chart<'a>(
@@ -196,6 +226,9 @@ fn history_chart<'a>(
     let mut reported = BTreeSet::new();
     let mut comparable = BTreeSet::new();
     for record in records {
+        if record["status"] == "pending" {
+            continue;
+        }
         if record["report_id"].is_null()
             && let Some(chart) = record.get("special_chart")
         {
@@ -411,7 +444,7 @@ fn append_health(
     }
     for (candidate, point_id) in candidates {
         let codes = candidate["code"]["coding"].as_array();
-        let mut matches: Vec<&str> = codes
+        let matches: Vec<&str> = codes
             .into_iter()
             .flatten()
             .filter(|coding| {
@@ -426,8 +459,11 @@ fn append_health(
                     .and_then(crate::laboratory::loinc_metric)
             })
             .collect();
-        if crate::clinical_labs::quest_total_vitamin_d(candidate, record) {
-            matches = vec!["vitamin_d_25_oh_total"];
+        if crate::clinical_labs::vitamin_d3_needs_review(candidate) {
+            if metric == "vitamin_d_25_oh_d3" {
+                excluded.push(json!({"point_id":point_id,"reason":"ambiguous_metric_code"}));
+            }
+            continue;
         }
         if matches.is_empty() && !candidate["valueQuantity"].is_null() {
             unassigned.push(json!({"point_id":point_id,"reason":"unmapped_clinical_metric"}));

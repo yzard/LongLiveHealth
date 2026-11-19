@@ -667,6 +667,20 @@ nonisolated final class SmokeTests: XCTestCase {
             let dateCheck = XCTNSPredicateExpectation(predicate: archives, object: dates)
             XCTAssertEqual(XCTWaiter.wait(for: [dateCheck], timeout: 12), .completed)
             XCTAssertEqual(app.staticTexts["chart-range-value"].label, expectedRange)
+            if query == "heart rate" {
+                let chart = app.descendants(matching: .any)["metric-range-chart"].firstMatch
+                XCTAssertTrue(chart.exists)
+                let attachment = XCTAttachment(screenshot: app.screenshot())
+                attachment.name = "All history year axis"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+                // The fixture's 72 BPM point is at the left end of a six-year archive.
+                // Tap just beyond its narrow bucket, near the visible mark.
+                let nearFirst = chart.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.83))
+                    .withOffset(CGVector(dx: 14, dy: 0))
+                nearFirst.tap()
+                XCTAssertEqual(app.staticTexts["chart-range-value"].label, "72")
+            }
             app.navigationBars.buttons.firstMatch.tap()
             search.buttons["Clear text"].firstMatch.tap()
         }

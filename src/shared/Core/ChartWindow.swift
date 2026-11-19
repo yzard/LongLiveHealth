@@ -98,6 +98,26 @@ public nonisolated struct ChartWindow: Equatable, Hashable, Sendable {
         upper = max(upper, start + length)
     }
 
+    public static func historyYearTicks(from start: Double, to end: Double, calendar: Calendar) -> [Date] {
+        let first = Date(timeIntervalSince1970: start)
+        let last = Date(timeIntervalSince1970: end.nextDown)
+        let firstYear = calendar.component(.year, from: first)
+        let lastYear = calendar.component(.year, from: last)
+        guard firstYear < lastYear else { return [first] }
+
+        let step = (lastYear - firstYear + 3) / 4
+        let firstBoundary = lastYear - ((lastYear - firstYear - 1) / step) * step
+        let spacing = (end - start) / 9
+        var ticks = [first]
+        for year in stride(from: firstBoundary, through: lastYear, by: step) {
+            guard let date = calendar.date(from: DateComponents(year: year, month: 1, day: 1)),
+                  date.timeIntervalSince(ticks[ticks.count - 1]) >= spacing else { continue }
+            ticks.append(date)
+        }
+        if ticks.count == 1 { ticks.append(last) }
+        return ticks
+    }
+
     public static func day(_ text: String) -> Date? {
         ISO8601DateFormatter().date(from: text + "T00:00:00Z")
     }

@@ -41,6 +41,10 @@ struct MetricHistoryView: View {
                           uniquingKeysWith: { first, _ in first })
     }
     private var showsChart: Bool { !chartKinds.isEmpty }
+    private var pendingRanges: JSONValue { currentHistory["pending_chart_ranges"] }
+    private var pendingUnits: [String] {
+        Array(Set(pendingRanges["D"].arrayValue.map { $0["unit"].stringValue })).sorted()
+    }
 
     var body: some View {
         MetricDetailScreen(title: metricName) {
@@ -74,6 +78,24 @@ struct MetricHistoryView: View {
                     }
                 }
             }
+            if !pendingUnits.isEmpty {
+                MetricChartSection {
+                    Text(uiText("Pending results preview")).font(.headline)
+                    Text(uiText("The reported name and LOINC code disagree. These results are awaiting review."))
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(pendingUnits, id: \.self) { unit in
+                        MetricChart(model: model, guidance: .null, ranges: pendingRanges, unit: unit,
+                                    metricKind: metric["metric_id"].stringValue, divisor: 1,
+                                    sourceKeys: Array(Set(pendingRanges["D"].arrayValue.map { $0["source"].stringValue })).sorted(),
+                                    names: Dictionary(records.map { (SourceNames.key($0), $0["source_name"].stringValue) },
+                                                      uniquingKeysWith: { first, _ in first }),
+                                    initialPeriod: .all, showsHour: false, heartRate: false, navigationTimestamps: nil,
+                                    onWindowChange: nil, evidence: records.filter { $0["status"].stringValue == "pending" })
+                            .id("pending:" + unit)
+                            .environment(\.timeZone, .gmt)
+                    }
+                }
+            }
             Section(uiText("About this metric")) {
                 MetricAboutView(id: metric["metric_id"].stringValue, name: metricName)
                 ForEach(Array(currentHistory["metric"]["loinc"].arrayValue.enumerated()), id: \.offset) { _, entry in
@@ -84,7 +106,7 @@ struct MetricHistoryView: View {
                     }
                 }
             }
-            if showsChart {
+            if showsChart || !pendingUnits.isEmpty {
                 Section {
                     NavigationLink(uiText("Historical Values")) {
                         List {

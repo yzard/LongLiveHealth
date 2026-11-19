@@ -40,3 +40,21 @@ private func range(_ source: String, _ low: Double, _ high: Double, last: Double
     #expect(segments[1]["start_at"] == .number(100))
     #expect(ChartRangeSegments.segments(rows: [], names: [:]).isEmpty)
 }
+
+@Test func sparseAllHistoryMarksCanBeTappedOutsideTheirTimeBuckets() {
+    var point = range("old", 36, 36, last: 4)
+    point["end_at"] = .number(6)
+    var later = range("new", 38, 42, last: 600)
+    later["start_at"] = .number(598)
+    later["end_at"] = .number(604)
+    let rows = ChartRangeSegments.segments(rows: [point, later], names: [:])
+    #expect(ChartRangeSegments.selection(rows: rows, time: 25, value: 36, secondsPerPoint: 2, unitsPerPoint: 0.2) == rows[0])
+    #expect(ChartRangeSegments.selection(rows: rows, time: 623, value: 41, secondsPerPoint: 2, unitsPerPoint: 0.2) == rows[1])
+    #expect(ChartRangeSegments.selection(rows: rows, time: 300, value: 36, secondsPerPoint: 2, unitsPerPoint: 0.2) == nil)
+}
+
+@Test func selectionUsesTheNearestVisibleColorAndKeepsTheTimeBucketSelectable() {
+    let rows = ChartRangeSegments.segments(rows: [range("old", 34, 35, last: 10), range("new", 40, 42, last: 20)], names: [:])
+    #expect(ChartRangeSegments.selection(rows: rows, time: 45, value: 41, secondsPerPoint: 1, unitsPerPoint: 0.1) == rows[1])
+    #expect(ChartRangeSegments.selection(rows: rows, time: 1, value: 32, secondsPerPoint: 1, unitsPerPoint: 0.1) == rows[0])
+}

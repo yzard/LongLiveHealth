@@ -373,7 +373,11 @@ pub fn annotate(result: &mut Value, metric: &str, profile: &Profile) {
                     .flatten()
                     .filter(|p| numeric(&p["value"]) == Some(value))
                     .collect();
-                let printed = if matching.len() == 1 {
+                // The total vitamin D levels list uses one population guide.
+                // Per-reading buckets retain their own laboratory assessment.
+                let total_vitamin_d_levels = period == "reference_days"
+                    && crate::laboratory::canonical_history_id(metric) == "vitamin_d_25_oh_total";
+                let printed = if matching.len() == 1 && !total_vitamin_d_levels {
                     report_assessment(matching[0], value, &unit)
                         .or_else(|| clinical_assessment(matching[0], value, &unit))
                 } else {

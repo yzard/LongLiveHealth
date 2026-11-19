@@ -1843,11 +1843,11 @@ async fn browse_unifies_total_vitamin_d_without_combining_its_fractions() {
         4,
         "{entries:?}"
     );
-    for (id, count) in [
-        ("vitamin_d_25_oh_total", 5),
-        ("vitamin_d_25_oh_d2", 1),
-        ("vitamin_d_25_oh_d3", 1),
-        ("vitamin_d_unspecified", 1),
+    for (id, plotted, archived) in [
+        ("vitamin_d_25_oh_total", 5, 5),
+        ("vitamin_d_25_oh_d2", 1, 1),
+        ("vitamin_d_25_oh_d3", 1, 2),
+        ("vitamin_d_unspecified", 1, 1),
     ] {
         assert_eq!(entries.iter().filter(|e| e["kind"] == id).count(), 1);
         let result = history(
@@ -1859,15 +1859,36 @@ async fn browse_unifies_total_vitamin_d_without_combining_its_fractions() {
         )
         .await
         .unwrap();
-        assert_eq!(result["points"].as_array().unwrap().len(), count, "{id}");
-        assert_eq!(result["records"].as_array().unwrap().len(), count, "{id}");
+        assert_eq!(result["points"].as_array().unwrap().len(), plotted, "{id}");
+        let records = result["records"].as_array().unwrap();
+        assert_eq!(records.len(), archived, "{id}");
+        let pending = result["pending_chart_ranges"]["D"].as_array().unwrap();
+        assert_eq!(pending.len(), usize::from(id == "vitamin_d_25_oh_d3"));
         if id == "vitamin_d_25_oh_total" {
+            let codes = result["metric"]["loinc"].as_array().unwrap();
+            assert_eq!(codes.len(), 2);
+            assert!(codes.iter().any(|entry| entry["code"] == "62292-8"));
+            assert!(codes.iter().any(|entry| entry["code"] == "68438-1"));
             assert!(result["points"].as_array().unwrap().iter().any(|point| {
                 point["value"] == "24"
                     && point["unit"] == "ng/mL"
                     && point["original"]["clinical_observation"]["valueQuantity"]["code"]
                         == "nmol/L"
             }));
+        } else if id == "vitamin_d_25_oh_d3" {
+            let held = records
+                .iter()
+                .find(|record| record["status"] == "pending")
+                .unwrap();
+            assert_eq!(held["original"]["status"], "final");
+            assert_eq!(held["original"]["code"]["coding"][0]["code"], "1989-3");
+            assert!(held["review_reason"].as_str().unwrap().contains("1989-3"));
+            assert_ne!(held["plotted"], true);
+            assert_eq!(pending[0]["unit"], held["unit"]);
+            assert_eq!(
+                pending[0]["min"].as_f64(),
+                held["original"]["valueQuantity"]["value"].as_f64()
+            );
         }
     }
 }

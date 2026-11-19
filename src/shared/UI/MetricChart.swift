@@ -188,11 +188,6 @@ struct MetricChart: View {
             other[lower ? "display_max" : "display_min"] == edge
         }
     }
-    private func position(_ row: JSONValue) -> Double {
-        let start = row["start_at"].numberValue ?? 0
-        let end = row["end_at"].numberValue ?? start
-        return start + (end - start) / 2
-    }
     private func barWidth(plotWidth: Double) -> Double {
         let slots = rows.map { row in
             let duration = (row["end_at"].numberValue ?? 0) - (row["start_at"].numberValue ?? 0)
@@ -201,6 +196,9 @@ struct MetricChart: View {
         return max(0.8, min(8, (slots.min() ?? 8 / 0.85) * 0.85))
     }
     private var tickDates: [Date] {
+        if active.period == .all {
+            return ChartWindow.historyYearTicks(from: plotStart, to: plotEnd, calendar: calendar)
+        }
         let step = active.period == .hour ? 900.0 : active.period == .day ? 21600.0 : (plotEnd - plotStart) / 4
         return (0..<4).map { Date(timeIntervalSince1970: plotStart + Double($0) * step) }
     }
@@ -214,24 +212,22 @@ struct MetricChart: View {
     private func choose(at point: CGPoint, proxy: ChartProxy, geometry: GeometryProxy) {
         guard let anchor = proxy.plotFrame else { return }
         let frame = geometry[anchor]
-        guard frame.contains(point), let date: Date = proxy.value(atX: point.x - frame.minX) else { return }
-        let at = date.timeIntervalSince1970
-        let candidates = segments.filter { ($0["start_at"].numberValue ?? 0) <= at && at < ($0["end_at"].numberValue ?? 0) }
-        let y: Double = proxy.value(atY: point.y - frame.minY) ?? 0
-        func distance(_ row: JSONValue) -> Double {
-            let lower = (row["display_min"].numberValue ?? 0) / divisor
-            let upper = (row["display_max"].numberValue ?? 0) / divisor
-            return max(lower - y, y - upper, 0)
-        }
-        selected = candidates.min { distance($0) < distance($1) }
+        guard frame.insetBy(dx: -8, dy: -8).contains(point), frame.width > 0, frame.height > 0 else { return }
+        let x = min(max(point.x - frame.minX, 0), frame.width)
+        let y = min(max(point.y - frame.minY, 0), frame.height)
+        guard let date: Date = proxy.value(atX: x), let value: Double = proxy.value(atY: y) else { return }
+        selected = ChartRangeSegments.selection(rows: segments, time: date.timeIntervalSince1970,
+            value: value * divisor, secondsPerPoint: (plotEnd - plotStart) / frame.width,
+            unitsPerPoint: (yDomain.upperBound - yDomain.lowerBound) * divisor / frame.height)
     }
 
     #endif
 
     private func tickLabel(_ date: Date) -> String {
+        if active.period == .all { return String(calendar.component(.year, from: date)) }
         let formatter = DateFormatter()
         formatter.timeZone = timeZone
-        formatter.dateFormat = active.period == .hour ? "h:mm a" : active.period == .day ? "h a" : active.period == .week ? "EEE" : active.period == .month ? "d" : active.period == .all ? "MMM yy" : "MMM"
+        formatter.dateFormat = active.period == .hour ? "h:mm a" : active.period == .day ? "h a" : active.period == .week ? "EEE" : active.period == .month ? "d" : "MMM"
         return formatter.string(from: date)
     }
 
@@ -283,6 +279,7 @@ struct MetricChart: View {
                 #if os(Android)
                 AndroidRangePlot(rows: segments, referenceBand: referenceBand, scaleLabels: scaleLabels, isBinary: isBinary, domain: yDomain, start: plotStart, length: plotEnd - plotStart,
                     divisor: divisor, width: width, ticks: tickDates.map { ($0.timeIntervalSince1970, tickLabel($0)) },
+                    showsYearTicks: active.period == .all,
                     color: color, exposedEnd: exposedEnd, selected: $selected, move: move)
                 #else
                 Chart {
@@ -301,7 +298,7 @@ struct MetricChart: View {
                     ForEach(Array(segments.enumerated()), id: \.offset) { _, row in
                         let lower = (row["display_min"].numberValue ?? 0) / divisor
                         let upper = (row["display_max"].numberValue ?? 0) / divisor
-                        let date = Date(timeIntervalSince1970: position(row))
+                        let date = Date(timeIntervalSince1970: ChartRangeSegments.position(row))
                         if isBinary {
                             PointMark(x: .value("Time", date), y: .value("Result", lower))
                                 .symbol { BinaryResultSymbol(value: lower, positiveColor: color(row)) }
@@ -328,7 +325,7 @@ struct MetricChart: View {
                         }
                     }
                     if let selected {
-                        RuleMark(x: .value("Selected time", Date(timeIntervalSince1970: position(selected))))
+                        RuleMark(x: .value("Selected time", Date(timeIntervalSince1970: ChartRangeSegments.position(selected))))
                             .foregroundStyle(.secondary.opacity(0.5)).lineStyle(StrokeStyle(lineWidth: 1))
                     }
                 }
@@ -340,14 +337,15 @@ struct MetricChart: View {
                     AxisMarks(values: tickDates) { value in
                         AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 3]))
                         if let date = value.as(Date.self) {
-                            AxisValueLabel {
+                            let isFirstYear = active.period == .all && date.timeIntervalSince1970 == plotStart
+                            AxisValueLabel(anchor: isFirstYear ? .topLeading : nil) {
                                 switch active.period {
                                 case .hour: Text(date, format: .dateTime.hour().minute())
                                 case .day: Text(date, format: .dateTime.hour())
                                 case .week: Text(date, format: .dateTime.weekday(.abbreviated))
                                 case .month: Text(date, format: .dateTime.day())
                                 case .halfYear, .year: Text(date, format: .dateTime.month(.abbreviated))
-                                case .all: Text(date, format: .dateTime.month(.abbreviated).year(.twoDigits))
+                                case .all: Text(tickLabel(date))
                                 }
                             }
                         }

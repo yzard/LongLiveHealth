@@ -7787,12 +7787,13 @@
       "metric_id": "vitamin_d_25_oh_d3",
       "name": "25-hydroxyvitamin D3",
       "unit": "ng/mL",
+      "loinc": "1989-3",
       "sources": [
-        "lab_context"
+        "vitd"
       ],
       "rules": [],
-      "reason": "No transferable interval verified for this coded assay. Use its original reference interval; ECG intervals require rhythm, rate and correction-method context.",
-      "note": "No automatic in-range judgment without an applicable interval.",
+      "reason": "This is the D3 fraction. Total 25-hydroxyvitamin D guidance does not apply.",
+      "note": "Use the original laboratory reference interval for this fraction.",
       "review_status": "no_numeric_rule"
     },
     "clinical:372380786a9f6bd054269a5eec72970f2f1889d610a6c9c84c7272491839ae08": {
