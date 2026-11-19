@@ -441,7 +441,7 @@ async fn rescan_unique_candidates(
     candidates: Vec<ObservationPayload>,
 ) -> Result<Vec<ObservationPayload>, AppError> {
     let key_for = |payload: &ObservationPayload, source: Option<&str>, date: Option<&str>| {
-        let metric = crate::reports::learned_for_pending(payload, metadata)
+        let metric = crate::reports::learned_report_mapping(payload, metadata)
             .or_else(|| crate::laboratory::resolved_report_metric(payload, source));
         crate::report_dedup::result_key(payload, metric, date)
     };

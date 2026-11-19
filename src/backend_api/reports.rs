@@ -558,6 +558,18 @@ impl StoredObservation {
                     || custom_metrics.iter().any(|metric| metric.metric_id == *id)
             })
             .or(named_id.map(String::as_str))
+            .or_else(|| {
+                // A legacy submission can predate the account's confirmed LOINC link.
+                if self.status != "submitted"
+                    || crate::laboratory::test_code_conflicts(&payload.raw_name)
+                {
+                    return None;
+                }
+                let id = learned_report_mapping(&payload, metadata)?;
+                let custom = custom_metrics.iter().find(|metric| metric.metric_id == id);
+                let unit = crate::laboratory::metric_standard_unit(id, custom);
+                crate::laboratory::association_units_compatible(id, unit, &payload).then_some(id)
+            })
             .map(str::to_owned);
         let custom = custom_metrics
             .iter()
@@ -698,7 +710,7 @@ fn resolve_report_mapping<'a>(
         && payload.metric_id.is_none()
         && test_code(payload).is_some_and(|code| metadata.links.contains_key(code))
     {
-        return learned_for_pending(payload, metadata);
+        return learned_report_mapping(payload, metadata);
     }
     crate::laboratory::resolved_report_metric(payload, source)
         .or_else(|| crate::laboratory::verified_custom_candidate(payload, custom_metrics))
@@ -1460,60 +1472,63 @@ impl Database {
                     Some(UnmappedChoice::Unmapped) | None => {}
                 }
             }
-            if observation.status == ReportResultStatus::Submitted
-                && previous.as_ref().is_none_or(|(status, payload)| {
-                    status != "submitted"
-                        || payload.metric_id != observation.payload.metric_id
-                        || payload.submission_loinc() != mapping_code.as_deref()
-                })
-            {
+            if observation.status == ReportResultStatus::Submitted {
                 let payload = &mut observation.payload;
-                let resolved = payload.metric_id.as_deref().or_else(|| {
-                    resolve_report_mapping(payload, "pending", source, &custom_metrics, &metadata)
-                });
-                if let Some(id) = resolved {
-                    let save_mapping = payload.metric_id.is_none()
-                        && (id.starts_with("custom:")
-                            || learned_for_pending(payload, &metadata).is_some());
-                    let id = id.to_owned();
-                    if let Some(code) = mapping_code.as_deref() {
-                        let clinical_metric = clinical
-                            .get(&id)
-                            .map(lab_metric_metadata::clinical_metric)
-                            .transpose()?;
-                        let metric = clinical_metric.as_ref().or_else(|| {
-                            custom_metrics.iter().find(|metric| metric.metric_id == id)
-                        });
-                        let standard_unit = crate::laboratory::metric_standard_unit(&id, metric);
-                        if lab_metric_metadata::link_submitted(
-                            &mut transaction,
-                            user_id,
-                            &mut metadata,
-                            &native_links,
-                            lab_metric_metadata::LinkTarget {
-                                id: &id,
-                                standard_unit,
-                                is_new: new_definition,
-                            },
-                            code,
+                let id = payload
+                    .metric_id
+                    .as_deref()
+                    .or_else(|| {
+                        resolve_report_mapping(
                             payload,
+                            "pending",
+                            source,
+                            &custom_metrics,
+                            &metadata,
                         )
-                        .await?
-                        {
-                            updated_metric_ids.insert(id.clone());
-                        }
-                    }
-                    if save_mapping {
-                        // Preserve account-specific associations across renames and rescans.
-                        payload.metric_id = Some(id);
-                    }
-                } else if candidate_key.is_some()
-                    || test_code(payload).is_some_and(|code| metadata.links.contains_key(code))
-                {
-                    return Err(AppError::Invalid(
+                    })
+                    .ok_or(AppError::Invalid(
                         "Choose a metric mapping or mark the result as new before submitting",
+                    ))?
+                    .to_owned();
+                let clinical_metric = clinical
+                    .get(&id)
+                    .map(lab_metric_metadata::clinical_metric)
+                    .transpose()?;
+                let metric = clinical_metric
+                    .as_ref()
+                    .or_else(|| custom_metrics.iter().find(|metric| metric.metric_id == id));
+                if metric.is_none() && crate::laboratory::metric_definition(&id).is_none() {
+                    return Err(AppError::Invalid(
+                        "Browse metric is not available for this account",
                     ));
                 }
+                if let Some(code) = mapping_code.as_deref()
+                    && previous.as_ref().is_none_or(|(status, prior)| {
+                        status != "submitted"
+                            || prior.metric_id.as_deref() != Some(id.as_str())
+                            || prior.submission_loinc() != Some(code)
+                    })
+                {
+                    let target = lab_metric_metadata::LinkTarget {
+                        id: &id,
+                        standard_unit: crate::laboratory::metric_standard_unit(&id, metric),
+                        is_new: new_definition,
+                    };
+                    if lab_metric_metadata::link_submitted(
+                        &mut transaction,
+                        user_id,
+                        &mut metadata,
+                        &native_links,
+                        target,
+                        code,
+                        payload,
+                    )
+                    .await?
+                    {
+                        updated_metric_ids.insert(id.clone());
+                    }
+                }
+                payload.metric_id = Some(id);
             }
             let statement = match observation.status {
                 ReportResultStatus::Pending => queries::SAVE_PENDING_OBSERVATION,
@@ -1861,7 +1876,7 @@ pub struct ExtractionInputRequest {
     pub page: i64,
 }
 
-pub(crate) fn learned_for_pending<'a>(
+pub(crate) fn learned_report_mapping<'a>(
     payload: &ObservationPayload,
     metadata: &'a Metadata,
 ) -> Option<&'a str> {
@@ -1915,10 +1930,8 @@ impl Database {
         let clinical = if rows.iter().any(|row| {
             serde_json::from_str(&row.payload_json).is_ok_and(|payload| {
                 needs_review_catalog(&payload)
-                    || (row.status == "pending"
-                        && test_code(&payload)
-                            .and_then(|code| metadata.links.get(code))
-                            .is_some_and(|id| lab_metric_metadata::is_clinical_id(id)))
+                    || learned_report_mapping(&payload, &metadata)
+                        .is_some_and(lab_metric_metadata::is_clinical_id)
             })
         }) {
             if let Some(connection) = connection {

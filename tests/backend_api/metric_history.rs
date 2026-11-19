@@ -1,10 +1,10 @@
-use crate::{add_user, archive, fixture, observation_payload};
+use crate::{add_user, archive, fixture, observation_payload, seed_legacy_submitted_observation};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use longlivehealth::reports::ReportResultStatus;
 use longlivehealth::{
     health::{ConnectionRequest, HealthRecordInput, SyncRequest},
     metric_history::{HistoryRequest, history},
-    reports::{ReportResultChange, ReportSubmission},
+    reports::{NewMetric, ReportResultChange, ReportSubmission, UnmappedChoice},
 };
 use serde_json::{Value, json};
 
@@ -18,6 +18,102 @@ async fn read(state: &longlivehealth::app::AppState, user: &str) -> Value {
     )
     .await
     .unwrap()
+}
+
+#[tokio::test]
+async fn browse_uses_confirmed_loinc_link_for_compatible_older_submissions() {
+    let (directory, state) = fixture().await;
+    let user = add_user(&state, "alice").await;
+    let name = "eGFR (Afr. Amer.)";
+    let unit = "mL/min/1.73m2";
+    let mut archived_reports = Vec::new();
+    for (year, reported_unit, choice) in [
+        (2018, unit, None),
+        (2017, "mg/dL", None),
+        (2016, unit, Some(UnmappedChoice::Unmapped)),
+        (
+            2019,
+            unit,
+            Some(UnmappedChoice::New(NewMetric {
+                name: name.into(),
+                standard_unit: unit.into(),
+                loinc_code: Some("48643-1".into()),
+            })),
+        ),
+    ] {
+        let report_id = archive(&state, "alice").await;
+        let mut payload = observation_payload();
+        payload.raw_name = format!("{name} (48643-1)");
+        payload.raw_result = "72".into();
+        payload.raw_unit = Some(reported_unit.into());
+        payload.sampled_at = Some(format!("{year}-10-20"));
+        payload.metric_id = None;
+        payload.unmapped_choice = choice;
+        payload.reference_range = None;
+        payload.report_flag = None;
+        if year < 2019 {
+            seed_legacy_submitted_observation(
+                &directory,
+                &user.user_id,
+                &report_id,
+                None,
+                &payload,
+            )
+            .await;
+            archived_reports.push(report_id);
+            continue;
+        }
+        state
+            .database
+            .submit_report_changes(
+                &user.user_id,
+                ReportSubmission {
+                    report_id: report_id.clone(),
+                    expected_revision: 1,
+                    context: None,
+                    observations: vec![ReportResultChange {
+                        observation_id: None,
+                        expected_revision: None,
+                        status: ReportResultStatus::Submitted,
+                        payload,
+                    }],
+                },
+            )
+            .await
+            .unwrap();
+        archived_reports.push(report_id);
+    }
+    let catalog = longlivehealth::browse_catalog::get(&state.database, &user.user_id)
+        .await
+        .unwrap();
+    let entries = catalog["entries"].as_array().unwrap();
+    // The incompatible and intentionally unmapped originals remain separate.
+    assert_eq!(entries.len(), 3);
+    let metric_id = entries
+        .iter()
+        .find_map(|entry| {
+            entry["kind"]
+                .as_str()
+                .filter(|id| id.starts_with("custom:"))
+        })
+        .unwrap();
+    let result = history(
+        &state.database,
+        &user.user_id,
+        HistoryRequest {
+            metric_id: metric_id.into(),
+        },
+    )
+    .await
+    .unwrap();
+    let records = result["records"].as_array().unwrap();
+    assert_eq!(records.len(), 2);
+    let earlier = records
+        .iter()
+        .find(|row| row["report_id"] == archived_reports[0])
+        .unwrap();
+    assert!(earlier["original"]["metric_id"].is_null());
+    assert_eq!(result["points"].as_array().unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -48,25 +144,20 @@ async fn renamed_report_metrics_are_suggested_by_loinc_or_original_identity_and_
         context: Some(serde_json::from_value(json!({"source_name":"Fixture Laboratory"})).unwrap()),
         observations,
     };
-    state
-        .database
-        .submit_report_changes(
+    for (name, unit) in [
+        ("pH (50560-2)", None),
+        ("Synthetic particle ratio", Some("U/L")),
+    ] {
+        let payload = row(name, "2018", unit, ReportResultStatus::Submitted).payload;
+        seed_legacy_submitted_observation(
+            &directory,
             &alice.user_id,
-            request(
-                &first,
-                vec![
-                    row("pH (50560-2)", "2018", None, ReportResultStatus::Submitted),
-                    row(
-                        "Synthetic particle ratio",
-                        "2018",
-                        Some("U/L"),
-                        ReportResultStatus::Submitted,
-                    ),
-                ],
-            ),
+            &first,
+            Some("Fixture Laboratory"),
+            &payload,
         )
-        .await
-        .unwrap();
+        .await;
+    }
     let catalog = longlivehealth::metric_history::browse(&state.database, &alice.user_id)
         .await
         .unwrap();
@@ -1066,7 +1157,7 @@ async fn report_aliases_share_history_and_browse_without_rewriting_stored_eviden
         assert_eq!(result["observations"][0]["payload"]["raw_name"], name);
         assert_eq!(
             result["observations"][0]["payload"]["metric_id"],
-            Value::Null
+            "ldl_cholesterol"
         );
         assert_eq!(
             result["observations"][0]["resolved_metric_id"],
@@ -1438,7 +1529,7 @@ fn numeric_suffixes_preserve_qualifiers_and_reject_code_conflicts() {
 
 #[tokio::test]
 async fn browse_keeps_submitted_unmapped_results_searchable_with_original_history() {
-    let (_directory, state) = fixture().await;
+    let (directory, state) = fixture().await;
     let alice = add_user(&state, "alice").await;
     let bob = add_user(&state, "bob").await;
     let mut report_ids = Vec::new();
@@ -1459,6 +1550,18 @@ async fn browse_keeps_submitted_unmapped_results_searchable_with_original_histor
         payload.raw_unit = unit.map(str::to_owned);
         payload.sampled_at = Some(format!("2018-10-2{index}"));
         payload.metric_id = None;
+        if status == ReportResultStatus::Submitted {
+            seed_legacy_submitted_observation(
+                &directory,
+                &alice.user_id,
+                &report_id,
+                Some(source),
+                &payload,
+            )
+            .await;
+            report_ids.push(report_id);
+            continue;
+        }
         let result = state
             .database
             .submit_report_changes(

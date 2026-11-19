@@ -1711,7 +1711,7 @@ async fn review_creates_an_owned_metric_and_links_its_submitted_browse_history()
 async fn mark_as_new_replaces_a_legacy_submitted_display_identity_with_a_persisted_metric() {
     use longlivehealth::reports::{NewMetric, UnmappedChoice};
 
-    let (_directory, state) = fixture().await;
+    let (directory, state) = fixture().await;
     let user = add_user(&state, "alice").await;
     let report_id = archive(&state, "alice").await;
     let review = |revision, observation_id, expected_revision, payload| {
@@ -1736,7 +1736,13 @@ async fn mark_as_new_replaces_a_legacy_submitted_display_identity_with_a_persist
     payload.raw_unit = None;
     payload.metric_id = None;
     payload.source.quote = "pH (50560-2) 6.0".into();
-    let original = review(1, None, None, payload.clone()).await.unwrap();
+    crate::seed_legacy_submitted_observation(&directory, &user.user_id, &report_id, None, &payload)
+        .await;
+    let original = state
+        .database
+        .report(&user.user_id, &report_id)
+        .await
+        .unwrap();
     let legacy = &original["observations"][0];
     assert!(legacy["payload"]["metric_id"].is_null());
     let browse = longlivehealth::metric_history::browse(&state.database, &user.user_id)
@@ -1912,7 +1918,7 @@ async fn edited_draft_can_submit_directly_after_mapping_issues_are_fixed() {
 }
 
 #[tokio::test]
-async fn explicitly_unmapped_manual_result_keeps_its_printed_identity() {
+async fn explicitly_unmapped_manual_result_can_only_be_saved_pending() {
     use longlivehealth::reports::UnmappedChoice;
 
     let (_directory, state) = fixture().await;
@@ -1921,24 +1927,27 @@ async fn explicitly_unmapped_manual_result_keeps_its_printed_identity() {
     let mut payload = observation_payload();
     payload.metric_id = None;
     payload.unmapped_choice = Some(UnmappedChoice::Unmapped);
-    let document = state
-        .database
-        .submit_report_changes(
+    let review = |status| {
+        state.database.submit_report_changes(
             &user.user_id,
             ReportSubmission {
-                report_id,
+                report_id: report_id.clone(),
                 expected_revision: 1,
                 context: None,
                 observations: vec![ReportResultChange {
                     observation_id: None,
                     expected_revision: None,
-                    status: ReportResultStatus::Submitted,
-                    payload,
+                    status,
+                    payload: payload.clone(),
                 }],
             },
         )
-        .await
-        .unwrap();
+    };
+    assert!(matches!(
+        review(ReportResultStatus::Submitted).await,
+        Err(longlivehealth::error::AppError::Invalid(_))
+    ));
+    let document = review(ReportResultStatus::Pending).await.unwrap();
     let row = &document["observations"][0];
     assert_eq!(row["payload"]["unmapped_choice"]["kind"], "unmapped");
     assert!(row["resolved_metric_id"].is_null());

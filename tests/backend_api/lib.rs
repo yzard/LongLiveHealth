@@ -110,6 +110,40 @@ pub async fn fixture() -> (TempDir, AppState) {
     (directory, state)
 }
 
+pub async fn seed_legacy_submitted_observation(
+    directory: &TempDir,
+    user_id: &str,
+    report_id: &str,
+    source: Option<&str>,
+    payload: &longlivehealth::reports::ObservationPayload,
+) {
+    assert!(payload.metric_id.is_none());
+    let pool = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(directory.path().join("database.sqlite")),
+    )
+    .await
+    .unwrap();
+    let mut transaction = pool.begin().await.unwrap();
+    sqlx::query("INSERT INTO observations (observation_id,user_id,report_id,current_revision,status,payload_json) VALUES (?,?,?,1,'submitted',?)")
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(user_id)
+        .bind(report_id)
+        .bind(serde_json::to_string(payload).unwrap())
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE reports SET revision=revision+1, context_json=CASE WHEN ?1 IS NULL THEN context_json ELSE json_set(context_json,'$.source_name',?1) END WHERE user_id=?2 AND report_id=?3")
+        .bind(source)
+        .bind(user_id)
+        .bind(report_id)
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    transaction.commit().await.unwrap();
+    pool.close().await;
+}
+
 pub fn configured_template() -> String {
     TEMPLATE
         .replace("analysis_enabled = true", "analysis_enabled = false")
