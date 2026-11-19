@@ -20,6 +20,7 @@ struct ReportView: View {
     @State var readyVisible = false
     @Environment(\.scenePhase) var scenePhase
     @Environment(\.dismiss) var dismiss
+    @Environment(\.colorScheme) var colorScheme
 
     private struct IndexedValue: Identifiable {
         let id: String
@@ -76,6 +77,17 @@ struct ReportView: View {
         case info, markerCount, actions, retry, relationship, unlink, review, error, empty, ocrOutput
         case validation(IndexedValue)
         case observation(JSONValue)
+
+        func background(in scheme: ColorScheme) -> Color? {
+            switch self {
+            case .validation: ReportResultPalette.needsReview(in: scheme)
+            case .observation(let value):
+                value["status"] == .string("submitted")
+                    ? ReportResultPalette.submitted(in: scheme)
+                    : ReportResultPalette.needsReview(in: scheme)
+            default: nil
+            }
+        }
 
         var id: String {
             switch self {
@@ -171,7 +183,9 @@ struct ReportView: View {
         List {
             ForEach(sections) { section in
                 Section {
-                    ForEach(section.rows) { row in reportRow(row) }
+                    ForEach(section.rows) { row in
+                        reportRow(row).listRowBackground(row.background(in: colorScheme))
+                    }
                 } header: {
                     if let title = section.title { Text(title) }
                 }
@@ -223,7 +237,7 @@ struct ReportView: View {
                 .padding(.horizontal, 16).padding(.vertical, 8)
             if !last { Divider() }
         }
-        .background(Color(.systemBackground))
+        .background(row.background(in: colorScheme) ?? Color(.systemBackground))
     }
     #endif
 
@@ -336,7 +350,8 @@ struct ReportView: View {
         let reason = issue["reason"] == .string("invalid_date") ? "Invalid" : "Missing"
         return VStack(alignment: .leading, spacing: 4) {
             Text(name.isEmpty ? uiText("Item \(Int(issue["item_index"].numberValue ?? 0))") : name).font(.headline)
-            Text(uiText("Page \(Int(issue["page"].numberValue ?? 0)) · \(reason) \(field)")).foregroundStyle(.red)
+            Text(uiText("Page \(Int(issue["page"].numberValue ?? 0)) · \(reason) \(field)"))
+                .foregroundStyle(ReportResultPalette.warning(in: colorScheme))
         }
     }
 
@@ -690,6 +705,28 @@ struct DocumentEvidenceView: View {
     }
 }
 
+private enum ReportResultPalette {
+    static func needsReview(in scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color(red: 0.19, green: 0.16, blue: 0.10)
+            : Color(red: 1, green: 0.96, blue: 0.88)
+    }
+
+    static func submitted(in scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color(red: 0.11, green: 0.17, blue: 0.14)
+            : Color(red: 0.91, green: 0.96, blue: 0.92)
+    }
+
+    static func reviewAccent(in scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color(red: 1, green: 0.83, blue: 0.54)
+            : Color(red: 0.45, green: 0.31, blue: 0)
+    }
+
+    static func warning(in scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color(red: 1, green: 0.60, blue: 0.64)
+            : Color(red: 0.61, green: 0.15, blue: 0.20)
+    }
+}
+
 struct ReportObservationRow: View {
     let model: AppModel
     let observation: JSONValue
@@ -697,6 +734,8 @@ struct ReportObservationRow: View {
     let edit: () -> Void
     let showSource: (Int) -> Void
     let writeHealth: () -> Void
+    @Environment(\.colorScheme) var colorScheme
+
     private var needsManualReview: Bool {
         observation["status"] == .string("pending")
             && !ReportReview.canBulkSubmit(observation)
@@ -715,6 +754,7 @@ struct ReportObservationRow: View {
 
     var body: some View {
         let status = observation["status"].stringValue
+        let reviewAccent = ReportResultPalette.reviewAccent(in: colorScheme)
         let mappedMetricID = ReportReview.defaultMetricID(observation)
         let hasPossibleMatch = status == "pending" && mappedMetricID != nil
         let proposedNew = observation["payload"]["unmapped_choice"]["kind"] == .string("new")
@@ -742,10 +782,10 @@ struct ReportObservationRow: View {
                     Button(action: edit) {
                         Text(hasPossibleMatch ? uiText("Possible match") : uiText("New"))
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color.yellow)
+                            .foregroundStyle(reviewAccent)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(Color.yellow.opacity(0.12), in: Capsule())
+                            .background(reviewAccent.opacity(0.12), in: Capsule())
                             .frame(minHeight: 44)
                     }
                     .accessibilityIdentifier(hasPossibleMatch ? "report-result-possible-match" : "report-result-new")
@@ -757,7 +797,7 @@ struct ReportObservationRow: View {
                     Text(resultLabel)
                         .foregroundStyle(observation["browse_issues"].arrayValue.contains {
                             $0["code"] == .string("negative_with_unit")
-                        } ? Color.yellow : Color.primary)
+                        } ? reviewAccent : Color.primary)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }.buttonStyle(.plain)
@@ -773,10 +813,10 @@ struct ReportObservationRow: View {
                     Button(action: changeStatus) {
                         Text(needsManualReview ? uiText("Review") : uiText("Submit"))
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(needsManualReview ? Color.yellow : Color.accentColor)
+                            .foregroundStyle(needsManualReview ? reviewAccent : Color.accentColor)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
-                            .background((needsManualReview ? Color.yellow : Color.accentColor).opacity(0.12), in: Capsule())
+                            .background((needsManualReview ? reviewAccent : Color.accentColor).opacity(0.12), in: Capsule())
                             .frame(minHeight: 44)
                     }
                     .accessibilityIdentifier("report-result-status-action")
@@ -802,7 +842,7 @@ struct ReportObservationRow: View {
                         HStack(alignment: .firstTextBaseline) {
                             issueLabel(issue)
                             Image(systemName: MobileSymbol.name("chevron.right"))
-                        }.font(.caption).foregroundStyle(.orange)
+                        }.font(.caption).foregroundStyle(ReportResultPalette.warning(in: colorScheme))
                     }.buttonStyle(.plain).accessibilityIdentifier("report-result-issue")
                 } else {
                     issueLabel(issue).accessibilityIdentifier("report-result-issue")
@@ -816,7 +856,7 @@ struct ReportObservationRow: View {
 
     private func issueLabel(_ issue: JSONValue) -> some View {
         Label(uiMessage(issue["message"].stringValue), systemImage: MobileSymbol.name("exclamationmark.triangle"))
-            .font(.caption).foregroundStyle(Color.yellow)
+            .font(.caption).foregroundStyle(ReportResultPalette.warning(in: colorScheme))
             .fixedSize(horizontal: false, vertical: true)
     }
 
