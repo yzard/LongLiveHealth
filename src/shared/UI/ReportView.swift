@@ -522,6 +522,13 @@ struct ReportView: View {
             where !model.metrics.contains(where: { $0["metric_id"] == metric["metric_id"] }) {
             model.metrics.append(metric)
         }
+        let updatedCodes = response["updated_metric_loinc"].objectValue
+        if !updatedCodes.isEmpty {
+            for index in model.metrics.indices {
+                let id = model.metrics[index]["metric_id"].stringValue
+                if let codes = updatedCodes[id] { model.metrics[index]["loinc"] = codes }
+            }
+        }
         try await applySavedReport(response)
     }
 

@@ -1,4 +1,12 @@
 {
+  "The matching code has multiple official replacements.": "匹配到的旧代码有多个官方替代项。",
+  "There is no direct replacement between these codes.": "这些代码之间没有直接替代关系。",
+  "Quantitative": "定量",
+  "Semiquantitative": "半定量",
+  "Ordinal": "有序定性",
+  "Ordinal or quantitative": "有序定性或定量",
+  "Nominal": "无序定性",
+  "Different fields": "不一致的字段",
   " g": "g",
   ", &unit, ": ", &unit,",
   "--data-dir must be an absolute directory": "--data-dir 必须是绝对目录",

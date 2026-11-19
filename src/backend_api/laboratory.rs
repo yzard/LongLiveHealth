@@ -789,6 +789,42 @@ pub(crate) fn history_comparison_unit<'a>(
     unit
 }
 
+pub(crate) fn metric_standard_unit<'a>(
+    id: &str,
+    custom: Option<&'a CustomMetric>,
+) -> Option<&'a str> {
+    custom
+        .map(|metric| metric.standard_unit.as_str())
+        .or_else(|| metric_definition(id).map(|metric| metric.standard_unit))
+        .filter(|unit| !unit.is_empty())
+}
+
+pub(crate) fn association_units_compatible(
+    metric_id: &str,
+    standard_unit: Option<&str>,
+    payload: &crate::reports::ObservationPayload,
+) -> bool {
+    let reported = payload
+        .raw_unit
+        .as_deref()
+        .map(custom_unit)
+        .filter(|unit| !unit.is_empty());
+    let standard = standard_unit.map(custom_unit);
+    match reported {
+        Some(unit) => {
+            standard.is_some_and(|standard| conversion(metric_id, standard, unit).is_some())
+        }
+        None => {
+            standard == Some("1")
+                || qualitative_shape(&payload.raw_result).is_some()
+                || matches!(
+                    payload.raw_result.trim().to_ascii_lowercase().as_str(),
+                    "reactive" | "non-reactive" | "nonreactive"
+                )
+        }
+    }
+}
+
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum UnitMatch {
@@ -978,6 +1014,8 @@ pub fn canonical_unit(raw: &str) -> Option<&'static str> {
         "pg" | "PG" => Some("pg"),
         "mIU/L" | "mIU/l" | "uIU/mL" | "uIU/ml" | "u[IU]/mL" | "m[IU]/L" => Some("mIU/L"),
         "mL/min/1.73m2" | "ml/min/1.73m2" | "mL/min/{1.73_m2}" => Some("mL/min/1.73m2"),
+        "/hpf" | "/HPF" | "/[hpf]" | "/[HPF]" => Some("/hpf"),
+        "/lpf" | "/LPF" | "/[lpf]" | "/[LPF]" => Some("/lpf"),
         "s" | "sec" | "seconds" | "second(s)" => Some("s"),
         "/100WBC's" | "/100WBC’s" | "/100WBC" => Some("/100 WBC's"),
         // CBC reports also use the documented 10E6 and 10E3 unit spellings.
@@ -1008,6 +1046,7 @@ struct Conversion {
     source: &'static str,
 }
 fn conversion(metric: &str, standard: &str, unit: &str) -> Option<Conversion> {
+    let standard = custom_unit(standard);
     let mut rule = Conversion {
         scale: Decimal::ONE,
         divisor: Decimal::ONE,

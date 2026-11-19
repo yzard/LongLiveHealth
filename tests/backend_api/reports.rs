@@ -35,7 +35,7 @@ async fn loinc_lookup_returns_the_official_name_with_authentication() {
 }
 
 #[tokio::test]
-async fn report_submissions_require_an_official_direct_replacement_to_add_loinc_codes() {
+async fn report_submissions_keep_official_replacements_and_reject_incompatible_codes() {
     use axum::http::StatusCode;
     use serde_json::json;
 
@@ -95,6 +95,8 @@ async fn report_submissions_require_an_official_direct_replacement_to_add_loinc_
     let message = issue["message"].as_str().unwrap();
     assert!(message.contains("14647-2") && message.contains("2093-3"));
     assert!(message.contains("MapTo.csv") && message.contains("no direct replacement"));
+    assert!(message.contains("method:") && message.contains("result type:"));
+    assert!(message.contains("measurement property"));
 
     let (status, rejected_batch) = crate::request(
         &router,
@@ -168,6 +170,227 @@ async fn report_submissions_require_an_official_direct_replacement_to_add_loinc_
             .unwrap()
             .contains("LOINC is already linked to another Browse metric")
     );
+}
+
+#[tokio::test]
+async fn loinc_method_variants_share_a_metric_and_preserve_each_printed_code() {
+    use axum::http::StatusCode;
+    use serde_json::json;
+
+    let (_directory, state) = fixture().await;
+    add_user(&state, "alice").await;
+    let token = crate::token(&state, "alice").await;
+    let router = longlivehealth::app::create_application(state.clone());
+    let submit_path = "/api/v1/reports/submit";
+
+    for (seed, incoming, label, standard, printed, value) in [
+        (
+            "50560-2",
+            "2756-5",
+            "Archive urine acidity",
+            "1",
+            None,
+            "6.5",
+        ),
+        (
+            "46419-8",
+            "13945-1",
+            "Archive urine sediment erythrocytes",
+            "/hpf",
+            Some("/[HPF]"),
+            "2",
+        ),
+        (
+            "46702-7",
+            "5821-4",
+            "Archive urine sediment leukocytes",
+            "/hpf",
+            Some("/[HPF]"),
+            "0–4",
+        ),
+        (
+            "5181-3",
+            "5182-1",
+            "Archive hepatitis A IgM antibody",
+            "COI",
+            None,
+            "Non-Reactive",
+        ),
+    ] {
+        let report = archive(&state, "alice").await;
+        let mut original = observation_payload();
+        original.metric_id = None;
+        original.raw_name = format!("{label} ({seed})");
+        original.raw_unit = Some(standard.into());
+        original.raw_result = "2".into();
+        let mut original = serde_json::to_value(original).unwrap();
+        original["unmapped_choice"] = json!({"kind":"new", "definition":{
+            "name":label, "standard_unit":standard, "loinc_code":seed
+        }});
+        let (status, created) = crate::request(&router, submit_path, Some(&token), json!({
+            "report_id":report, "expected_revision":1, "observations":[{"status":"submitted", "payload":original}]
+        })).await;
+        assert_eq!(status, StatusCode::OK, "{created}");
+        let metric = &created["created_metric"]["metric_id"];
+        let revision = &created["report"]["revision"];
+        let mut row = observation_payload();
+        row.raw_name = format!("{label} ({incoming})");
+        row.raw_result = value.into();
+        row.raw_unit = printed.map(str::to_owned);
+        row.metric_id = metric.as_str().map(str::to_owned);
+
+        if incoming == "2756-5" {
+            let mut wrong_unit = row.clone();
+            wrong_unit.raw_unit = Some("mg/dL".into());
+            let (status, failure) = crate::request(&router, submit_path, Some(&token), json!({
+                "report_id":report, "expected_revision":revision, "observations":[{"status":"submitted", "payload":wrong_unit}]
+            })).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{failure}");
+            let message = failure["error"]["message"].as_str().unwrap();
+            assert!(
+                message.contains("Units are incompatible") && message.contains("mg/dL"),
+                "{message}"
+            );
+        }
+
+        let (status, submitted) = crate::request(&router, submit_path, Some(&token), json!({
+            "report_id":report, "expected_revision":revision, "observations":[{"status":"submitted", "payload":row}]
+        })).await;
+        assert_eq!(status, StatusCode::OK, "{submitted}");
+        let key = metric.as_str().unwrap();
+        let entries = submitted["updated_metric_loinc"][key].as_array().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().any(|code| code["code"] == seed));
+        assert!(entries.iter().any(|code| code["code"] == incoming));
+        let observations = submitted["observations"].as_array().unwrap();
+        assert_eq!(observations.len(), 2);
+        assert!(
+            observations
+                .iter()
+                .all(|o| o["resolved_metric_id"] == *metric)
+        );
+        let linked = observations
+            .iter()
+            .find(|o| o["lab_test_code"] == incoming)
+            .unwrap();
+        assert_eq!(linked["payload"]["raw_name"], row.raw_name);
+        assert_eq!(linked["payload"]["raw_unit"], json!(printed));
+        if incoming == "5821-4" {
+            assert_eq!(linked["interpretation"]["result"]["status"], "range");
+        }
+        let (status, catalog) =
+            crate::request(&router, "/api/v1/metrics/list", Some(&token), json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{catalog}");
+        let entry = catalog["metrics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["metric_id"] == *metric)
+            .unwrap();
+        assert_eq!(entry["loinc"], submitted["updated_metric_loinc"][key]);
+        let (status, history) = crate::request(
+            &router,
+            "/api/v1/metrics/history/get",
+            Some(&token),
+            json!({"metric_id": key}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{history}");
+        assert_eq!(history["metric"]["loinc"], entry["loinc"]);
+        let records = history["records"].as_array().unwrap();
+        for code in [seed, incoming] {
+            assert!(records.iter().any(|record| {
+                let raw_name = record["original"]["raw_name"].as_str().unwrap_or_default();
+                raw_name.ends_with(&format!("({code})"))
+            }));
+        }
+    }
+}
+
+#[tokio::test]
+async fn urine_bacteria_ordinal_and_quantitative_codes_show_matching_diagnostics_and_stay_separate()
+{
+    use axum::http::StatusCode;
+    use serde_json::json;
+
+    let (directory, state) = fixture().await;
+    add_user(&state, "alice").await;
+    let token = crate::token(&state, "alice").await;
+    let report = archive(&state, "alice").await;
+    let router = longlivehealth::app::create_application(state);
+    let submit_path = "/api/v1/reports/submit";
+
+    let mut original = observation_payload();
+    original.raw_name = "Urine bacteria automated count (33218-9)".into();
+    original.raw_unit = Some("/hpf".into());
+    original.raw_result = "4".into();
+    original.metric_id = None;
+    let mut payload = serde_json::to_value(original).unwrap();
+    payload["unmapped_choice"] = json!({"kind":"new", "definition":{
+        "name":"Urine bacteria automated count", "standard_unit":"/hpf", "loinc_code":"33218-9"
+    }});
+    let (status, created) = crate::request(&router, submit_path, Some(&token), json!({
+        "report_id":report, "expected_revision":1, "observations":[{"status":"submitted", "payload":payload}]
+    })).await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let metric = &created["created_metric"]["metric_id"];
+    let mut candidate = observation_payload();
+    candidate.raw_name = "Bacteria, Urine (25145-4)".into();
+    candidate.raw_unit = None;
+    candidate.raw_result = "None".into();
+    candidate.metric_id = metric.as_str().map(str::to_owned);
+    let (status, draft) = crate::request(
+        &router,
+        submit_path,
+        Some(&token),
+        json!({
+            "report_id":report, "expected_revision":created["report"]["revision"],
+            "observations":[{"status":"pending", "payload":candidate}]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{draft}");
+    let pending = draft["observations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["status"] == "pending")
+        .unwrap();
+    let diagnostic = pending["browse_issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|issue| issue["code"] == "loinc_mapping_unverified")
+        .unwrap();
+    let (status, failure) = crate::request(
+        &router,
+        submit_path,
+        Some(&token),
+        json!({
+            "report_id":report, "expected_revision":draft["report"]["revision"],
+            "observations":[{"status":"submitted", "payload":candidate,
+            "observation_id":pending["observation_id"], "expected_revision":pending["revision"]}]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{failure}");
+    assert_eq!(failure["error"]["message"], diagnostic["message"]);
+    let message = diagnostic["message"].as_str().unwrap();
+    for expected in [
+        "25145-4",
+        "33218-9",
+        "Microscopy.light",
+        "Automated count",
+        "Ordinal",
+        "Quantitative",
+        "measurement property",
+    ] {
+        assert!(
+            message.contains(expected),
+            "{expected} missing from {message}"
+        );
+    }
+    assert_eq!(observation_counts(directory.path()).await, (1, 1));
 }
 
 #[tokio::test]

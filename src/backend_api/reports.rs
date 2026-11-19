@@ -503,6 +503,7 @@ impl StoredObservation {
         metadata: &Metadata,
         native_links: &std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
         include_suggestions: bool,
+        language: crate::interface_language::Language,
     ) -> Result<Observation, AppError> {
         let mut payload: ObservationPayload = serde_json::from_str(&self.payload_json)?;
         let context: Value = serde_json::from_str(&self.context_json)?;
@@ -592,7 +593,7 @@ impl StoredObservation {
                 message: "A metric with this name and unit already exists. Select it or change the new definition.".into(),
             });
         }
-        if conflict {
+        if conflict && let Some(code) = payload.mapping_loinc() {
             let message = linked_candidate
                 .map(|id| metadata.aliases.get(id).map(String::as_str)
                     .or_else(|| custom_metrics.iter().find(|metric| metric.metric_id == id).map(|metric| metric.name.as_str()))
@@ -601,10 +602,25 @@ impl StoredObservation {
                     || "This LOINC is used by multiple Apple Health metrics. Check the printed code and metric mapping.".into(),
                     |name| format!("This LOINC is already linked to {name}. Check the printed code and metric mapping."),
                 );
+            let existing = payload
+                .metric_id
+                .as_deref()
+                .map(|id| {
+                    metadata
+                        .codes_for_metric(
+                            id,
+                            lab_metric_metadata::native_codes_for_metric(native_links, id),
+                        )
+                        .into_iter()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            let details = crate::loinc::comparison_details(code, &existing, language);
             browse_issues.push(BrowseIssue {
                 code: "loinc_metric_conflict",
                 scope: "browse",
-                message,
+                message: format!("{message} {details}"),
             });
         }
         let metric_suggestions =
@@ -1296,6 +1312,7 @@ impl Database {
         let mut metadata = Metadata::load(&mut transaction, user_id).await?;
         custom_metrics.extend(metadata.named_report_metrics());
         let mut created_metrics = Vec::new();
+        let mut updated_metric_ids = std::collections::BTreeSet::new();
         let mut created_definitions = std::collections::BTreeMap::<_, String>::new();
         let original_context: Value = serde_json::from_str(&report.context_json)?;
         let original_source = original_context["source_name"].as_str();
@@ -1459,16 +1476,33 @@ impl Database {
                         && (id.starts_with("custom:")
                             || learned_for_pending(payload, &metadata).is_some());
                     let id = id.to_owned();
-                    lab_metric_metadata::link_submitted(
-                        &mut transaction,
-                        user_id,
-                        &mut metadata,
-                        &native_links,
-                        &id,
-                        mapping_code.as_deref(),
-                        new_definition,
-                    )
-                    .await?;
+                    if let Some(code) = mapping_code.as_deref() {
+                        let clinical_metric = clinical
+                            .get(&id)
+                            .map(lab_metric_metadata::clinical_metric)
+                            .transpose()?;
+                        let metric = clinical_metric.as_ref().or_else(|| {
+                            custom_metrics.iter().find(|metric| metric.metric_id == id)
+                        });
+                        let standard_unit = crate::laboratory::metric_standard_unit(&id, metric);
+                        if lab_metric_metadata::link_submitted(
+                            &mut transaction,
+                            user_id,
+                            &mut metadata,
+                            &native_links,
+                            lab_metric_metadata::LinkTarget {
+                                id: &id,
+                                standard_unit,
+                                is_new: new_definition,
+                            },
+                            code,
+                            payload,
+                        )
+                        .await?
+                        {
+                            updated_metric_ids.insert(id.clone());
+                        }
+                    }
                     if save_mapping {
                         // Preserve account-specific associations across renames and rescans.
                         payload.metric_id = Some(id);
@@ -1523,6 +1557,20 @@ impl Database {
                 .collect::<Result<Vec<_>, AppError>>()?;
             document["created_metric"] = created[0].clone();
             document["created_metrics"] = json!(created);
+        }
+        if !updated_metric_ids.is_empty() {
+            document["updated_metric_loinc"] = Value::Object(
+                updated_metric_ids
+                    .into_iter()
+                    .map(|id| {
+                        let codes = metadata.loinc_entries(
+                            &id,
+                            lab_metric_metadata::native_codes_for_metric(&native_links, &id),
+                        );
+                        (id, codes)
+                    })
+                    .collect(),
+            );
         }
         if queue_analysis {
             document["analysis_trigger"] = json!({"status":"queued"});
@@ -1890,7 +1938,8 @@ impl Database {
                 custom_metrics.push(lab_metric_metadata::clinical_metric(&group)?);
             }
         }
-        let (mut observations, metadata, native_links) = self
+        let language = crate::interface_language::Language::current();
+        let (mut observations, metadata, native_links, custom_metrics) = self
             .cpu
             .run(move || {
                 let mut observations = rows
@@ -1901,6 +1950,7 @@ impl Database {
                             &metadata,
                             &native_links,
                             include_suggestions,
+                            language,
                         )
                     })
                     .filter(|row| {
@@ -1923,7 +1973,7 @@ impl Database {
                         }
                     }
                 }
-                Ok((observations, metadata, native_links))
+                Ok((observations, metadata, native_links, custom_metrics))
             })
             .await?;
         if include_suggestions {
@@ -1932,7 +1982,23 @@ impl Database {
                 .iter_mut()
                 .filter(|row| row.status == "pending")
             {
-                let Some(id) = row.resolved_metric_id.as_deref() else {
+                let candidate = row
+                    .payload
+                    .ocr_metric_candidate
+                    .as_deref()
+                    .filter(|candidate| {
+                        row.payload.unmapped_choice.is_none()
+                            && row
+                                .metric_suggestions
+                                .as_ref()
+                                .and_then(Value::as_array)
+                                .is_some_and(|suggestions| {
+                                    suggestions.iter().any(|suggestion| {
+                                        suggestion["metric_id"].as_str() == Some(candidate)
+                                    })
+                                })
+                    });
+                let Some(id) = row.resolved_metric_id.as_deref().or(candidate) else {
                     continue;
                 };
                 let Some(code) = row.payload.submission_loinc() else {
@@ -1951,7 +2017,15 @@ impl Database {
                 {
                     continue;
                 }
-                if let Err(error) = crate::loinc::validate_replacement(code, &existing) {
+                let custom = custom_metrics.iter().find(|metric| metric.metric_id == id);
+                let standard_unit = crate::laboratory::metric_standard_unit(id, custom);
+                if let Err(error) = crate::loinc::validate_association(
+                    code,
+                    &existing,
+                    id,
+                    standard_unit,
+                    &row.payload,
+                ) {
                     let (code, message) = error
                         .loinc_mapping_message(crate::interface_language::Language::current())
                         .ok_or(error)?;

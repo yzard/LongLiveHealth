@@ -428,13 +428,19 @@ observation table. The Ready to Submit batch sends only pending results with a v
 interruption between copying and cleanup cannot delete the sole durable copy.
 Existing pending rows are moved into the draft store without re-running OCR. Previously rejected observations become pending, retain their payload and ID, and open in Needs Review.
 
-When a submission adds a distinct LOINC to a metric that already has LOINC codes,
-the server requires an unambiguous direct replacement in the packaged official
-LOINC `MapTo.csv`. Either code may be the deprecated member of the pair. Review
-can display the same validation before submission. Unverified mappings return
-400 with `loinc_mapping_unverified`, the report code, the database codes and the
-reference version. The API loads the reference release before accepting requests. The failed submission does not change the report or
-its drafts.
+When a submission adds a distinct LOINC to an existing metric, the server checks
+the packaged official `MapTo.csv` for an unambiguous direct replacement. Codes
+can also share a metric when the LOINC component, measurement property, time,
+specimen and result scale match, the method differs, and the reported unit is
+compatible with the metric. Each observation retains its original LOINC.
+`metrics/list` and metric history list all codes associated with the metric.
+Successful submissions that add links also return `updated_metric_loinc`, keyed
+by metric ID, with the complete code list for each changed metric.
+
+Review and submission use the same validation. An unverified association returns
+400 with `loinc_mapping_unverified`, the report and database codes, their methods
+and result scales, and the conflicting fields or units. The failed submission does
+not change the report or its drafts.
 
 A pending result saves an existing metric in `payload.metric_id`. With that ID
 unset, `payload.unmapped_choice` can be `{"kind":"unmapped"}` or

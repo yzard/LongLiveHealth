@@ -9,13 +9,8 @@ use serde::Serialize;
 pub enum AppError {
     #[error("{0}")]
     Invalid(&'static str),
-    #[error("MapTo.csv from LOINC {version} cannot verify {incoming} against {existing}")]
-    LoincMapping {
-        incoming: String,
-        existing: String,
-        version: String,
-        ambiguous: bool,
-    },
+    #[error("The LOINC association could not be verified")]
+    LoincMapping(Box<crate::loinc::MappingFailure>),
     #[error("LOINC {incoming} is already linked elsewhere or ambiguous")]
     LoincCodeConflict {
         incoming: String,
@@ -72,7 +67,7 @@ impl IntoResponse for AppError {
             Self::Invalid(_) | Self::LoincCodeConflict { .. } => {
                 (StatusCode::BAD_REQUEST, "invalid_request")
             }
-            Self::LoincMapping { .. } => (StatusCode::BAD_REQUEST, "loinc_mapping_unverified"),
+            Self::LoincMapping(_) => (StatusCode::BAD_REQUEST, "loinc_mapping_unverified"),
             Self::LoincMapUnavailable { .. } => {
                 (StatusCode::SERVICE_UNAVAILABLE, "loinc_map_unavailable")
             }
@@ -125,47 +120,8 @@ impl AppError {
     ) -> Option<(&'static str, String)> {
         use crate::interface_language::Language::{Chinese, English};
         match (self, language) {
-            (
-                Self::LoincMapping {
-                    incoming,
-                    existing,
-                    version,
-                    ambiguous,
-                },
-                English,
-            ) => {
-                let reason = if *ambiguous {
-                    "The matching code has multiple official replacements."
-                } else {
-                    "There is no direct replacement between these codes."
-                };
-                Some((
-                    "loinc_mapping_unverified",
-                    format!(
-                        "Cannot add report LOINC {incoming} to a metric with database LOINC {existing}. {reason} Source: LOINC {version} MapTo.csv. Choose the metric for the printed code or review the codes."
-                    ),
-                ))
-            }
-            (
-                Self::LoincMapping {
-                    incoming,
-                    existing,
-                    version,
-                    ambiguous,
-                },
-                Chinese,
-            ) => {
-                let reason = if *ambiguous {
-                    "匹配到的旧代码有多个官方替代项。"
-                } else {
-                    "这些代码之间没有直接替代关系。"
-                };
-                Some((
-                    "loinc_mapping_unverified",
-                    format!(
-                        "无法将报告 LOINC {incoming} 添加到数据库 LOINC 为 {existing} 的指标。{reason}来源为 LOINC {version} MapTo.csv。请选择报告代码对应的指标，或核对代码。"
-                    ),
-                ))
+            (Self::LoincMapping(failure), language) => {
+                Some(("loinc_mapping_unverified", failure.message(language)))
             }
             (
                 Self::LoincCodeConflict {
@@ -180,6 +136,7 @@ impl AppError {
                 } else {
                     "This LOINC is already linked to another Browse metric."
                 };
+                let details = crate::loinc::comparison_details(incoming, existing, language);
                 let existing = if existing.is_empty() {
                     "none"
                 } else {
@@ -188,7 +145,7 @@ impl AppError {
                 Some((
                     "invalid_request",
                     format!(
-                        "{reason} Report LOINC {incoming}. Selected metric's database LOINC {existing}. Check the printed code and metric mapping."
+                        "{reason} Report LOINC {incoming}. Selected metric's database LOINC {existing}. {details} Check the printed code and metric mapping."
                     ),
                 ))
             }
@@ -205,11 +162,12 @@ impl AppError {
                 } else {
                     "此 LOINC 已关联到另一个 Browse 指标。"
                 };
+                let details = crate::loinc::comparison_details(incoming, existing, language);
                 let existing = if existing.is_empty() { "无" } else { existing };
                 Some((
                     "invalid_request",
                     format!(
-                        "{reason}报告 LOINC 为 {incoming}，所选指标的数据库 LOINC 为 {existing}。请核对报告代码和指标映射。"
+                        "{reason}报告 LOINC 为 {incoming}，所选指标的数据库 LOINC 为 {existing}。{details} 请核对报告代码和指标映射。"
                     ),
                 ))
             }

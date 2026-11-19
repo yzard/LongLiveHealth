@@ -55,7 +55,7 @@ fn loinc_archive_is_read_without_opening_a_database() {
     archive.start_file("LoincTable/Loinc.csv", options).unwrap();
     write!(
         archive,
-        "LOINC_NUM,LONG_COMMON_NAME,VersionLastChanged\r\n33914-3,Previous term,1.0ma\r\n77147-7,Replacement term,9.17\r\n"
+        "LOINC_NUM,LONG_COMMON_NAME,VersionLastChanged,COMPONENT,PROPERTY,TIME_ASPCT,SYSTEM,SCALE_TYP,METHOD_TYP\r\n33914-3,Previous term,1.0ma,GFR,VRat,Pt,Ser,Qn,Old method\r\n77147-7,Replacement term,9.17,GFR,VRat,Pt,Ser,Qn,New method\r\n"
     ).unwrap();
     archive.start_file("LoincTable/MapTo.csv", options).unwrap();
     write!(archive, "LOINC,MAP_TO,COMMENT\r\n33914-3,77147-7,\"Replacement, with context\r\non another line\"\r\n").unwrap();

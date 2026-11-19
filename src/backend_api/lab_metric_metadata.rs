@@ -103,15 +103,24 @@ impl Metadata {
         let Some(id) = metric["metric_id"].as_str() else {
             return;
         };
-        metric["loinc"] = json!(
-            self.codes_for_metric(id, native_codes.into_iter().flatten().map(String::as_str))
+        metric["loinc"] =
+            self.loinc_entries(id, native_codes.into_iter().flatten().map(String::as_str));
+    }
+
+    pub(crate) fn loinc_entries<'a>(
+        &'a self,
+        id: &str,
+        native_codes: impl Iterator<Item = &'a str>,
+    ) -> Value {
+        json!(
+            self.codes_for_metric(id, native_codes)
                 .into_iter()
                 .map(|code| json!({
                     "code": code,
                     "official_name": crate::loinc::long_common_name(code),
                 }))
                 .collect::<Vec<_>>()
-        );
+        )
     }
 
     pub(crate) fn codes_for_metric<'a>(
@@ -198,22 +207,30 @@ pub(crate) fn native_codes_for_metric<'a>(
         .filter_map(|(code, ids)| ids.contains(id).then_some(code.as_str()))
 }
 
+pub(crate) struct LinkTarget<'a> {
+    pub id: &'a str,
+    pub standard_unit: Option<&'a str>,
+    pub is_new: bool,
+}
+
 pub(crate) async fn link_submitted(
     transaction: &mut Transaction<'_, Sqlite>,
     user_id: &str,
     metadata: &mut Metadata,
     native_links: &BTreeMap<String, BTreeSet<String>>,
-    id: &str,
-    code: Option<&str>,
-    allow_unlisted_first_code: bool,
-) -> Result<(), AppError> {
-    let Some(code) = code else {
-        return Ok(());
-    };
+    target: LinkTarget<'_>,
+    code: &str,
+    observation: &ObservationPayload,
+) -> Result<bool, AppError> {
+    let LinkTarget {
+        id,
+        standard_unit,
+        is_new,
+    } = target;
     let existing = metadata.codes_for_metric(id, native_codes_for_metric(native_links, id));
     let bound = loinc_metric(code).or_else(|| metadata.links.get(code).map(String::as_str));
     if bound == Some(id) {
-        return Ok(());
+        return Ok(false);
     }
     let native_conflict = native_links
         .get(code)
@@ -225,12 +242,9 @@ pub(crate) async fn link_submitted(
             native: bound.is_none(),
         });
     }
-    crate::loinc::validate_replacement(code, &existing)?;
-    if existing.is_empty()
-        && crate::loinc::long_common_name(code).is_none()
-        && !allow_unlisted_first_code
-    {
-        return Ok(());
+    crate::loinc::validate_association(code, &existing, id, standard_unit, observation)?;
+    if existing.is_empty() && crate::loinc::long_common_name(code).is_none() && !is_new {
+        return Ok(false);
     }
     sqlx::query(queries::LINK_LAB_METRIC_LOINC)
         .bind(user_id)
@@ -239,7 +253,7 @@ pub(crate) async fn link_submitted(
         .execute(&mut **transaction)
         .await?;
     metadata.links.insert(code.to_owned(), id.to_owned());
-    Ok(())
+    Ok(true)
 }
 
 async fn register_named_report_metric(

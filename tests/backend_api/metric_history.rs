@@ -2546,7 +2546,8 @@ async fn lab_charts_keep_closed_ranges_and_binary_states_distinct() {
     let ordered = get("urine_bacteria").await.unwrap();
     let chart = &ordered["result_charts"][0];
     assert_eq!(chart["kind"], "ordinal");
-    assert_eq!(chart["unit"], "/HPF");
+    assert_eq!(chart["unit"], "/hpf");
+    assert_eq!(ordered["records"][0]["unit"], "/HPF");
     assert_eq!(chart["ranges"]["scale_labels"], json!(["None", "Few"]));
     assert_eq!(chart["ranges"]["D"][0]["latest_min"], 0.0);
     assert_eq!(chart["ranges"]["D"][0]["latest_max"], 1.0);
